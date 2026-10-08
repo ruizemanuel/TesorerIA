@@ -34,9 +34,15 @@ let lastOperation: { hash: Hash; sender: Address } | undefined;
 const element = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 const setText = (id: string, text: string) => (element(id).textContent = text);
 const accountButtons = ["refresh", "send-test", "return"];
+const lockedButtons = new Set<string>(); // stay disabled after their action finishes
 
 function showError(error: unknown) {
   setText("error", error instanceof Error ? error.message : String(error));
+}
+
+function lockButton(id: string) {
+  lockedButtons.add(id);
+  element<HTMLButtonElement>(id).disabled = true;
 }
 
 function onClick(id: string, action: () => Promise<void>) {
@@ -49,7 +55,7 @@ function onClick(id: string, action: () => Promise<void>) {
     } catch (error) {
       showError(error);
     } finally {
-      button.disabled = false;
+      button.disabled = lockedButtons.has(id);
     }
   });
 }
@@ -60,7 +66,10 @@ function loadCredential(): StoredCredential | undefined {
 }
 
 async function connect(credential: StoredCredential) {
+  // A second passkey would replace the stored one, and with it the Safe that holds the funds.
+  lockButton("create");
   setText("credential", credential.id);
+  setText("public-key", credential.publicKey);
   account = await createMemberAccount({ client, owner: toWebAuthnAccount({ credential }) });
   setText("address", account.address);
   for (const id of accountButtons) element<HTMLButtonElement>(id).disabled = false;
