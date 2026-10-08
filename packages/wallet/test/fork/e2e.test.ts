@@ -42,6 +42,7 @@ const PATCHED_WEBAUTHN_VALIDATOR = "7ab16ff354acb328452f1d445b3ddee9a91e9e69";
 const UNPATCHED_WEBAUTHN_VALIDATORS = ["d990393c", "ba45a2bf"];
 const SAFE_WEBAUTHN_SHARED_SIGNER = "94a4f6affbd8975951142c3999aeab7ecee555c2";
 const SAFE_P256_VERIFIERS_WORD = "0100a86e0054c51e4894d88762a017ecc5e5235f5dba";
+const SAFE_FCL_VERIFIER: Address = "0xA86e0054C51E4894D88762a017ECc5E5235f5DBA"; // Safe's fallback if the precompile fails
 const P256_VERIFIER: Record<AccountKind, Address> = {
   safe: "0x0000000000000000000000000000000000000100", // precompile
   kernel: "0xc2b78104907F722DABAc4C69f826a522B2754De4", // Daimo P256Verifier
@@ -180,7 +181,10 @@ describe.each<AccountKind>(["safe", "kernel"])("%s member account", (kind) => {
     expect((await publicClient.getCode({ address: account.address }))?.length).toBeGreaterThan(2);
     expect(await usdtBalance(account.address)).toBe(3_000_000n);
     expect((await usdtBalance(recipient!)) - recipientBefore).toBe(2_000_000n);
-    expect(await calledAddresses(hash)).toContain(P256_VERIFIER[kind].toLowerCase());
+    const called = await calledAddresses(hash);
+    expect(called).toContain(P256_VERIFIER[kind].toLowerCase());
+    // A call to 0x100 shows up in the trace even when it fails, and Safe then verifies through FCL.
+    if (kind === "safe") expect(called).not.toContain(SAFE_FCL_VERIFIER.toLowerCase());
     deployHash = hash;
   });
 
