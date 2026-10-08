@@ -68,6 +68,10 @@ function toAccount(kind: AccountKind, passkey: FakePasskey): Promise<SmartAccoun
   return createMemberAccount({ client: publicClient, owner, kind });
 }
 
+function usdtBalance(address: Address): Promise<bigint> {
+  return publicClient.readContract({ address: USDT, abi: erc20Abi, functionName: "balanceOf", args: [address] });
+}
+
 function usdtTransfer(to: Address, amount: bigint): Call {
   return { to: USDT, data: encodeFunctionData({ abi: erc20Abi, functionName: "transfer", args: [to, amount] }) };
 }
@@ -158,8 +162,11 @@ describe.each<AccountKind>(["safe", "kernel"])("%s member account", (kind) => {
   });
 
   it("deploys and runs a tagged batch through EntryPoint v0.7", async () => {
-    await fund(account.address);
-    const calls = [usdtTransfer(account.address, 1n), usdtTransfer(account.address, 1n)];
+    await fund(account.address); // 5 USDT arrive before the account exists
+    const [recipient] = await walletClient.getAddresses();
+    const recipientBefore = await usdtBalance(recipient!);
+    // The first operation spends part of those funds, so the batch must actually run.
+    const calls = [usdtTransfer(recipient!, 1_000_000n), usdtTransfer(recipient!, 1_000_000n)];
 
     const userOp = await prepare(account, calls);
     expect(userOp.factory).toBeDefined();
@@ -171,9 +178,8 @@ describe.each<AccountKind>(["safe", "kernel"])("%s member account", (kind) => {
     expect(receipt.status).toBe("success");
     expect(event.success).toBe(true);
     expect((await publicClient.getCode({ address: account.address }))?.length).toBeGreaterThan(2);
-    expect(
-      await publicClient.readContract({ address: USDT, abi: erc20Abi, functionName: "balanceOf", args: [account.address] }),
-    ).toBe(5_000_000n);
+    expect(await usdtBalance(account.address)).toBe(3_000_000n);
+    expect((await usdtBalance(recipient!)) - recipientBefore).toBe(2_000_000n);
     expect(await calledAddresses(hash)).toContain(P256_VERIFIER[kind].toLowerCase());
     deployHash = hash;
   });
