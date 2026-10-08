@@ -402,7 +402,7 @@ contract Fondo is ReentrancyGuardTransient, IUniswapV3SwapCallback {
             agente = p.a;
             emit AgenteCambiado(p.a);
         } else {
-            revert ParametrosInvalidos(); // la Tarea 9 agrega Cerrar
+            _cerrar();
         }
     }
 
@@ -423,5 +423,23 @@ contract Fondo is ReentrancyGuardTransient, IUniswapV3SwapCallback {
             }
         }
         esMiembro[m] = false;
+    }
+
+    /// @dev Reparte wARS y USDT en proporción a lo aportado (por igual si nadie aportó) y cierra el fondo.
+    ///      El polvo de redondeo (menos de 1 wei por miembro) queda en el contrato.
+    function _cerrar() internal {
+        cerrado = true;
+        uint256 bw = wars.balanceOf(address(this));
+        uint256 bu = usdt.balanceOf(address(this));
+        uint256 n = _miembros.length;
+        uint256 total = totalAportado;
+        for (uint256 i; i < n; ++i) {
+            address m = _miembros[i];
+            uint256 w = total == 0 ? bw / n : bw * aportado[m] / total;
+            uint256 u = total == 0 ? bu / n : bu * aportado[m] / total;
+            if (w > 0) wars.safeTransfer(m, w);
+            if (u > 0) usdt.safeTransfer(m, u);
+        }
+        emit Cierre(bw, bu);
     }
 }
