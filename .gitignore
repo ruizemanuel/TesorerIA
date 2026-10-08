@@ -1,0 +1,26 @@
+# Design docs and plans stay local
+docs/superpowers/
+
+# Dependencies and builds
+node_modules/
+.next/
+dist/
+coverage/
+.turbo/
+
+# Foundry
+cache/
+out/
+broadcast/
+
+# Environment and keys
+.env
+.env.*
+!.env.example
+*.key
+keystore/
+
+# Misc
+.DS_Store
+.vercel
+*.log
