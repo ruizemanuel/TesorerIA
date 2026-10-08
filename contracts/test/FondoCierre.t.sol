@@ -72,4 +72,58 @@ contract FondoCierreTest is BaseFondoTest {
         assertLe(repartido, x + y + z);
         assertLe(wars.balanceOf(address(fondo)), 5); // polvo de redondeo: menos de 1 wei por miembro
     }
+
+    // Review fix: el saldo llega también por transferencia directa, así que el reparto redondea de verdad.
+    function testFuzz_cierreRepartePorAporteConRedondeo(uint96 a, uint96 b, uint96 c, uint96 extraW, uint64 extraU)
+        public
+    {
+        uint256[3] memory ap;
+        ap[0] = bound(a, 1, 100_000e18);
+        ap[1] = bound(b, 1, 100_000e18);
+        ap[2] = bound(c, 1, 100_000e18);
+        for (uint256 i; i < 3; ++i) _aportarWars(miembros[i], ap[i]);
+        wars.mint(address(fondo), bound(extraW, 0, 100_000e18));
+        usdt.mint(address(fondo), bound(extraU, 0, 1_000e6));
+
+        uint256 bw = wars.balanceOf(address(fondo));
+        uint256 bu = usdt.balanceOf(address(fondo));
+        uint256 t = fondo.totalAportado();
+        for (uint256 i; i < 3; ++i) ap[i] = fondo.aportado(miembros[i]);
+
+        _cerrar();
+
+        uint256 sw;
+        uint256 su;
+        for (uint256 i; i < 3; ++i) {
+            assertEq(wars.balanceOf(miembros[i]), bw * ap[i] / t);
+            assertEq(usdt.balanceOf(miembros[i]), bu * ap[i] / t);
+            sw += wars.balanceOf(miembros[i]);
+            su += usdt.balanceOf(miembros[i]);
+        }
+        for (uint256 i = 3; i < 5; ++i) {
+            assertEq(wars.balanceOf(miembros[i]), 0);
+            assertEq(usdt.balanceOf(miembros[i]), 0);
+        }
+        assertEq(sw + wars.balanceOf(address(fondo)), bw);
+        assertEq(su + usdt.balanceOf(address(fondo)), bu);
+        assertLt(wars.balanceOf(address(fondo)), 3);
+        assertLt(usdt.balanceOf(address(fondo)), 3);
+    }
+
+    // Review fix: sin aportes, el saldo se reparte por igual y el resto de la división queda en el contrato.
+    function testFuzz_cierreSinAportesRepartePorIgual(uint96 w, uint64 u) public {
+        uint256 bw = bound(w, 1, 1_000_000e18);
+        uint256 bu = bound(u, 1, 1_000_000e6);
+        wars.mint(address(fondo), bw);
+        usdt.mint(address(fondo), bu);
+
+        _cerrar();
+
+        for (uint256 i; i < 5; ++i) {
+            assertEq(wars.balanceOf(miembros[i]), bw / 5);
+            assertEq(usdt.balanceOf(miembros[i]), bu / 5);
+        }
+        assertEq(wars.balanceOf(address(fondo)), bw % 5);
+        assertEq(usdt.balanceOf(address(fondo)), bu % 5);
+    }
 }
