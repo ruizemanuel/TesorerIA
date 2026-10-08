@@ -49,4 +49,20 @@ abstract contract BaseFondoTest is Test {
     function _nuevoFondo(Fondo.Parametros memory p) internal returns (Fondo) {
         return new Fondo(IERC20(address(wars)), IERC20(address(usdt)), IUniswapV3Pool(address(pool)), p);
     }
+
+    function _aportarWars(address m, uint256 monto) internal {
+        wars.mint(m, monto);
+        vm.startPrank(m);
+        wars.approve(address(fondo), monto);
+        fondo.aportarWars(monto);
+        vm.stopPrank();
+    }
+
+    function _aportarUsdt(address m, uint256 monto) internal {
+        usdt.mint(m, monto);
+        vm.startPrank(m);
+        usdt.approve(address(fondo), monto);
+        fondo.aportarUsdt(monto);
+        vm.stopPrank();
+    }
 }

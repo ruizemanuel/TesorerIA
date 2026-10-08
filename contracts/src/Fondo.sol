@@ -195,6 +195,32 @@ contract Fondo is ReentrancyGuardTransient, IUniswapV3SwapCallback {
         if (delta < 0 && (delta % int56(uint56(VENTANA_TWAP)) != 0)) t--;
     }
 
+    // ---------------------------------------------------------------- Aportes
+    function aportarWars(uint256 monto) external soloMiembro abierto nonReentrant {
+        uint256 recibido = _recibir(wars, monto);
+        _acreditar(msg.sender, address(wars), recibido, recibido);
+    }
+
+    function aportarUsdt(uint256 monto) external soloMiembro abierto nonReentrant {
+        uint256 recibido = _recibir(usdt, monto);
+        _acreditar(msg.sender, address(usdt), recibido, cotizarUsdtEnWars(recibido));
+    }
+
+    /// @dev Mide lo recibido por diferencia de saldo, dentro de la llamada (regla CIP-64 del spec).
+    function _recibir(IERC20 token, uint256 monto) internal returns (uint256) {
+        if (monto == 0) revert MontoCero();
+        uint256 antes = token.balanceOf(address(this));
+        token.safeTransferFrom(msg.sender, address(this), monto);
+        return token.balanceOf(address(this)) - antes;
+    }
+
+    function _acreditar(address miembro, address token, uint256 recibido, uint256 enWars) internal {
+        if (saldoEnWars() > topeSaldoTotal) revert TopeSaldoSuperado();
+        aportado[miembro] += enWars;
+        totalAportado += enWars;
+        emit Aporte(miembro, token, recibido, enWars);
+    }
+
     // ---------------------------------------------------------------- Swap (lo completa la Tarea 5)
     function uniswapV3SwapCallback(int256, int256, bytes calldata) external pure override {
         revert SoloPool();
