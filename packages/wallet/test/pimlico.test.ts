@@ -1,3 +1,4 @@
+import { inspect } from "node:util";
 import {
   type Address,
   type Hash,
@@ -13,7 +14,7 @@ import {
 } from "viem";
 import { type SmartAccount, entryPoint07Abi, entryPoint07Address, toSmartAccount } from "viem/account-abstraction";
 import { celo } from "viem/chains";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { ATTRIBUTION_SUFFIX, type Call, createPimlicoBundlerClient, pimlicoTransport, sendTaggedCalls } from "../src";
 
 const SENDER = getAddress("0x5a6b47f4131bf1feafa56a05573314bcf44c9149");
@@ -244,5 +245,67 @@ describe("Pimlico bundler client", () => {
       success: false,
       reason: REVERT_REASON,
     });
+  });
+});
+
+describe("Pimlico API key redaction", () => {
+  // Fake key with characters that encodeURIComponent changes, so both forms are checked.
+  const API_KEY = "pim_fake key/Zz+9";
+  const ENCODED_API_KEY = encodeURIComponent(API_KEY);
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  /** Runs a request through the real http transport against a stubbed `fetch` and returns what it throws. */
+  async function failedRequest(respond: () => Response) {
+    const fetchMock = vi.fn(async () => respond());
+    vi.stubGlobal("fetch", fetchMock);
+    const bundlerClient = createPimlicoBundlerClient({
+      client: mockPublicClient(),
+      transport: pimlicoTransport(API_KEY),
+      sponsorshipPolicyId: SPONSORSHIP_POLICY_ID,
+    });
+    const error = await bundlerClient.request({ method: "eth_supportedEntryPoints" }).then(
+      () => {
+        throw new Error("expected the request to fail");
+      },
+      (error: unknown) => error as Error,
+    );
+    return { error, fetchMock, printed: inspect(error, { depth: null }) };
+  }
+
+  function expectRedacted(printed: string) {
+    expect(printed).not.toContain(API_KEY);
+    expect(printed).not.toContain(ENCODED_API_KEY);
+    expect(printed).toContain("api.pimlico.io");
+  }
+
+  it("keeps the key out of a JSON-RPC error", async () => {
+    const { error, fetchMock, printed } = await failedRequest(
+      () =>
+        new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, error: { code: -32602, message: "Invalid sponsorship policy" } }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+    );
+
+    expectRedacted(printed);
+    expect(error.name).toBe("InvalidParamsRpcError");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the key out of an HTTP 401", async () => {
+    const { error, fetchMock, printed } = await failedRequest(
+      () =>
+        new Response(JSON.stringify({ error: "Unauthorized" }), {
+          status: 401,
+          headers: { "Content-Type": "application/json" },
+        }),
+    );
+
+    expectRedacted(printed);
+    expect(error.name).toBe("HttpRequestError");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
