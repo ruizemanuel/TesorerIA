@@ -1,4 +1,5 @@
 import { inspect } from "node:util";
+import { createPimlicoClient } from "permissionless/clients/pimlico";
 import {
   type Address,
   type Hash,
@@ -12,7 +13,13 @@ import {
   getAddress,
   parseAbi,
 } from "viem";
-import { type SmartAccount, entryPoint07Abi, entryPoint07Address, toSmartAccount } from "viem/account-abstraction";
+import {
+  type SmartAccount,
+  createBundlerClient,
+  entryPoint07Abi,
+  entryPoint07Address,
+  toSmartAccount,
+} from "viem/account-abstraction";
 import { celo } from "viem/chains";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ATTRIBUTION_SUFFIX, type Call, createPimlicoBundlerClient, pimlicoTransport, sendTaggedCalls } from "../src";
@@ -223,6 +230,39 @@ describe("Pimlico bundler client", () => {
       success: true,
       reason: undefined,
     });
+  });
+
+  it("tags the operation even when the bundler client was created without the suffix", async () => {
+    const pimlico = mockPimlico();
+    const client = mockPublicClient();
+    const { account, signed } = await stubAccount(client);
+    // The wiring of createPimlicoBundlerClient on a plain viem client: no dataSuffix.
+    const pimlicoClient = createPimlicoClient({
+      transport: pimlico.transport,
+      entryPoint: { address: entryPoint07Address, version: "0.7" },
+    });
+    const bundlerClient = createBundlerClient({
+      client,
+      transport: pimlico.transport,
+      paymaster: pimlicoClient,
+      paymasterContext: { sponsorshipPolicyId: SPONSORSHIP_POLICY_ID },
+      userOperation: { estimateFeesPerGas: async () => (await pimlicoClient.getUserOperationGasPrice()).fast },
+    });
+    const transfer = encodeFunctionData({ abi: erc20Abi, functionName: "transfer", args: [SENDER, 1n] });
+    const calls: Call[] = [{ to: USDT, data: transfer }];
+
+    await sendTaggedCalls({ bundlerClient, account, calls });
+
+    const callData = concat([await account.encodeCalls(calls), ATTRIBUTION_SUFFIX]); // suffix exactly once, at the end
+    for (const method of [
+      "pm_getPaymasterStubData",
+      "eth_estimateUserOperationGas",
+      "pm_getPaymasterData",
+      "eth_sendUserOperation",
+    ]) {
+      expect(pimlico.find(method)[0].callData, method).toBe(callData);
+    }
+    expect(signed).toEqual([callData]);
   });
 
   it("reports a failed operation with the bundler's revert reason", async () => {
