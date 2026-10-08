@@ -137,6 +137,8 @@ describe("scripts/verify-tx.mjs", () => {
 
     expect(run.code).toBe(2);
     expect(run.stdout).toMatch(/^UNKNOWN: /m);
+    // The probe shows two hashes; passing the UserOperation hash must not read as "retry later".
+    expect(run.stdout).toContain("not the UserOperation hash");
     expect(run.stdout).not.toContain("ATTRIBUTED");
     expect(run.stdout).toContain(RPC_LINE);
     expect(run.requests).toContain("eth_getTransactionByHash");

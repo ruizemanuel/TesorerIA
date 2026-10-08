@@ -62,7 +62,11 @@ async function main() {
 
   if (sender === undefined) return 0;
   if (userOps === null) {
-    console.log(`UNKNOWN: no readable bundle, so ${sender} cannot be checked for ${code}`);
+    console.log(
+      `UNKNOWN: no readable bundle, so ${sender} cannot be checked for ${code} ` +
+        "(make sure this is the bundle transaction hash, not the UserOperation hash; " +
+        "a just-mined transaction may need a few seconds to be indexed)",
+    );
     return 2;
   }
   const attributed = userOps.some(
