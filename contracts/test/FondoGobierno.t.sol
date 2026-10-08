@@ -20,6 +20,19 @@ contract FondoGobiernoTest is BaseFondoTest {
         fondo.ejecutar(id);
     }
 
+    /// La lista de miembros tiene exactamente estas direcciones, sin importar el orden.
+    function _assertMiembros(address[] memory esperados) internal view {
+        address[] memory lista = fondo.miembros();
+        assertEq(lista.length, esperados.length);
+        for (uint256 i; i < esperados.length; ++i) {
+            bool esta;
+            for (uint256 j; j < lista.length; ++j) {
+                if (lista[j] == esperados[i]) esta = true;
+            }
+            assertTrue(esta, "falta un miembro en la lista");
+        }
+    }
+
     function test_agregarMiembro() public {
         _aprobado(Fondo.Accion.AgregarMiembro, nuevo, address(0), 0);
         assertTrue(fondo.esMiembro(nuevo));
@@ -52,6 +65,29 @@ contract FondoGobiernoTest is BaseFondoTest {
         assertEq(fondo.totalAportado(), totalAntes - aporteM1);
     }
 
+    // Review final: al sacar a un miembro del medio, en la lista quedan los otros cuatro (el último también) y el
+    // voto del último sigue contando.
+    function test_sacarUnMiembroDelMedioActualizaLaLista() public {
+        _aprobado(Fondo.Accion.SacarMiembro, miembros[2], address(0), 0);
+        address[] memory esperados = new address[](4);
+        esperados[0] = miembros[0];
+        esperados[1] = miembros[1];
+        esperados[2] = miembros[3];
+        esperados[3] = miembros[4];
+        _assertMiembros(esperados);
+
+        uint256 pago = _proponer(miembros[0], Fondo.Accion.Pagar, miembros[1], 1_000e18);
+        vm.prank(miembros[4]);
+        fondo.votar(pago);
+        assertEq(fondo.votosDe(pago), 2);
+        vm.prank(miembros[2]);
+        vm.expectRevert(Fondo.NoEsMiembro.selector);
+        fondo.votar(pago);
+        _aprobar(pago, 3, 4);
+        fondo.ejecutar(pago);
+        assertEq(wars.balanceOf(miembros[1]), 1_000e18);
+    }
+
     function test_noSePuedeSacarSiNQuedariaMayorQueLosMiembros() public {
         _aprobado(Fondo.Accion.CambiarVotos, address(0), address(0), 5);
         uint256 id = _proponer(miembros[0], Fondo.Accion.SacarMiembro, miembros[4], address(0), 0);
@@ -68,6 +104,29 @@ contract FondoGobiernoTest is BaseFondoTest {
         assertEq(fondo.aportado(nuevo), aporte);
         assertEq(fondo.aportado(miembros[0]), 0);
         assertEq(fondo.miembros().length, 5);
+    }
+
+    // Review final: el nuevo ocupa el lugar del viejo en la lista, vota y su voto cuenta; el viejo ya no vota.
+    function test_cambiarMiembroReemplazaEnLaListaYElNuevoVota() public {
+        _aprobado(Fondo.Accion.CambiarMiembro, miembros[2], nuevo, 0);
+        address[] memory esperados = new address[](5);
+        esperados[0] = miembros[0];
+        esperados[1] = miembros[1];
+        esperados[2] = nuevo;
+        esperados[3] = miembros[3];
+        esperados[4] = miembros[4];
+        _assertMiembros(esperados);
+
+        uint256 pago = _proponer(miembros[0], Fondo.Accion.Pagar, nuevo, 1_000e18);
+        vm.prank(miembros[2]);
+        vm.expectRevert(Fondo.NoEsMiembro.selector);
+        fondo.votar(pago);
+        _aprobar(pago, 1, 2);
+        vm.prank(nuevo);
+        fondo.votar(pago);
+        assertEq(fondo.votosDe(pago), 3);
+        fondo.ejecutar(pago);
+        assertEq(wars.balanceOf(nuevo), 1_000e18);
     }
 
     function test_cambiarTope() public {
