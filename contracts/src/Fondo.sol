@@ -352,13 +352,76 @@ contract Fondo is ReentrancyGuardTransient, IUniswapV3SwapCallback {
     }
 
     function _aplicar(Propuesta storage p) internal {
-        if (p.accion == Accion.Pagar) {
+        Accion acc = p.accion;
+        if (acc == Accion.Pagar) {
             if (!esMiembro[p.a]) revert DestinoNoMiembro();
             if (p.monto == 0) revert MontoCero();
             _pagarWars(p.a, p.monto);
             emit Pago(p.a, p.monto);
+        } else if (acc == Accion.AgregarMiembro) {
+            if (p.a == address(0) || p.a == agente || esMiembro[p.a] || _miembros.length >= MAX_MIEMBROS) {
+                revert ParametrosInvalidos();
+            }
+            esMiembro[p.a] = true;
+            _miembros.push(p.a);
+            emit MiembroAgregado(p.a);
+        } else if (acc == Accion.SacarMiembro) {
+            if (!esMiembro[p.a] || _miembros.length - 1 < votosNecesarios) revert ParametrosInvalidos();
+            (uint256 w, uint256 u) = _parteDe(p.a);
+            totalAportado -= aportado[p.a];
+            aportado[p.a] = 0;
+            _quitarMiembro(p.a);
+            if (w > 0) wars.safeTransfer(p.a, w);
+            if (u > 0) usdt.safeTransfer(p.a, u);
+            emit MiembroSacado(p.a, w, u);
+        } else if (acc == Accion.CambiarMiembro) {
+            if (!esMiembro[p.a] || p.b == address(0) || p.b == agente || esMiembro[p.b]) {
+                revert ParametrosInvalidos();
+            }
+            uint256 n = _miembros.length;
+            for (uint256 i; i < n; ++i) {
+                if (_miembros[i] == p.a) {
+                    _miembros[i] = p.b;
+                    break;
+                }
+            }
+            esMiembro[p.a] = false;
+            esMiembro[p.b] = true;
+            aportado[p.b] = aportado[p.a];
+            aportado[p.a] = 0;
+            emit MiembroCambiado(p.a, p.b);
+        } else if (acc == Accion.CambiarTope) {
+            topeSemanal = p.monto;
+            emit TopeSemanalCambiado(p.monto);
+        } else if (acc == Accion.CambiarVotos) {
+            if (p.monto < MIN_VOTOS || p.monto > _miembros.length) revert ParametrosInvalidos();
+            votosNecesarios = uint8(p.monto);
+            emit VotosNecesariosCambiados(uint8(p.monto));
+        } else if (acc == Accion.CambiarAgente) {
+            if (esMiembro[p.a]) revert ParametrosInvalidos();
+            agente = p.a;
+            emit AgenteCambiado(p.a);
         } else {
-            revert ParametrosInvalidos(); // la Tarea 8 agrega las demás acciones
+            revert ParametrosInvalidos(); // la Tarea 9 agrega Cerrar
         }
+    }
+
+    /// @dev Parte proporcional de `m` en los saldos, según lo aportado. Si nadie aportó, no le toca nada.
+    function _parteDe(address m) internal view returns (uint256 w, uint256 u) {
+        if (totalAportado == 0) return (0, 0);
+        w = wars.balanceOf(address(this)) * aportado[m] / totalAportado;
+        u = usdt.balanceOf(address(this)) * aportado[m] / totalAportado;
+    }
+
+    function _quitarMiembro(address m) internal {
+        uint256 n = _miembros.length;
+        for (uint256 i; i < n; ++i) {
+            if (_miembros[i] == m) {
+                _miembros[i] = _miembros[n - 1];
+                _miembros.pop();
+                break;
+            }
+        }
+        esMiembro[m] = false;
     }
 }
