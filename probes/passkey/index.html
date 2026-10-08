@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>TesorerIA passkey probe</title>
+    <style>
+      :root { color-scheme: light dark; }
+      body { font-family: system-ui, sans-serif; max-width: 44rem; margin: 2rem auto; padding: 0 1rem; line-height: 1.5; }
+      section { border-top: 1px solid #ccc; padding: 0.5rem 0 1rem; }
+      code, output { font-family: ui-monospace, monospace; word-break: break-all; }
+      .warning { color: #a15c00; font-weight: 600; }
+      #error { color: #b00020; white-space: pre-wrap; }
+      input { width: 100%; box-sizing: border-box; margin-bottom: 0.5rem; }
+    </style>
+  </head>
+  <body>
+    <h1>TesorerIA passkey probe</h1>
+    <p>Manual smoke test on Celo mainnet: a Safe account owned by a passkey, sponsored by Pimlico, tagged for attribution.</p>
+    <p id="error" role="alert"></p>
+
+    <section>
+      <h2>1. Passkey</h2>
+      <button id="create">Create passkey</button>
+      <p>Credential: <code id="credential">none</code></p>
+    </section>
+
+    <section>
+      <h2>2. Account</h2>
+      <p class="warning">Send only on the CELO network.</p>
+      <p>Address: <code id="address">-</code></p>
+      <p>Deployed: <output id="deployed">-</output></p>
+      <p>USDT: <output id="usdt">-</output> · wARS: <output id="wars">-</output></p>
+      <button id="refresh" disabled>Refresh</button>
+    </section>
+
+    <section>
+      <h2>3. Test operation</h2>
+      <p>Batch of two <code>USDT.transfer(self, 1)</code> calls (needs at least 0.000002 USDT).</p>
+      <button id="send-test" disabled>Send test operation</button>
+    </section>
+
+    <section>
+      <h2>4. Return USDT</h2>
+      <label>Destination address <input id="destination" placeholder="0x…" /></label>
+      <label>Amount (USDT) <input id="amount" placeholder="1.5" inputmode="decimal" /></label>
+      <button id="return" disabled>Return USDT</button>
+    </section>
+
+    <section>
+      <h2>Result</h2>
+      <p>UserOperation hash: <code id="user-op-hash">-</code></p>
+      <p>Transaction: <a id="transaction" target="_blank" rel="noreferrer">-</a></p>
+      <p>Success: <output id="success">-</output></p>
+      <p>Attributed: <output id="attributed">-</output> <button id="check-again" disabled>Check again</button></p>
+    </section>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

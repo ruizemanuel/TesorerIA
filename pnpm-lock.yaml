@@ -194,6 +194,22 @@ importers:
         specifier: 5.0.3
         version: 5.0.3(@types/node@26.6.4)(vite@8.3.4(@types/node@26.6.4))
 
+  probes/passkey:
+    dependencies:
+      '@tesoreria/wallet':
+        specifier: workspace:*
+        version: link:../../packages/wallet
+      viem:
+        specifier: 2.57.4
+        version: 2.57.4(typescript@7.0.2)
+    devDependencies:
+      typescript:
+        specifier: 7.0.2
+        version: 7.0.2
+      vite:
+        specifier: 8.3.4
+        version: 8.3.4(@types/node@26.6.4)
+
 packages:
 
   '@adraffy/ens-normalize@1.11.1':
