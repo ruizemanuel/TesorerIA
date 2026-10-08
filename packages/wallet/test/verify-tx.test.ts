@@ -146,6 +146,26 @@ describe("scripts/verify-tx.mjs", () => {
     expectEndpointHidden(run);
   });
 
+  it("exits 2 with only the error's name when something unexpected throws", async () => {
+    // The library swallows RPC errors, so make console.log throw once the summary starts: the error
+    // carries a URL with a key in its message, which must not be printed.
+    const preload = `
+      const log = console.log;
+      console.log = (...args) => {
+        if (String(args[0]).startsWith("verifyUserOps:")) throw new TypeError("boom http://rpc.example/v2/s3cret-key-8f3a1c");
+        log(...args);
+      };`;
+    const run = await runScript([HASH, OURS], sharedBundle(), ["--import", `data:text/javascript,${encodeURIComponent(preload)}`]);
+
+    expect(run.code).toBe(2);
+    expect(run.stdout).toMatch(/^UNKNOWN: unexpected error \(TypeError\)$/m);
+    for (const output of [run.stdout, run.stderr]) {
+      expect(output).not.toContain("boom");
+      expect(output).not.toContain("rpc.example");
+    }
+    expectEndpointHidden(run);
+  });
+
   it("exits 64 for an invalid transaction hash, without reaching the RPC", async () => {
     const run = await runScript(["0x1234", OURS], sharedBundle());
 

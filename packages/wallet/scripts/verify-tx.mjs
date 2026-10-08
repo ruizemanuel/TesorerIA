@@ -76,4 +76,8 @@ async function main() {
   return attributed ? 0 : 1;
 }
 
-process.exitCode = await main();
+// An unexpected throw must not exit 1 (NOT ATTRIBUTED) or print a message or stack that could carry the RPC URL.
+process.exitCode = await main().catch((error) => {
+  console.log(`UNKNOWN: unexpected error (${error instanceof Error ? error.name : typeof error})`);
+  return 2;
+});
