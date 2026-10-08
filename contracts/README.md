@@ -1,0 +1,45 @@
+# TesorerIA contracts
+
+`Fondo` holds a group's shared money in wARS (and USDT until the agent converts it) on Celo. The agent can only:
+- convert USDT to wARS within 2% of the pool's 30-minute TWAP;
+- reimburse the expense the group agreed on, to a member, up to a weekly cap.
+
+Everything else (other payments, member changes, caps, quorum, replacing or firing the agent, closing the fund) needs N-of-M member votes. `FabricaFondos` deploys one `Fondo` per group.
+
+## Run the tests
+
+    git clone https://github.com/ruizemanuel/TesorerIA && cd TesorerIA/contracts && git submodule update --init   # no --recursive needed
+    forge build
+    FOUNDRY_PROFILE=ci forge test                 # unit + fuzz tests with mocks, no network
+    forge test --match-path "test/fork/*" -vv     # against a local fork of Celo mainnet
+
+## Security review
+
+Internal review before the first mainnet deploy (2026-10-08), not an external audit: Slither 0.11.6 and the Pashov checklist over `src/`. No finding needed a code change. Line numbers are in `src/Fondo.sol` unless noted.
+
+### Slither
+
+`slither . --filter-paths "lib/|test/" --exclude-informational` reports 12 results: 2 High, 7 Medium and 3 Low, all justified below.
+
+- **High, `reentrancy-balance` in `convertir` (2 results, one per swap direction; `:240`, `:242-248`, `:251`).** False positive. Reading the wARS balance before and after `pool.swap` is how the fund measures what actually arrived. Nothing can take wARS out of the fund during the swap: `convertir` holds the `nonReentrant` lock, as does every other function that moves tokens, and the swap callback only pays USDT to the pool while `_swapEnCurso` is set (`:257`). An outside transfer during the swap could only add wARS. The pool address is immutable, and the real wARS and USDT have no transfer hooks.
+- **Medium, `incorrect-equality` (4 results).** False positive. `total == 0` in `_cerrar` (`:438-439`) and `totalAportado == 0` in `_parteDe` (`:411`) compare internal accounting that a token transfer cannot change, and guard a division by zero. `montoUsdt == 0` in `cotizarUsdtEnWars` (`:179`) is an early return; a USDT donation only turns a zero into the correct quote of the donated amount.
+- **Medium, `unused-return` (3 results).** Intended. `_tickPromedio` (`:192`) only needs the tick cumulatives from `pool.observe`. `convertir` ignores the amounts returned by `pool.swap` (`:242-248`, 2 results) because it does not trust them: the wARS received is measured by balance difference and checked against `minWars` (`:250-251`).
+- **Low (3 results).** `reentrancy-benign`: `_swapEnCurso = false` is written after the swap (`:249`) on purpose, since the flag has to cover it. `timestamp`: proposal expiry (`:351`) uses `block.timestamp` on purpose (proposals last 7 days, so seconds of drift don't matter); the flagged `id >= _propuestas.length` checks (`:337`, `:348`) don't involve time.
+
+The 19 forge-lint warnings in `src/` were also reviewed and left as they are. Every `unsafe-typecast` is bounded: `uint128` is checked at `:180`, the TWAP tick fits `int24`, `int256(montoUsdt)` is capped by the USDT balance, the callback casts the positive delta the pool asks for, the `uint8` vote count is at most 10, and the `uint64` is a timestamp. The modifiers before `nonReentrant` only read storage. The `reentrancy-events` sit in `nonReentrant` functions or, in `FabricaFondos.sol:33`, after a constructor that only makes view calls. The rest repeat Slither's `unused-return` and `timestamp`, plus a revert inside the constructor's validation loop.
+
+### Pashov checklist
+
+1. **Reentrancy: PASS.** Every function that moves tokens is `nonReentrant` (OpenZeppelin `ReentrancyGuardTransient`): `aportarWars`, `aportarUsdt`, `convertir`, `reintegrarGastoAcordado` and `ejecutar` (`:199`, `:204`, `:231`, `:269`, `:316`). State changes come before transfers in reimbursements (`:276`), execution (`:319`), member removal (`:370-373`) and closing (`:431`). Contributions pull the tokens before crediting, to credit what actually arrived; the lock covers them. The swap callback runs inside `convertir`, so it is guarded by `msg.sender == pool` and `_swapEnCurso` (`:257`) instead of the lock.
+2. **Overflow: PASS.** Solidity 0.8.37 checked arithmetic. `src/` has no `unchecked` blocks; the only ones on its paths are in Uniswap's `TickMath`, `FullMath` and `OracleLibrary`. Narrowing casts are bounded (see forge-lint above).
+3. **Access control: PASS.** `soloMiembro` (`:125`) guards contributions and votes, `soloAgente` (`:130`) guards conversion and reimbursement, `proponer` takes members or the agent (`:293`), and `abierto` (`:135`) guards every state change. Anyone can call `ejecutar`, but it needs N votes (`:318`). The constructor checks 3 to 10 distinct non-zero members, an agent who is not one of them, 2 ≤ N ≤ members, a non-zero total cap and the pool's tokens (`:142-155`). The factory has no privileged functions. Test gap: both callback tests run outside a conversion, so the `msg.sender == pool` half of the guard has no test of its own. It is defense in depth, since the pool only calls back whoever called `swap` and no outside code runs while `_swapEnCurso` is set.
+4. **Front-running and MEV: PASS.** `convertir` rejects a `minWars` below 98% of the 30-minute TWAP quote (`:237`) and reverts if less than `minWars` arrives (`:251`). The swap has no price limit (`:246`), so a sandwich can take at most the gap between the market price and `minWars`; the agent should set `minWars` near the current quote, not at the floor. USDT contributions are credited at the TWAP, not the spot price. Reimbursements, payments and the closing split don't depend on prices.
+5. **Oracle manipulation: PASS.** The only price is the pool's 30-minute TWAP from `observe` (`:189-196`), rounded toward negative infinity like Uniswap's `OracleLibrary.consult`. It sets USDT credits, the total cap check and the conversion floor. A price moved within one block doesn't count toward it, and holding a moved price for 30 minutes against arbitrage costs more than it can win in a fund capped at `topeSaldoTotal` (450,000 wARS, about US$300, by default). The agent will also compare the pool with Chainlink before converting; that check lives off-chain, in the agent. With less than 30 minutes of pool history, `observe` reverts and so do the quotes: a denial of service, not a loss (the real pool keeps 1,200 observations).
+6. **Unchecked external calls: PASS.** Every token movement uses `SafeERC20`: `safeTransferFrom` (`:213`) and `safeTransfer` (`:259`, `:283`, `:374-375`, `:440-441`). Incoming amounts are measured by balance difference (`:212-214`, `:240`, `:250`). The ignored returns of `pool.swap` and `pool.observe` are covered under Slither.
+7. **Centralization: PASS.** `Fondo` and `FabricaFondos` have no owner, admin, pause or upgrade path. The agent can only `convertir` (the wARS stay in the fund), `reintegrarGastoAcordado` (to a member, within `topeSemanal` per week, `:271-276`) and `proponer`. It never votes: only a member's proposal carries the proposer's vote (`:308`), and `votar` is `soloMiembro` (`:311`). It can never be a member (`:152`, `:362`, `:378`, `:401`), and members replace or fire it with a `CambiarAgente` vote. A stolen agent key can cost at most `topeSemanal` a week, paid to members, plus up to 2% per conversion. Residual risk: if N equals the number of members, one lost passkey blocks every vote, including the one that would replace that member.
+8. **Events: PASS.** Every state change emits an event: `Aporte`, `Conversion`, `Reintegro`, `PropuestaCreada`, `Voto` and `PropuestaEjecutada`; each executed action adds its own (`Pago`, `MiembroAgregado`, `MiembroSacado`, `MiembroCambiado`, `TopeSemanalCambiado`, `VotosNecesariosCambiados`, `AgenteCambiado`, `Cierre`); and the factory emits `FondoCreado`. `Cierre` reports the balances before the split, including the rounding dust that stays behind.
+9. **Tokens with a blocklist: FAIL (known risk, governance workaround).** wARS has a `COMPLIANCE_ROLE` (off today) and Celo's USDT has a blocklist (`isBlocked`). Payouts are pushed, so if a member who is owed a share gets blocklisted, closing (`:440-441`) and removing that member (`:374-375`) revert for everyone, as do payments to them. Workaround: vote `CambiarMiembro` to another address of the same member (it moves no tokens), then close. If the fund itself were blocklisted, its balance of that token would be frozen and the contract can't prevent it. Also, tokens that reach the fund after it closes, such as a withdrawal still in transit, stay locked: every function that moves tokens requires the fund to be open.
+
+## License
+
+GPL-2.0-or-later (uses Uniswap v3 `TickMath`, `FullMath` and `OracleLibrary`).
