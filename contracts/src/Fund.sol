@@ -9,437 +9,437 @@ import {IUniswapV3SwapCallback} from "@uniswap/v3-core/contracts/interfaces/call
 import {TickMath} from "@uniswap/v3-core/contracts/libraries/TickMath.sol";
 import {OracleLibrary} from "@uniswap/v3-periphery/contracts/libraries/OracleLibrary.sol";
 
-/// @title Fondo de TesorerIA
-/// @notice Fondo común de un grupo en wARS. Nadie del grupo tiene la plata: el agente solo puede convertir USDT
-///         a wARS y reintegrar el gasto acordado hasta un tope semanal, siempre a miembros. Todo lo demás se vota.
-contract Fondo is ReentrancyGuardTransient, IUniswapV3SwapCallback {
+/// @title TesorerIA fund
+/// @notice A group's shared fund in wARS. No one in the group holds the money: the agent can only convert USDT
+///         to wARS and reimburse the agreed expense up to a weekly cap, always to members. Everything else is voted on.
+contract Fund is ReentrancyGuardTransient, IUniswapV3SwapCallback {
     using SafeERC20 for IERC20;
 
-    // ---------------------------------------------------------------- Constantes
-    uint256 public constant MIN_MIEMBROS = 3;
-    uint256 public constant MAX_MIEMBROS = 10;
-    uint256 public constant MIN_VOTOS = 2;
-    uint32 public constant VENTANA_TWAP = 30 minutes;
-    uint256 public constant DESVIO_MAX_BPS = 200;
+    // ---------------------------------------------------------------- Constants
+    uint256 public constant MIN_MEMBERS = 3;
+    uint256 public constant MAX_MEMBERS = 10;
+    uint256 public constant MIN_VOTES = 2;
+    uint32 public constant TWAP_WINDOW = 30 minutes;
+    uint256 public constant MAX_DEVIATION_BPS = 200;
     uint256 public constant BPS = 10_000;
-    uint256 public constant SEMANA = 7 days;
-    uint256 public constant DURACION_PROPUESTA = 7 days;
+    uint256 public constant WEEK = 7 days;
+    uint256 public constant PROPOSAL_DURATION = 7 days;
 
-    // ---------------------------------------------------------------- Tipos
-    struct Parametros {
-        string nombre;
-        address[] miembros;
-        uint8 votosNecesarios;
-        address agente;
-        string gastoAcordado;
-        uint256 topeSemanal;
-        uint256 topeSaldoTotal;
+    // ---------------------------------------------------------------- Types
+    struct Params {
+        string name;
+        address[] members;
+        uint8 votesRequired;
+        address agent;
+        string agreedExpense;
+        uint256 weeklyCap;
+        uint256 balanceCap;
     }
 
-    enum Accion {
-        Pagar,
-        AgregarMiembro,
-        SacarMiembro,
-        CambiarMiembro,
-        CambiarTope,
-        CambiarVotos,
-        CambiarAgente,
-        Cerrar
+    enum Action {
+        Pay,
+        AddMember,
+        RemoveMember,
+        ReplaceMember,
+        SetWeeklyCap,
+        SetVotesRequired,
+        SetAgent,
+        Close
     }
 
-    struct Propuesta {
-        Accion accion;
+    struct Proposal {
+        Action action;
         address a;
         address b;
-        uint256 monto;
-        uint64 vence;
-        bool ejecutada;
-        address proponente;
-        string nota;
+        uint256 amount;
+        uint64 deadline;
+        bool executed;
+        address proposer;
+        string note;
     }
 
-    // ---------------------------------------------------------------- Errores
-    error ParametrosInvalidos();
-    error NoEsMiembro();
-    error SoloAgente();
-    error SoloMiembroOAgente();
-    error FondoCerrado();
-    error MontoCero();
-    error TopeSaldoSuperado();
-    error TopeSemanalSuperado();
-    error SaldoInsuficiente();
-    error DestinoNoMiembro();
-    error MinimoMuyBajo();
-    error RecibidoInsuficiente();
-    error SoloPool();
-    error PropuestaInexistente();
-    error PropuestaVencida();
-    error PropuestaYaEjecutada();
-    error YaVoto();
-    error VotosInsuficientes();
+    // ---------------------------------------------------------------- Errors
+    error InvalidParams();
+    error NotMember();
+    error OnlyAgent();
+    error OnlyMemberOrAgent();
+    error FundIsClosed();
+    error ZeroAmount();
+    error BalanceCapExceeded();
+    error WeeklyCapExceeded();
+    error InsufficientBalance();
+    error RecipientNotMember();
+    error MinOutTooLow();
+    error InsufficientOutput();
+    error OnlyPool();
+    error ProposalNotFound();
+    error ProposalExpired();
+    error ProposalAlreadyExecuted();
+    error AlreadyVoted();
+    error NotEnoughVotes();
 
-    // ---------------------------------------------------------------- Eventos
-    event Aporte(address indexed miembro, address indexed token, uint256 monto, uint256 acreditadoWars);
-    event Conversion(uint256 usdtEntregado, uint256 warsRecibido);
-    event Reintegro(address indexed miembro, uint256 monto, bytes32 ref, uint256 semana);
-    event PropuestaCreada(
-        uint256 indexed id, Accion accion, address a, address b, uint256 monto, address indexed proponente, string nota
+    // ---------------------------------------------------------------- Events
+    event Contribution(address indexed member, address indexed token, uint256 amount, uint256 creditedWars);
+    event Conversion(uint256 usdtIn, uint256 warsOut);
+    event Reimbursement(address indexed member, uint256 amount, bytes32 ref, uint256 week);
+    event ProposalCreated(
+        uint256 indexed id, Action action, address a, address b, uint256 amount, address indexed proposer, string note
     );
-    event Voto(uint256 indexed id, address indexed miembro);
-    event PropuestaEjecutada(uint256 indexed id);
-    event Pago(address indexed miembro, uint256 monto);
-    event MiembroAgregado(address indexed miembro);
-    event MiembroSacado(address indexed miembro, uint256 warsDevuelto, uint256 usdtDevuelto);
-    event MiembroCambiado(address indexed viejo, address indexed nuevo);
-    event TopeSemanalCambiado(uint256 tope);
-    event VotosNecesariosCambiados(uint8 votos);
-    event AgenteCambiado(address indexed agente);
-    event Cierre(uint256 warsRepartido, uint256 usdtRepartido);
+    event VoteCast(uint256 indexed id, address indexed member);
+    event ProposalExecuted(uint256 indexed id);
+    event Payment(address indexed member, uint256 amount);
+    event MemberAdded(address indexed member);
+    event MemberRemoved(address indexed member, uint256 warsReturned, uint256 usdtReturned);
+    event MemberReplaced(address indexed oldMember, address indexed newMember);
+    event WeeklyCapChanged(uint256 cap);
+    event VotesRequiredChanged(uint8 votes);
+    event AgentChanged(address indexed agent);
+    event FundClosed(uint256 warsBalance, uint256 usdtBalance);
 
-    // ---------------------------------------------------------------- Estado
+    // ---------------------------------------------------------------- State
     IERC20 public immutable wars;
     IERC20 public immutable usdt;
     IUniswapV3Pool public immutable pool;
-    uint256 public immutable inicio;
-    uint256 public immutable topeSaldoTotal;
+    uint256 public immutable startTime;
+    uint256 public immutable balanceCap;
 
-    string public nombre;
-    string public gastoAcordado;
-    uint256 public topeSemanal;
-    uint8 public votosNecesarios;
-    address public agente;
-    bool public cerrado;
+    string public name;
+    string public agreedExpense;
+    uint256 public weeklyCap;
+    uint8 public votesRequired;
+    address public agent;
+    bool public closed;
 
-    address[] private _miembros;
-    mapping(address => bool) public esMiembro;
-    mapping(address => uint256) public aportado;
-    uint256 public totalAportado;
-    mapping(uint256 => uint256) public gastadoEnSemana;
+    address[] private _members;
+    mapping(address => bool) public isMember;
+    mapping(address => uint256) public contributed;
+    uint256 public totalContributed;
+    mapping(uint256 => uint256) public spentInWeek;
 
-    Propuesta[] private _propuestas;
-    mapping(uint256 => mapping(address => bool)) public votoDe;
+    Proposal[] private _proposals;
+    mapping(uint256 => mapping(address => bool)) public hasVoted;
 
-    bool private _swapEnCurso;
+    bool private _swapInProgress;
 
-    // ---------------------------------------------------------------- Modificadores
-    modifier soloMiembro() {
-        if (!esMiembro[msg.sender]) revert NoEsMiembro();
+    // ---------------------------------------------------------------- Modifiers
+    modifier onlyMember() {
+        if (!isMember[msg.sender]) revert NotMember();
         _;
     }
 
-    modifier soloAgente() {
-        if (msg.sender != agente) revert SoloAgente();
+    modifier onlyAgent() {
+        if (msg.sender != agent) revert OnlyAgent();
         _;
     }
 
-    modifier abierto() {
-        if (cerrado) revert FondoCerrado();
+    modifier whenOpen() {
+        if (closed) revert FundIsClosed();
         _;
     }
 
-    // ---------------------------------------------------------------- Creación
-    constructor(IERC20 wars_, IERC20 usdt_, IUniswapV3Pool pool_, Parametros memory p) {
+    // ---------------------------------------------------------------- Creation
+    constructor(IERC20 wars_, IERC20 usdt_, IUniswapV3Pool pool_, Params memory p) {
         address t0 = pool_.token0();
         address t1 = pool_.token1();
         bool tokensOk = (t0 == address(wars_) && t1 == address(usdt_)) || (t0 == address(usdt_) && t1 == address(wars_));
-        uint256 n = p.miembros.length;
+        uint256 n = p.members.length;
         if (
-            !tokensOk || n < MIN_MIEMBROS || n > MAX_MIEMBROS || p.votosNecesarios < MIN_VOTOS
-                || p.votosNecesarios > n || p.topeSaldoTotal == 0
-        ) revert ParametrosInvalidos();
+            !tokensOk || n < MIN_MEMBERS || n > MAX_MEMBERS || p.votesRequired < MIN_VOTES
+                || p.votesRequired > n || p.balanceCap == 0
+        ) revert InvalidParams();
         for (uint256 i; i < n; ++i) {
-            address m = p.miembros[i];
-            if (m == address(0) || m == p.agente || esMiembro[m]) revert ParametrosInvalidos();
-            esMiembro[m] = true;
-            _miembros.push(m);
+            address m = p.members[i];
+            if (m == address(0) || m == p.agent || isMember[m]) revert InvalidParams();
+            isMember[m] = true;
+            _members.push(m);
         }
         wars = wars_;
         usdt = usdt_;
         pool = pool_;
-        inicio = block.timestamp;
-        topeSaldoTotal = p.topeSaldoTotal;
-        nombre = p.nombre;
-        gastoAcordado = p.gastoAcordado;
-        topeSemanal = p.topeSemanal;
-        votosNecesarios = p.votosNecesarios;
-        agente = p.agente;
+        startTime = block.timestamp;
+        balanceCap = p.balanceCap;
+        name = p.name;
+        agreedExpense = p.agreedExpense;
+        weeklyCap = p.weeklyCap;
+        votesRequired = p.votesRequired;
+        agent = p.agent;
     }
 
-    // ---------------------------------------------------------------- Vistas
-    function miembros() external view returns (address[] memory) {
-        return _miembros;
+    // ---------------------------------------------------------------- Views
+    function members() external view returns (address[] memory) {
+        return _members;
     }
 
-    function semanaActual() public view returns (uint256) {
-        return (block.timestamp - inicio) / SEMANA;
+    function currentWeek() public view returns (uint256) {
+        return (block.timestamp - startTime) / WEEK;
     }
 
-    /// @notice Cuántos wARS valen `montoUsdt` según el TWAP de 30 minutos del pool.
-    function cotizarUsdtEnWars(uint256 montoUsdt) public view returns (uint256) {
-        if (montoUsdt == 0) return 0;
-        if (montoUsdt > type(uint128).max) revert ParametrosInvalidos();
-        return OracleLibrary.getQuoteAtTick(_tickPromedio(), uint128(montoUsdt), address(usdt), address(wars));
+    /// @notice How many wARS `usdtAmount` is worth at the pool's 30-minute TWAP.
+    function quoteUsdtInWars(uint256 usdtAmount) public view returns (uint256) {
+        if (usdtAmount == 0) return 0;
+        if (usdtAmount > type(uint128).max) revert InvalidParams();
+        return OracleLibrary.getQuoteAtTick(_averageTick(), uint128(usdtAmount), address(usdt), address(wars));
     }
 
-    /// @notice Saldo total del fondo expresado en wARS (el USDT, al TWAP).
-    function saldoEnWars() public view returns (uint256) {
-        return wars.balanceOf(address(this)) + cotizarUsdtEnWars(usdt.balanceOf(address(this)));
+    /// @notice The fund's total balance in wARS (the USDT valued at the TWAP).
+    function balanceInWars() public view returns (uint256) {
+        return wars.balanceOf(address(this)) + quoteUsdtInWars(usdt.balanceOf(address(this)));
     }
 
-    function _tickPromedio() internal view returns (int24 t) {
-        uint32[] memory hace = new uint32[](2);
-        hace[0] = VENTANA_TWAP;
-        (int56[] memory acumulados,) = pool.observe(hace);
-        int56 delta = acumulados[1] - acumulados[0];
-        t = int24(delta / int56(uint56(VENTANA_TWAP)));
-        if (delta < 0 && (delta % int56(uint56(VENTANA_TWAP)) != 0)) t--;
+    function _averageTick() internal view returns (int24 t) {
+        uint32[] memory secondsAgos = new uint32[](2);
+        secondsAgos[0] = TWAP_WINDOW;
+        (int56[] memory tickCumulatives,) = pool.observe(secondsAgos);
+        int56 delta = tickCumulatives[1] - tickCumulatives[0];
+        t = int24(delta / int56(uint56(TWAP_WINDOW)));
+        if (delta < 0 && (delta % int56(uint56(TWAP_WINDOW)) != 0)) t--;
     }
 
-    // ---------------------------------------------------------------- Aportes
-    function aportarWars(uint256 monto) external soloMiembro abierto nonReentrant {
-        uint256 recibido = _recibir(wars, monto);
-        _acreditar(msg.sender, address(wars), recibido, recibido);
+    // ---------------------------------------------------------------- Contributions
+    function contributeWars(uint256 amount) external onlyMember whenOpen nonReentrant {
+        uint256 received = _pullTokens(wars, amount);
+        _credit(msg.sender, address(wars), received, received);
     }
 
-    function aportarUsdt(uint256 monto) external soloMiembro abierto nonReentrant {
-        uint256 recibido = _recibir(usdt, monto);
-        _acreditar(msg.sender, address(usdt), recibido, cotizarUsdtEnWars(recibido));
+    function contributeUsdt(uint256 amount) external onlyMember whenOpen nonReentrant {
+        uint256 received = _pullTokens(usdt, amount);
+        _credit(msg.sender, address(usdt), received, quoteUsdtInWars(received));
     }
 
-    /// @dev Mide lo recibido por diferencia de saldo, dentro de la llamada (regla CIP-64 del spec).
-    function _recibir(IERC20 token, uint256 monto) internal returns (uint256) {
-        if (monto == 0) revert MontoCero();
-        uint256 antes = token.balanceOf(address(this));
-        token.safeTransferFrom(msg.sender, address(this), monto);
-        return token.balanceOf(address(this)) - antes;
+    /// @dev Measures what arrived by balance difference, within the call (the spec's CIP-64 rule).
+    function _pullTokens(IERC20 token, uint256 amount) internal returns (uint256) {
+        if (amount == 0) revert ZeroAmount();
+        uint256 balanceBefore = token.balanceOf(address(this));
+        token.safeTransferFrom(msg.sender, address(this), amount);
+        return token.balanceOf(address(this)) - balanceBefore;
     }
 
-    function _acreditar(address miembro, address token, uint256 recibido, uint256 enWars) internal {
-        if (saldoEnWars() > topeSaldoTotal) revert TopeSaldoSuperado();
-        aportado[miembro] += enWars;
-        totalAportado += enWars;
-        emit Aporte(miembro, token, recibido, enWars);
+    function _credit(address member, address token, uint256 received, uint256 inWars) internal {
+        if (balanceInWars() > balanceCap) revert BalanceCapExceeded();
+        contributed[member] += inWars;
+        totalContributed += inWars;
+        emit Contribution(member, token, received, inWars);
     }
 
-    // ---------------------------------------------------------------- Conversión (agente)
-    /// @notice Cambia `montoUsdt` del fondo por wARS en el pool. `minWars` no puede estar más de 2 % por debajo
-    ///         de la cotización TWAP, y lo recibido no puede ser menor que `minWars`.
-    function convertir(uint256 montoUsdt, uint256 minWars)
+    // ---------------------------------------------------------------- Conversion (agent)
+    /// @notice Swaps `usdtAmount` of the fund's USDT for wARS in the pool. `minWarsOut` can't be more than 2% below
+    ///         the TWAP quote, and what arrives can't be less than `minWarsOut`.
+    function convert(uint256 usdtAmount, uint256 minWarsOut)
         external
-        soloAgente
-        abierto
+        onlyAgent
+        whenOpen
         nonReentrant
-        returns (uint256 recibido)
+        returns (uint256 received)
     {
-        if (montoUsdt == 0) revert MontoCero();
-        if (usdt.balanceOf(address(this)) < montoUsdt) revert SaldoInsuficiente();
-        uint256 esperado = cotizarUsdtEnWars(montoUsdt);
-        if (minWars < esperado * (BPS - DESVIO_MAX_BPS) / BPS) revert MinimoMuyBajo();
+        if (usdtAmount == 0) revert ZeroAmount();
+        if (usdt.balanceOf(address(this)) < usdtAmount) revert InsufficientBalance();
+        uint256 expected = quoteUsdtInWars(usdtAmount);
+        if (minWarsOut < expected * (BPS - MAX_DEVIATION_BPS) / BPS) revert MinOutTooLow();
 
         bool zeroForOne = address(usdt) == pool.token0();
-        uint256 antes = wars.balanceOf(address(this));
-        _swapEnCurso = true;
+        uint256 balanceBefore = wars.balanceOf(address(this));
+        _swapInProgress = true;
         pool.swap(
             address(this),
             zeroForOne,
-            int256(montoUsdt),
+            int256(usdtAmount),
             zeroForOne ? TickMath.MIN_SQRT_RATIO + 1 : TickMath.MAX_SQRT_RATIO - 1,
             ""
         );
-        _swapEnCurso = false;
-        recibido = wars.balanceOf(address(this)) - antes;
-        if (recibido < minWars) revert RecibidoInsuficiente();
-        emit Conversion(montoUsdt, recibido);
+        _swapInProgress = false;
+        received = wars.balanceOf(address(this)) - balanceBefore;
+        if (received < minWarsOut) revert InsufficientOutput();
+        emit Conversion(usdtAmount, received);
     }
 
-    /// @dev Solo el pool, y solo durante `convertir`, puede cobrar el USDT del swap.
+    /// @dev Only the pool, and only during `convert`, can collect the swap's USDT.
     function uniswapV3SwapCallback(int256 amount0Delta, int256 amount1Delta, bytes calldata) external override {
-        if (msg.sender != address(pool) || !_swapEnCurso) revert SoloPool();
-        uint256 aPagar = uint256(amount0Delta > 0 ? amount0Delta : amount1Delta);
-        usdt.safeTransfer(address(pool), aPagar);
+        if (msg.sender != address(pool) || !_swapInProgress) revert OnlyPool();
+        uint256 amountToPay = uint256(amount0Delta > 0 ? amount0Delta : amount1Delta);
+        usdt.safeTransfer(address(pool), amountToPay);
     }
 
-    // ---------------------------------------------------------------- Reintegro (agente)
-    /// @notice Devuelve a un miembro el gasto que el grupo acordó, sin votos, hasta `topeSemanal` por semana.
-    /// @param ref Hash del gasto cargado en la web (lo usa la línea de tiempo para enlazarlo).
-    function reintegrarGastoAcordado(address miembro, uint256 monto, bytes32 ref)
+    // ---------------------------------------------------------------- Reimbursement (agent)
+    /// @notice Pays a member back for the expense the group agreed on, without votes, up to `weeklyCap` per week.
+    /// @param ref Hash of the expense entered in the web app (the timeline uses it to link to the expense).
+    function reimburseAgreedExpense(address member, uint256 amount, bytes32 ref)
         external
-        soloAgente
-        abierto
+        onlyAgent
+        whenOpen
         nonReentrant
     {
-        if (!esMiembro[miembro]) revert DestinoNoMiembro();
-        if (monto == 0) revert MontoCero();
-        uint256 semana = semanaActual();
-        uint256 gastado = gastadoEnSemana[semana] + monto;
-        if (gastado > topeSemanal) revert TopeSemanalSuperado();
-        gastadoEnSemana[semana] = gastado;
-        _pagarWars(miembro, monto);
-        emit Reintegro(miembro, monto, ref, semana);
+        if (!isMember[member]) revert RecipientNotMember();
+        if (amount == 0) revert ZeroAmount();
+        uint256 week = currentWeek();
+        uint256 spent = spentInWeek[week] + amount;
+        if (spent > weeklyCap) revert WeeklyCapExceeded();
+        spentInWeek[week] = spent;
+        _payWars(member, amount);
+        emit Reimbursement(member, amount, ref, week);
     }
 
-    function _pagarWars(address a, uint256 monto) internal {
-        if (wars.balanceOf(address(this)) < monto) revert SaldoInsuficiente();
-        wars.safeTransfer(a, monto);
+    function _payWars(address to, uint256 amount) internal {
+        if (wars.balanceOf(address(this)) < amount) revert InsufficientBalance();
+        wars.safeTransfer(to, amount);
     }
 
-    // ---------------------------------------------------------------- Propuestas y votos
-    function proponer(Accion accion, address a, address b, uint256 monto, string calldata nota)
+    // ---------------------------------------------------------------- Proposals and votes
+    function propose(Action action, address a, address b, uint256 amount, string calldata note)
         external
-        abierto
+        whenOpen
         returns (uint256 id)
     {
-        bool miembro = esMiembro[msg.sender];
-        if (!miembro && msg.sender != agente) revert SoloMiembroOAgente();
-        id = _propuestas.length;
-        _propuestas.push(
-            Propuesta({
-                accion: accion,
+        bool member = isMember[msg.sender];
+        if (!member && msg.sender != agent) revert OnlyMemberOrAgent();
+        id = _proposals.length;
+        _proposals.push(
+            Proposal({
+                action: action,
                 a: a,
                 b: b,
-                monto: monto,
-                vence: uint64(block.timestamp + DURACION_PROPUESTA),
-                ejecutada: false,
-                proponente: msg.sender,
-                nota: nota
+                amount: amount,
+                deadline: uint64(block.timestamp + PROPOSAL_DURATION),
+                executed: false,
+                proposer: msg.sender,
+                note: note
             })
         );
-        emit PropuestaCreada(id, accion, a, b, monto, msg.sender, nota);
-        if (miembro) _votar(id);
+        emit ProposalCreated(id, action, a, b, amount, msg.sender, note);
+        if (member) _vote(id);
     }
 
-    function votar(uint256 id) external soloMiembro abierto {
-        _propuestaVigente(id);
-        _votar(id);
+    function vote(uint256 id) external onlyMember whenOpen {
+        _activeProposal(id);
+        _vote(id);
     }
 
-    function ejecutar(uint256 id) external abierto nonReentrant {
-        Propuesta storage p = _propuestaVigente(id);
-        if (votosDe(id) < votosNecesarios) revert VotosInsuficientes();
-        p.ejecutada = true;
-        _aplicar(p);
-        emit PropuestaEjecutada(id);
+    function execute(uint256 id) external whenOpen nonReentrant {
+        Proposal storage p = _activeProposal(id);
+        if (voteCount(id) < votesRequired) revert NotEnoughVotes();
+        p.executed = true;
+        _apply(p);
+        emit ProposalExecuted(id);
     }
 
-    /// @notice Votos a favor, contando solo a los miembros actuales.
-    function votosDe(uint256 id) public view returns (uint256 n) {
-        uint256 cant = _miembros.length;
-        for (uint256 i; i < cant; ++i) {
-            if (votoDe[id][_miembros[i]]) ++n;
+    /// @notice Votes in favor, counting only current members.
+    function voteCount(uint256 id) public view returns (uint256 n) {
+        uint256 count = _members.length;
+        for (uint256 i; i < count; ++i) {
+            if (hasVoted[id][_members[i]]) ++n;
         }
     }
 
-    function cantidadPropuestas() external view returns (uint256) {
-        return _propuestas.length;
+    function proposalCount() external view returns (uint256) {
+        return _proposals.length;
     }
 
-    function propuesta(uint256 id) external view returns (Propuesta memory) {
-        if (id >= _propuestas.length) revert PropuestaInexistente();
-        return _propuestas[id];
+    function getProposal(uint256 id) external view returns (Proposal memory) {
+        if (id >= _proposals.length) revert ProposalNotFound();
+        return _proposals[id];
     }
 
-    function _votar(uint256 id) internal {
-        if (votoDe[id][msg.sender]) revert YaVoto();
-        votoDe[id][msg.sender] = true;
-        emit Voto(id, msg.sender);
+    function _vote(uint256 id) internal {
+        if (hasVoted[id][msg.sender]) revert AlreadyVoted();
+        hasVoted[id][msg.sender] = true;
+        emit VoteCast(id, msg.sender);
     }
 
-    function _propuestaVigente(uint256 id) internal view returns (Propuesta storage p) {
-        if (id >= _propuestas.length) revert PropuestaInexistente();
-        p = _propuestas[id];
-        if (p.ejecutada) revert PropuestaYaEjecutada();
-        if (block.timestamp > p.vence) revert PropuestaVencida();
+    function _activeProposal(uint256 id) internal view returns (Proposal storage p) {
+        if (id >= _proposals.length) revert ProposalNotFound();
+        p = _proposals[id];
+        if (p.executed) revert ProposalAlreadyExecuted();
+        if (block.timestamp > p.deadline) revert ProposalExpired();
     }
 
-    function _aplicar(Propuesta storage p) internal {
-        Accion acc = p.accion;
-        if (acc == Accion.Pagar) {
-            if (!esMiembro[p.a]) revert DestinoNoMiembro();
-            if (p.monto == 0) revert MontoCero();
-            _pagarWars(p.a, p.monto);
-            emit Pago(p.a, p.monto);
-        } else if (acc == Accion.AgregarMiembro) {
-            if (p.a == address(0) || p.a == agente || esMiembro[p.a] || _miembros.length >= MAX_MIEMBROS) {
-                revert ParametrosInvalidos();
+    function _apply(Proposal storage p) internal {
+        Action action = p.action;
+        if (action == Action.Pay) {
+            if (!isMember[p.a]) revert RecipientNotMember();
+            if (p.amount == 0) revert ZeroAmount();
+            _payWars(p.a, p.amount);
+            emit Payment(p.a, p.amount);
+        } else if (action == Action.AddMember) {
+            if (p.a == address(0) || p.a == agent || isMember[p.a] || _members.length >= MAX_MEMBERS) {
+                revert InvalidParams();
             }
-            esMiembro[p.a] = true;
-            _miembros.push(p.a);
-            emit MiembroAgregado(p.a);
-        } else if (acc == Accion.SacarMiembro) {
-            if (!esMiembro[p.a] || _miembros.length - 1 < votosNecesarios) revert ParametrosInvalidos();
-            (uint256 w, uint256 u) = _parteDe(p.a);
-            totalAportado -= aportado[p.a];
-            aportado[p.a] = 0;
-            _quitarMiembro(p.a);
+            isMember[p.a] = true;
+            _members.push(p.a);
+            emit MemberAdded(p.a);
+        } else if (action == Action.RemoveMember) {
+            if (!isMember[p.a] || _members.length - 1 < votesRequired) revert InvalidParams();
+            (uint256 w, uint256 u) = _shareOf(p.a);
+            totalContributed -= contributed[p.a];
+            contributed[p.a] = 0;
+            _removeMember(p.a);
             if (w > 0) wars.safeTransfer(p.a, w);
             if (u > 0) usdt.safeTransfer(p.a, u);
-            emit MiembroSacado(p.a, w, u);
-        } else if (acc == Accion.CambiarMiembro) {
-            if (!esMiembro[p.a] || p.b == address(0) || p.b == agente || esMiembro[p.b]) {
-                revert ParametrosInvalidos();
+            emit MemberRemoved(p.a, w, u);
+        } else if (action == Action.ReplaceMember) {
+            if (!isMember[p.a] || p.b == address(0) || p.b == agent || isMember[p.b]) {
+                revert InvalidParams();
             }
-            uint256 n = _miembros.length;
+            uint256 n = _members.length;
             for (uint256 i; i < n; ++i) {
-                if (_miembros[i] == p.a) {
-                    _miembros[i] = p.b;
+                if (_members[i] == p.a) {
+                    _members[i] = p.b;
                     break;
                 }
             }
-            esMiembro[p.a] = false;
-            esMiembro[p.b] = true;
-            aportado[p.b] = aportado[p.a];
-            aportado[p.a] = 0;
-            emit MiembroCambiado(p.a, p.b);
-        } else if (acc == Accion.CambiarTope) {
-            topeSemanal = p.monto;
-            emit TopeSemanalCambiado(p.monto);
-        } else if (acc == Accion.CambiarVotos) {
-            if (p.monto < MIN_VOTOS || p.monto > _miembros.length) revert ParametrosInvalidos();
-            votosNecesarios = uint8(p.monto);
-            emit VotosNecesariosCambiados(uint8(p.monto));
-        } else if (acc == Accion.CambiarAgente) {
-            if (esMiembro[p.a]) revert ParametrosInvalidos();
-            agente = p.a;
-            emit AgenteCambiado(p.a);
+            isMember[p.a] = false;
+            isMember[p.b] = true;
+            contributed[p.b] = contributed[p.a];
+            contributed[p.a] = 0;
+            emit MemberReplaced(p.a, p.b);
+        } else if (action == Action.SetWeeklyCap) {
+            weeklyCap = p.amount;
+            emit WeeklyCapChanged(p.amount);
+        } else if (action == Action.SetVotesRequired) {
+            if (p.amount < MIN_VOTES || p.amount > _members.length) revert InvalidParams();
+            votesRequired = uint8(p.amount);
+            emit VotesRequiredChanged(uint8(p.amount));
+        } else if (action == Action.SetAgent) {
+            if (isMember[p.a]) revert InvalidParams();
+            agent = p.a;
+            emit AgentChanged(p.a);
         } else {
-            _cerrar();
+            _close();
         }
     }
 
-    /// @dev Parte proporcional de `m` en los saldos, según lo aportado. Si nadie aportó, no le toca nada.
-    function _parteDe(address m) internal view returns (uint256 w, uint256 u) {
-        if (totalAportado == 0) return (0, 0);
-        w = wars.balanceOf(address(this)) * aportado[m] / totalAportado;
-        u = usdt.balanceOf(address(this)) * aportado[m] / totalAportado;
+    /// @dev `m`'s proportional share of the balances, by contribution. If no one has contributed, `m` gets nothing.
+    function _shareOf(address m) internal view returns (uint256 w, uint256 u) {
+        if (totalContributed == 0) return (0, 0);
+        w = wars.balanceOf(address(this)) * contributed[m] / totalContributed;
+        u = usdt.balanceOf(address(this)) * contributed[m] / totalContributed;
     }
 
-    function _quitarMiembro(address m) internal {
-        uint256 n = _miembros.length;
+    function _removeMember(address m) internal {
+        uint256 n = _members.length;
         for (uint256 i; i < n; ++i) {
-            if (_miembros[i] == m) {
-                _miembros[i] = _miembros[n - 1];
-                _miembros.pop();
+            if (_members[i] == m) {
+                _members[i] = _members[n - 1];
+                _members.pop();
                 break;
             }
         }
-        esMiembro[m] = false;
+        isMember[m] = false;
     }
 
-    /// @dev Reparte wARS y USDT en proporción a lo aportado (por igual si nadie aportó) y cierra el fondo.
-    ///      El polvo de redondeo (menos de 1 wei por miembro) queda en el contrato.
-    function _cerrar() internal {
-        cerrado = true;
+    /// @dev Splits wARS and USDT in proportion to contributions (equally if no one contributed) and closes the fund.
+    ///      Emits the balances read before the split. Rounding dust (under 1 wei per member) stays in the contract.
+    function _close() internal {
+        closed = true;
         uint256 bw = wars.balanceOf(address(this));
         uint256 bu = usdt.balanceOf(address(this));
-        uint256 n = _miembros.length;
-        uint256 total = totalAportado;
+        uint256 n = _members.length;
+        uint256 total = totalContributed;
         for (uint256 i; i < n; ++i) {
-            address m = _miembros[i];
-            uint256 w = total == 0 ? bw / n : bw * aportado[m] / total;
-            uint256 u = total == 0 ? bu / n : bu * aportado[m] / total;
+            address m = _members[i];
+            uint256 w = total == 0 ? bw / n : bw * contributed[m] / total;
+            uint256 u = total == 0 ? bu / n : bu * contributed[m] / total;
             if (w > 0) wars.safeTransfer(m, w);
             if (u > 0) usdt.safeTransfer(m, u);
         }
-        emit Cierre(bw, bu);
+        emit FundClosed(bw, bu);
     }
 }

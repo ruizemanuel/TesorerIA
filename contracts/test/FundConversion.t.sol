@@ -1,129 +1,129 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 pragma solidity 0.8.37;
 
-import {BaseFondoTest} from "./Base.t.sol";
-import {Fondo} from "../src/Fund.sol";
+import {BaseFundTest} from "./Base.t.sol";
+import {Fund} from "../src/Fund.sol";
 import {MockPool} from "./mocks/MockPool.sol";
-import {Atacante, MockPoolHostil} from "./mocks/MockPoolHostile.sol";
+import {Attacker, MockPoolHostile} from "./mocks/MockPoolHostile.sol";
 
-contract FondoConversionTest is BaseFondoTest {
+contract FundConversionTest is BaseFundTest {
     function setUp() public override {
         super.setUp();
-        _aportarUsdt(miembros[0], 50e6);
+        _contributeUsdt(members[0], 50e6);
     }
 
-    function test_agenteConvierteAlPrecioDelPool() public {
-        uint256 esperado = fondo.cotizarUsdtEnWars(30e6);
-        vm.prank(agente);
-        uint256 recibido = fondo.convertir(30e6, esperado * 99 / 100);
-        assertApproxEqRel(recibido, esperado, 0.0001e18);
-        assertEq(usdt.balanceOf(address(fondo)), 20e6);
-        assertEq(wars.balanceOf(address(fondo)), recibido);
+    function test_agentConvertsAtThePoolPrice() public {
+        uint256 expected = fund.quoteUsdtInWars(30e6);
+        vm.prank(agent);
+        uint256 received = fund.convert(30e6, expected * 99 / 100);
+        assertApproxEqRel(received, expected, 0.0001e18);
+        assertEq(usdt.balanceOf(address(fund)), 20e6);
+        assertEq(wars.balanceOf(address(fund)), received);
     }
 
-    function test_emiteConversion() public {
-        uint256 esperado = fondo.cotizarUsdtEnWars(10e6);
-        vm.expectEmit(false, false, false, false, address(fondo));
-        emit Fondo.Conversion(10e6, esperado);
-        vm.prank(agente);
-        fondo.convertir(10e6, esperado * 99 / 100);
+    function test_emitsConversion() public {
+        uint256 expected = fund.quoteUsdtInWars(10e6);
+        vm.expectEmit(false, false, false, false, address(fund));
+        emit Fund.Conversion(10e6, expected);
+        vm.prank(agent);
+        fund.convert(10e6, expected * 99 / 100);
     }
 
-    function test_soloElAgentePuedeConvertir() public {
-        vm.prank(miembros[0]);
-        vm.expectRevert(Fondo.SoloAgente.selector);
-        fondo.convertir(10e6, 1);
+    function test_onlyTheAgentCanConvert() public {
+        vm.prank(members[0]);
+        vm.expectRevert(Fund.OnlyAgent.selector);
+        fund.convert(10e6, 1);
     }
 
-    function test_minimoPorDebajoDelMargenRevierte() public {
-        uint256 esperado = fondo.cotizarUsdtEnWars(10e6);
-        vm.prank(agente);
-        vm.expectRevert(Fondo.MinimoMuyBajo.selector);
-        fondo.convertir(10e6, esperado * 97 / 100);
+    function test_minOutBelowTheMarginReverts() public {
+        uint256 expected = fund.quoteUsdtInWars(10e6);
+        vm.prank(agent);
+        vm.expectRevert(Fund.MinOutTooLow.selector);
+        fund.convert(10e6, expected * 97 / 100);
     }
 
-    // Review final: el margen es exactamente 2 %. El mínimo justo en el 98 % de la cotización pasa (y el pool
-    // que entrega justo eso también); un wei menos, no.
-    function test_minimoJustoEnEl98PorCientoSeAcepta() public {
-        uint256 piso = fondo.cotizarUsdtEnWars(10e6) * 9_800 / 10_000;
-        pool.setCalidad(9_800); // entrega 2 % menos: justo el piso
-        vm.prank(agente);
-        uint256 recibido = fondo.convertir(10e6, piso);
-        assertEq(recibido, piso);
-        assertEq(usdt.balanceOf(address(fondo)), 40e6);
+    // Final review: the margin is exactly 2%. A minimum right at 98% of the quote passes (and so does a pool
+    // that delivers exactly that); one wei less doesn't.
+    function test_minOutExactlyAt98PercentIsAccepted() public {
+        uint256 floor = fund.quoteUsdtInWars(10e6) * 9_800 / 10_000;
+        pool.setQuality(9_800); // delivers 2% less: exactly the floor
+        vm.prank(agent);
+        uint256 received = fund.convert(10e6, floor);
+        assertEq(received, floor);
+        assertEq(usdt.balanceOf(address(fund)), 40e6);
     }
 
-    function test_minimoUnWeiDebajoDel98PorCientoRevierte() public {
-        uint256 piso = fondo.cotizarUsdtEnWars(10e6) * 9_800 / 10_000;
-        vm.prank(agente);
-        vm.expectRevert(Fondo.MinimoMuyBajo.selector);
-        fondo.convertir(10e6, piso - 1);
+    function test_minOutOneWeiBelow98PercentReverts() public {
+        uint256 floor = fund.quoteUsdtInWars(10e6) * 9_800 / 10_000;
+        vm.prank(agent);
+        vm.expectRevert(Fund.MinOutTooLow.selector);
+        fund.convert(10e6, floor - 1);
     }
 
-    function testFuzz_elMargenEsExactamenteDel2PorCiento(uint256 monto) public {
-        monto = bound(monto, 1, 50e6);
-        uint256 piso = fondo.cotizarUsdtEnWars(monto) * 9_800 / 10_000;
-        pool.setCalidad(9_800);
-        vm.startPrank(agente);
-        vm.expectRevert(Fondo.MinimoMuyBajo.selector);
-        fondo.convertir(monto, piso - 1);
-        assertEq(fondo.convertir(monto, piso), piso);
+    function testFuzz_theMarginIsExactly2Percent(uint256 amount) public {
+        amount = bound(amount, 1, 50e6);
+        uint256 floor = fund.quoteUsdtInWars(amount) * 9_800 / 10_000;
+        pool.setQuality(9_800);
+        vm.startPrank(agent);
+        vm.expectRevert(Fund.MinOutTooLow.selector);
+        fund.convert(amount, floor - 1);
+        assertEq(fund.convert(amount, floor), floor);
         vm.stopPrank();
     }
 
-    function test_siElPoolEntregaMenosQueElMinimoRevierte() public {
-        uint256 esperado = fondo.cotizarUsdtEnWars(10e6);
-        pool.setCalidad(9_850); // entrega 1,5 % menos
-        vm.prank(agente);
-        vm.expectRevert(Fondo.RecibidoInsuficiente.selector);
-        fondo.convertir(10e6, esperado * 99 / 100);
+    function test_ifThePoolDeliversLessThanMinOutItReverts() public {
+        uint256 expected = fund.quoteUsdtInWars(10e6);
+        pool.setQuality(9_850); // delivers 1.5% less
+        vm.prank(agent);
+        vm.expectRevert(Fund.InsufficientOutput.selector);
+        fund.convert(10e6, expected * 99 / 100);
     }
 
-    function test_noPuedeConvertirMasUsdtDelQueHay() public {
-        vm.prank(agente);
-        vm.expectRevert(Fondo.SaldoInsuficiente.selector);
-        fondo.convertir(51e6, 1);
+    function test_cannotConvertMoreUsdtThanTheFundHolds() public {
+        vm.prank(agent);
+        vm.expectRevert(Fund.InsufficientBalance.selector);
+        fund.convert(51e6, 1);
     }
 
-    function test_callbackFueraDeUnaConversionRevierte() public {
+    function test_callbackOutsideAConversionReverts() public {
         vm.prank(address(pool));
-        vm.expectRevert(Fondo.SoloPool.selector);
-        fondo.uniswapV3SwapCallback(0, 1e6, "");
+        vm.expectRevert(Fund.OnlyPool.selector);
+        fund.uniswapV3SwapCallback(0, 1e6, "");
     }
 
-    function test_callbackDeOtroQueNoEsElPoolRevierte() public {
-        vm.prank(ajeno);
-        vm.expectRevert(Fondo.SoloPool.selector);
-        fondo.uniswapV3SwapCallback(0, 1e6, "");
+    function test_callbackFromSomeoneOtherThanThePoolReverts() public {
+        vm.prank(outsider);
+        vm.expectRevert(Fund.OnlyPool.selector);
+        fund.uniswapV3SwapCallback(0, 1e6, "");
     }
 
-    /// Fondo nuevo sobre un pool que, en medio del swap, deja que un tercero llame la callback del fondo.
-    function _fondoConPoolHostil() internal returns (Atacante atacante) {
-        MockPoolHostil hostil = new MockPoolHostil(address(wars), address(usdt), -350142);
-        wars.mint(address(hostil), 1_000_000_000e18);
-        pool = MockPool(address(hostil));
-        fondo = _nuevoFondo(_params());
-        _aportarUsdt(miembros[0], 50e6);
-        atacante = hostil.atacante();
+    /// New fund on a pool that, in the middle of the swap, lets a third party call the fund's callback.
+    function _fundWithHostilePool() internal returns (Attacker attacker) {
+        MockPoolHostile hostile = new MockPoolHostile(address(wars), address(usdt), -350142);
+        wars.mint(address(hostile), 1_000_000_000e18);
+        pool = MockPool(address(hostile));
+        fund = _newFund(_params());
+        _contributeUsdt(members[0], 50e6);
+        attacker = hostile.attacker();
     }
 
-    // Review final: mientras dura la conversión (`_swapEnCurso`), solo el pool puede cobrar por la callback.
-    function test_otroQueNoEsElPoolNoPuedeCobrarDuranteLaConversion() public {
-        _fondoConPoolHostil();
-        uint256 esperado = fondo.cotizarUsdtEnWars(10e6);
-        vm.prank(agente);
-        vm.expectRevert(Fondo.SoloPool.selector);
-        fondo.convertir(10e6, esperado * 99 / 100);
+    // Final review: while the conversion runs (`_swapInProgress`), only the pool can collect through the callback.
+    function test_nonPoolCannotCollectDuringTheConversion() public {
+        _fundWithHostilePool();
+        uint256 expected = fund.quoteUsdtInWars(10e6);
+        vm.prank(agent);
+        vm.expectRevert(Fund.OnlyPool.selector);
+        fund.convert(10e6, expected * 99 / 100);
     }
 
-    function test_unTerceroDuranteLaConversionNoSeLlevaElUsdtDelFondo() public {
-        Atacante atacante = _fondoConPoolHostil();
-        atacante.setTragarError(true);
-        uint256 esperado = fondo.cotizarUsdtEnWars(10e6);
-        vm.prank(agente);
-        fondo.convertir(10e6, esperado * 99 / 100);
-        assertEq(atacante.ultimoError(), abi.encodeWithSelector(Fondo.SoloPool.selector));
-        assertEq(usdt.balanceOf(address(fondo)), 40e6); // solo pagó los 10 USDT del swap
+    function test_thirdPartyDuringTheConversionCannotTakeTheFundUsdt() public {
+        Attacker attacker = _fundWithHostilePool();
+        attacker.setSwallowError(true);
+        uint256 expected = fund.quoteUsdtInWars(10e6);
+        vm.prank(agent);
+        fund.convert(10e6, expected * 99 / 100);
+        assertEq(attacker.lastError(), abi.encodeWithSelector(Fund.OnlyPool.selector));
+        assertEq(usdt.balanceOf(address(fund)), 40e6); // it only paid the swap's 10 USDT
         assertEq(usdt.balanceOf(address(pool)), 10e6);
     }
 }

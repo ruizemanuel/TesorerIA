@@ -1,129 +1,129 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 pragma solidity 0.8.37;
 
-import {BaseFondoTest} from "./Base.t.sol";
-import {Fondo} from "../src/Fund.sol";
+import {BaseFundTest} from "./Base.t.sol";
+import {Fund} from "../src/Fund.sol";
 
-contract FondoCierreTest is BaseFondoTest {
-    function _cerrar() internal {
-        uint256 id = _proponer(miembros[0], Fondo.Accion.Cerrar, address(0), address(0), 0);
-        _aprobar(id, 1, 3);
-        fondo.ejecutar(id);
+contract FundCloseTest is BaseFundTest {
+    function _close() internal {
+        uint256 id = _propose(members[0], Fund.Action.Close, address(0), address(0), 0);
+        _castVotes(id, 1, 3);
+        fund.execute(id);
     }
 
-    function test_cierreRepartePorAporte() public {
-        _aportarWars(miembros[0], 30_000e18);
-        _aportarWars(miembros[1], 10_000e18);
-        _cerrar();
-        assertTrue(fondo.cerrado());
-        assertEq(wars.balanceOf(miembros[0]), 30_000e18);
-        assertEq(wars.balanceOf(miembros[1]), 10_000e18);
-        assertEq(wars.balanceOf(miembros[2]), 0);
+    function test_closeSplitsByContribution() public {
+        _contributeWars(members[0], 30_000e18);
+        _contributeWars(members[1], 10_000e18);
+        _close();
+        assertTrue(fund.closed());
+        assertEq(wars.balanceOf(members[0]), 30_000e18);
+        assertEq(wars.balanceOf(members[1]), 10_000e18);
+        assertEq(wars.balanceOf(members[2]), 0);
     }
 
-    function test_cierreConUsdtSinConvertir() public {
-        _aportarWars(miembros[0], 16_058.8e18);
-        _aportarUsdt(miembros[1], 10e6);
-        _cerrar();
-        assertApproxEqAbs(usdt.balanceOf(miembros[1]), 5e6, 0.02e6);
-        assertApproxEqAbs(usdt.balanceOf(miembros[0]), 5e6, 0.02e6);
+    function test_closeWithUnconvertedUsdt() public {
+        _contributeWars(members[0], 16_058.8e18);
+        _contributeUsdt(members[1], 10e6);
+        _close();
+        assertApproxEqAbs(usdt.balanceOf(members[1]), 5e6, 0.02e6);
+        assertApproxEqAbs(usdt.balanceOf(members[0]), 5e6, 0.02e6);
     }
 
-    function test_sinAportesRepartePorIgual() public {
-        wars.mint(address(fondo), 5_000e18);
-        _cerrar();
-        for (uint256 i; i < 5; ++i) assertEq(wars.balanceOf(miembros[i]), 1_000e18);
+    function test_withoutContributionsSplitsEqually() public {
+        wars.mint(address(fund), 5_000e18);
+        _close();
+        for (uint256 i; i < 5; ++i) assertEq(wars.balanceOf(members[i]), 1_000e18);
     }
 
-    // Review Focus 1: lo que llega directo al contrato no se le acredita a nadie y se reparte por aporte.
-    function test_transferenciaDirectaSeRepartePorAporte() public {
-        _aportarWars(miembros[0], 30_000e18);
-        _aportarWars(miembros[1], 10_000e18);
-        wars.mint(address(fondo), 4_000e18); // por ejemplo, un retiro mandado al contrato por error
-        assertEq(fondo.totalAportado(), 40_000e18);
-        _cerrar();
-        assertEq(wars.balanceOf(miembros[0]), 33_000e18);
-        assertEq(wars.balanceOf(miembros[1]), 11_000e18);
+    // Review Focus 1: what reaches the contract directly is credited to no one and is split by contribution.
+    function test_directTransferIsSplitByContribution() public {
+        _contributeWars(members[0], 30_000e18);
+        _contributeWars(members[1], 10_000e18);
+        wars.mint(address(fund), 4_000e18); // for example, a withdrawal sent to the contract by mistake
+        assertEq(fund.totalContributed(), 40_000e18);
+        _close();
+        assertEq(wars.balanceOf(members[0]), 33_000e18);
+        assertEq(wars.balanceOf(members[1]), 11_000e18);
     }
 
-    function test_despuesDeCerrarTodoRevierte() public {
-        _aportarWars(miembros[0], 1_000e18);
-        _cerrar();
-        vm.prank(miembros[0]);
-        vm.expectRevert(Fondo.FondoCerrado.selector);
-        fondo.aportarWars(1);
-        vm.prank(agente);
-        vm.expectRevert(Fondo.FondoCerrado.selector);
-        fondo.reintegrarGastoAcordado(miembros[0], 1, bytes32(0));
-        vm.prank(miembros[0]);
-        vm.expectRevert(Fondo.FondoCerrado.selector);
-        fondo.proponer(Fondo.Accion.Pagar, miembros[1], address(0), 1, "x");
+    function test_everythingRevertsAfterClosing() public {
+        _contributeWars(members[0], 1_000e18);
+        _close();
+        vm.prank(members[0]);
+        vm.expectRevert(Fund.FundIsClosed.selector);
+        fund.contributeWars(1);
+        vm.prank(agent);
+        vm.expectRevert(Fund.FundIsClosed.selector);
+        fund.reimburseAgreedExpense(members[0], 1, bytes32(0));
+        vm.prank(members[0]);
+        vm.expectRevert(Fund.FundIsClosed.selector);
+        fund.propose(Fund.Action.Pay, members[1], address(0), 1, "x");
     }
 
-    function testFuzz_cierreConservaElSaldo(uint96 a, uint96 b, uint96 c) public {
+    function testFuzz_closeConservesTheBalance(uint96 a, uint96 b, uint96 c) public {
         uint256 x = bound(a, 1, 100_000e18);
         uint256 y = bound(b, 1, 100_000e18);
         uint256 z = bound(c, 1, 100_000e18);
-        _aportarWars(miembros[0], x);
-        _aportarWars(miembros[1], y);
-        _aportarWars(miembros[2], z);
-        _cerrar();
-        uint256 repartido = wars.balanceOf(miembros[0]) + wars.balanceOf(miembros[1]) + wars.balanceOf(miembros[2]);
-        assertLe(repartido, x + y + z);
-        assertLe(wars.balanceOf(address(fondo)), 5); // polvo de redondeo: menos de 1 wei por miembro
+        _contributeWars(members[0], x);
+        _contributeWars(members[1], y);
+        _contributeWars(members[2], z);
+        _close();
+        uint256 paidOut = wars.balanceOf(members[0]) + wars.balanceOf(members[1]) + wars.balanceOf(members[2]);
+        assertLe(paidOut, x + y + z);
+        assertLe(wars.balanceOf(address(fund)), 5); // rounding dust: under 1 wei per member
     }
 
-    // Review fix: el saldo llega también por transferencia directa, así que el reparto redondea de verdad.
-    function testFuzz_cierreRepartePorAporteConRedondeo(uint96 a, uint96 b, uint96 c, uint96 extraW, uint64 extraU)
+    // Review fix: part of the balance also arrives by direct transfer, so the split really rounds.
+    function testFuzz_closeSplitsByContributionWithRounding(uint96 a, uint96 b, uint96 c, uint96 extraW, uint64 extraU)
         public
     {
-        uint256[3] memory ap;
-        ap[0] = bound(a, 1, 100_000e18);
-        ap[1] = bound(b, 1, 100_000e18);
-        ap[2] = bound(c, 1, 100_000e18);
-        for (uint256 i; i < 3; ++i) _aportarWars(miembros[i], ap[i]);
-        wars.mint(address(fondo), bound(extraW, 0, 100_000e18));
-        usdt.mint(address(fondo), bound(extraU, 0, 1_000e6));
+        uint256[3] memory contribs;
+        contribs[0] = bound(a, 1, 100_000e18);
+        contribs[1] = bound(b, 1, 100_000e18);
+        contribs[2] = bound(c, 1, 100_000e18);
+        for (uint256 i; i < 3; ++i) _contributeWars(members[i], contribs[i]);
+        wars.mint(address(fund), bound(extraW, 0, 100_000e18));
+        usdt.mint(address(fund), bound(extraU, 0, 1_000e6));
 
-        uint256 bw = wars.balanceOf(address(fondo));
-        uint256 bu = usdt.balanceOf(address(fondo));
-        uint256 t = fondo.totalAportado();
-        for (uint256 i; i < 3; ++i) ap[i] = fondo.aportado(miembros[i]);
+        uint256 bw = wars.balanceOf(address(fund));
+        uint256 bu = usdt.balanceOf(address(fund));
+        uint256 t = fund.totalContributed();
+        for (uint256 i; i < 3; ++i) contribs[i] = fund.contributed(members[i]);
 
-        _cerrar();
+        _close();
 
         uint256 sw;
         uint256 su;
         for (uint256 i; i < 3; ++i) {
-            assertEq(wars.balanceOf(miembros[i]), bw * ap[i] / t);
-            assertEq(usdt.balanceOf(miembros[i]), bu * ap[i] / t);
-            sw += wars.balanceOf(miembros[i]);
-            su += usdt.balanceOf(miembros[i]);
+            assertEq(wars.balanceOf(members[i]), bw * contribs[i] / t);
+            assertEq(usdt.balanceOf(members[i]), bu * contribs[i] / t);
+            sw += wars.balanceOf(members[i]);
+            su += usdt.balanceOf(members[i]);
         }
         for (uint256 i = 3; i < 5; ++i) {
-            assertEq(wars.balanceOf(miembros[i]), 0);
-            assertEq(usdt.balanceOf(miembros[i]), 0);
+            assertEq(wars.balanceOf(members[i]), 0);
+            assertEq(usdt.balanceOf(members[i]), 0);
         }
-        assertEq(sw + wars.balanceOf(address(fondo)), bw);
-        assertEq(su + usdt.balanceOf(address(fondo)), bu);
-        assertLt(wars.balanceOf(address(fondo)), 3);
-        assertLt(usdt.balanceOf(address(fondo)), 3);
+        assertEq(sw + wars.balanceOf(address(fund)), bw);
+        assertEq(su + usdt.balanceOf(address(fund)), bu);
+        assertLt(wars.balanceOf(address(fund)), 3);
+        assertLt(usdt.balanceOf(address(fund)), 3);
     }
 
-    // Review fix: sin aportes, el saldo se reparte por igual y el resto de la división queda en el contrato.
-    function testFuzz_cierreSinAportesRepartePorIgual(uint96 w, uint64 u) public {
+    // Review fix: with no contributions, the balance is split equally and the division remainder stays in the contract.
+    function testFuzz_closeWithoutContributionsSplitsEqually(uint96 w, uint64 u) public {
         uint256 bw = bound(w, 1, 1_000_000e18);
         uint256 bu = bound(u, 1, 1_000_000e6);
-        wars.mint(address(fondo), bw);
-        usdt.mint(address(fondo), bu);
+        wars.mint(address(fund), bw);
+        usdt.mint(address(fund), bu);
 
-        _cerrar();
+        _close();
 
         for (uint256 i; i < 5; ++i) {
-            assertEq(wars.balanceOf(miembros[i]), bw / 5);
-            assertEq(usdt.balanceOf(miembros[i]), bu / 5);
+            assertEq(wars.balanceOf(members[i]), bw / 5);
+            assertEq(usdt.balanceOf(members[i]), bu / 5);
         }
-        assertEq(wars.balanceOf(address(fondo)), bw % 5);
-        assertEq(usdt.balanceOf(address(fondo)), bu % 5);
+        assertEq(wars.balanceOf(address(fund)), bw % 5);
+        assertEq(usdt.balanceOf(address(fund)), bu % 5);
     }
 }

@@ -1,52 +1,52 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 pragma solidity 0.8.37;
 
-import {BaseFondoTest} from "./Base.t.sol";
-import {Fondo} from "../src/Fund.sol";
-import {FabricaFondos} from "../src/FundFactory.sol";
+import {BaseFundTest} from "./Base.t.sol";
+import {Fund} from "../src/Fund.sol";
+import {FundFactory} from "../src/FundFactory.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
 import {MockPool} from "./mocks/MockPool.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IUniswapV3Pool} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
 
-contract FabricaFondosTest is BaseFondoTest {
-    FabricaFondos fabrica;
+contract FundFactoryTest is BaseFundTest {
+    FundFactory factory;
 
     function setUp() public override {
         super.setUp();
-        fabrica = new FabricaFondos(IERC20(address(wars)), IERC20(address(usdt)), IUniswapV3Pool(address(pool)));
+        factory = new FundFactory(IERC20(address(wars)), IERC20(address(usdt)), IUniswapV3Pool(address(pool)));
     }
 
-    function test_creaUnFondoConLosParametros() public {
-        vm.prank(miembros[0]);
-        address creado = fabrica.crearFondo(_params());
-        assertEq(fabrica.cantidadFondos(), 1);
-        assertEq(fabrica.fondos(0), creado);
-        Fondo f = Fondo(creado);
-        assertEq(f.nombre(), "Futbol de los jueves");
+    function test_createsAFundWithTheParams() public {
+        vm.prank(members[0]);
+        address created = factory.createFund(_params());
+        assertEq(factory.fundCount(), 1);
+        assertEq(factory.funds(0), created);
+        Fund f = Fund(created);
+        assertEq(f.name(), "Thursday football");
         assertEq(address(f.wars()), address(wars));
         assertEq(address(f.pool()), address(pool));
-        assertEq(f.miembros().length, 5);
+        assertEq(f.members().length, 5);
     }
 
-    function test_emiteFondoCreado() public {
-        vm.expectEmit(false, true, false, true, address(fabrica));
-        emit FabricaFondos.FondoCreado(address(0), miembros[0], "Futbol de los jueves");
-        vm.prank(miembros[0]);
-        fabrica.crearFondo(_params());
+    function test_emitsFundCreated() public {
+        vm.expectEmit(false, true, false, true, address(factory));
+        emit FundFactory.FundCreated(address(0), members[0], "Thursday football");
+        vm.prank(members[0]);
+        factory.createFund(_params());
     }
 
-    function test_parametrosInvalidosRevierten() public {
-        Fondo.Parametros memory p = _params();
-        p.votosNecesarios = 9;
-        vm.expectRevert(Fondo.ParametrosInvalidos.selector);
-        fabrica.crearFondo(p);
+    function test_invalidParamsRevert() public {
+        Fund.Params memory p = _params();
+        p.votesRequired = 9;
+        vm.expectRevert(Fund.InvalidParams.selector);
+        factory.createFund(p);
     }
 
-    function test_poolDeOtrosTokensRevierte() public {
-        MockERC20 otro = new MockERC20("OTRO", "OTRO", 18);
-        MockPool malo = new MockPool(address(otro), address(usdt), 0);
-        vm.expectRevert(FabricaFondos.PoolInvalido.selector);
-        new FabricaFondos(IERC20(address(wars)), IERC20(address(usdt)), IUniswapV3Pool(address(malo)));
+    function test_poolOfOtherTokensReverts() public {
+        MockERC20 other = new MockERC20("OTHER", "OTHER", 18);
+        MockPool bad = new MockPool(address(other), address(usdt), 0);
+        vm.expectRevert(FundFactory.InvalidPool.selector);
+        new FundFactory(IERC20(address(wars)), IERC20(address(usdt)), IUniswapV3Pool(address(bad)));
     }
 }

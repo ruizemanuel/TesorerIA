@@ -4,163 +4,163 @@ pragma solidity 0.8.37;
 import {CommonBase} from "forge-std/Base.sol";
 import {StdCheats} from "forge-std/StdCheats.sol";
 import {StdUtils} from "forge-std/StdUtils.sol";
-import {BaseFondoTest} from "./Base.t.sol";
-import {Fondo} from "../src/Fund.sol";
+import {BaseFundTest} from "./Base.t.sol";
+import {Fund} from "../src/Fund.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
 
-/// Hace, en orden al azar, aportes en wARS y acciones de gobierno completas (proponer, votar hasta N y ejecutar).
-/// Cada llamada es una acción coherente: si no sería válida en el estado actual, la saltea en vez de revertir.
-contract HandlerFondo is CommonBase, StdCheats, StdUtils {
-    Fondo public immutable fondo;
+/// Runs, in random order, wARS contributions and complete governance actions (propose, vote up to N and execute).
+/// Each call is one coherent action: if it wouldn't be valid in the current state, it skips it instead of reverting.
+contract FundHandler is CommonBase, StdCheats, StdUtils {
+    Fund public immutable fund;
     MockERC20 public immutable wars;
-    /// Todas las direcciones que el handler puede tocar: los miembros iniciales y los candidatos a entrar.
-    address[] internal _actores;
+    /// Every address the handler can touch: the initial members and the candidates to join.
+    address[] internal _actors;
 
-    constructor(Fondo fondo_, MockERC20 wars_, address[] memory actores_) {
-        fondo = fondo_;
+    constructor(Fund fund_, MockERC20 wars_, address[] memory actors_) {
+        fund = fund_;
         wars = wars_;
-        _actores = actores_;
+        _actors = actors_;
     }
 
-    function actores() external view returns (address[] memory) {
-        return _actores;
+    function actors() external view returns (address[] memory) {
+        return _actors;
     }
 
-    function aportar(uint256 semilla, uint256 monto) external {
-        uint256 saldo = fondo.saldoEnWars();
-        uint256 tope = fondo.topeSaldoTotal();
-        if (saldo >= tope) return;
-        monto = bound(monto, 1, tope - saldo);
-        address[] memory lista = fondo.miembros();
-        address m = lista[semilla % lista.length];
-        wars.mint(m, monto);
+    function contribute(uint256 seed, uint256 amount) external {
+        uint256 balance = fund.balanceInWars();
+        uint256 cap = fund.balanceCap();
+        if (balance >= cap) return;
+        amount = bound(amount, 1, cap - balance);
+        address[] memory list = fund.members();
+        address m = list[seed % list.length];
+        wars.mint(m, amount);
         vm.startPrank(m);
-        wars.approve(address(fondo), monto);
-        fondo.aportarWars(monto);
+        wars.approve(address(fund), amount);
+        fund.contributeWars(amount);
         vm.stopPrank();
     }
 
-    function agregarMiembro(uint256 semilla) external {
-        if (fondo.miembros().length >= fondo.MAX_MIEMBROS()) return;
-        (address x, bool hay) = _noMiembro(semilla);
-        if (!hay) return;
-        _aprobarYEjecutar(Fondo.Accion.AgregarMiembro, x, address(0), 0, semilla);
+    function addMember(uint256 seed) external {
+        if (fund.members().length >= fund.MAX_MEMBERS()) return;
+        (address x, bool found) = _nonMember(seed);
+        if (!found) return;
+        _approveAndExecute(Fund.Action.AddMember, x, address(0), 0, seed);
     }
 
-    function sacarMiembro(uint256 semilla) external {
-        address[] memory lista = fondo.miembros();
-        if (lista.length - 1 < fondo.votosNecesarios()) return;
-        _aprobarYEjecutar(Fondo.Accion.SacarMiembro, lista[semilla % lista.length], address(0), 0, semilla);
+    function removeMember(uint256 seed) external {
+        address[] memory list = fund.members();
+        if (list.length - 1 < fund.votesRequired()) return;
+        _approveAndExecute(Fund.Action.RemoveMember, list[seed % list.length], address(0), 0, seed);
     }
 
-    function cambiarMiembro(uint256 semillaViejo, uint256 semillaNuevo) external {
-        (address nuevo, bool hay) = _noMiembro(semillaNuevo);
-        if (!hay) return;
-        address[] memory lista = fondo.miembros();
-        _aprobarYEjecutar(Fondo.Accion.CambiarMiembro, lista[semillaViejo % lista.length], nuevo, 0, semillaViejo);
+    function replaceMember(uint256 oldSeed, uint256 newSeed) external {
+        (address newMember, bool found) = _nonMember(newSeed);
+        if (!found) return;
+        address[] memory list = fund.members();
+        _approveAndExecute(Fund.Action.ReplaceMember, list[oldSeed % list.length], newMember, 0, oldSeed);
     }
 
-    function cambiarVotos(uint256 votos, uint256 semilla) external {
-        votos = bound(votos, fondo.MIN_VOTOS(), fondo.miembros().length);
-        _aprobarYEjecutar(Fondo.Accion.CambiarVotos, address(0), address(0), votos, semilla);
+    function setVotesRequired(uint256 votes, uint256 seed) external {
+        votes = bound(votes, fund.MIN_VOTES(), fund.members().length);
+        _approveAndExecute(Fund.Action.SetVotesRequired, address(0), address(0), votes, seed);
     }
 
-    /// Propone un miembro al azar (y con eso vota), votan los siguientes hasta llegar a N y ejecuta cualquiera.
-    function _aprobarYEjecutar(Fondo.Accion accion, address a, address b, uint256 monto, uint256 semilla) internal {
-        address[] memory lista = fondo.miembros();
-        uint256 n = lista.length;
-        uint256 primero = uint256(keccak256(abi.encode(semilla, accion))) % n;
-        vm.prank(lista[primero]);
-        uint256 id = fondo.proponer(accion, a, b, monto, "invariante");
-        for (uint256 k = 1; k < n && fondo.votosDe(id) < fondo.votosNecesarios(); ++k) {
-            vm.prank(lista[(primero + k) % n]);
-            fondo.votar(id);
+    /// A random member proposes (and so votes), the next ones vote until N is reached, and anyone executes.
+    function _approveAndExecute(Fund.Action action, address a, address b, uint256 amount, uint256 seed) internal {
+        address[] memory list = fund.members();
+        uint256 n = list.length;
+        uint256 first = uint256(keccak256(abi.encode(seed, action))) % n;
+        vm.prank(list[first]);
+        uint256 id = fund.propose(action, a, b, amount, "invariant");
+        for (uint256 k = 1; k < n && fund.voteCount(id) < fund.votesRequired(); ++k) {
+            vm.prank(list[(first + k) % n]);
+            fund.vote(id);
         }
-        fondo.ejecutar(id);
+        fund.execute(id);
     }
 
-    /// El primer actor que no es miembro, empezando por uno al azar.
-    function _noMiembro(uint256 semilla) internal view returns (address, bool) {
-        uint256 n = _actores.length;
-        uint256 desde = semilla % n;
+    /// The first actor who is not a member, starting from a random one.
+    function _nonMember(uint256 seed) internal view returns (address, bool) {
+        uint256 n = _actors.length;
+        uint256 start = seed % n;
         for (uint256 k; k < n; ++k) {
-            address x = _actores[(desde + k) % n];
-            if (!fondo.esMiembro(x)) return (x, true);
+            address x = _actors[(start + k) % n];
+            if (!fund.isMember(x)) return (x, true);
         }
         return (address(0), false);
     }
 }
 
-/// Con cambios de miembros, de N y aportes en cualquier orden, la lista de miembros (la que cuenta los votos y
-/// reparte el cierre) coincide con `esMiembro`, y lo aportado cuadra con `totalAportado`.
-contract FondoInvariantesTest is BaseFondoTest {
-    HandlerFondo internal handler;
+/// With member changes, N changes and contributions in any order, the member list (the one that counts votes and
+/// splits the close) matches `isMember`, and the contributions add up to `totalContributed`.
+contract FundInvariantsTest is BaseFundTest {
+    FundHandler internal handler;
 
     function setUp() public override {
         super.setUp();
-        address[] memory actores = new address[](12);
-        for (uint256 i; i < 5; ++i) actores[i] = miembros[i];
-        for (uint256 i = 5; i < 12; ++i) actores[i] = makeAddr(string.concat("candidato", vm.toString(i)));
-        handler = new HandlerFondo(fondo, wars, actores);
+        address[] memory actors = new address[](12);
+        for (uint256 i; i < 5; ++i) actors[i] = members[i];
+        for (uint256 i = 5; i < 12; ++i) actors[i] = makeAddr(string.concat("candidate", vm.toString(i)));
+        handler = new FundHandler(fund, wars, actors);
 
-        bytes4[] memory acciones = new bytes4[](5);
-        acciones[0] = HandlerFondo.aportar.selector;
-        acciones[1] = HandlerFondo.agregarMiembro.selector;
-        acciones[2] = HandlerFondo.sacarMiembro.selector;
-        acciones[3] = HandlerFondo.cambiarMiembro.selector;
-        acciones[4] = HandlerFondo.cambiarVotos.selector;
+        bytes4[] memory selectors = new bytes4[](5);
+        selectors[0] = FundHandler.contribute.selector;
+        selectors[1] = FundHandler.addMember.selector;
+        selectors[2] = FundHandler.removeMember.selector;
+        selectors[3] = FundHandler.replaceMember.selector;
+        selectors[4] = FundHandler.setVotesRequired.selector;
         targetContract(address(handler));
-        targetSelector(FuzzSelector({addr: address(handler), selectors: acciones}));
+        targetSelector(FuzzSelector({addr: address(handler), selectors: selectors}));
     }
 
-    function _esta(address[] memory lista, address x) internal pure returns (bool) {
-        for (uint256 i; i < lista.length; ++i) {
-            if (lista[i] == x) return true;
+    function _contains(address[] memory list, address x) internal pure returns (bool) {
+        for (uint256 i; i < list.length; ++i) {
+            if (list[i] == x) return true;
         }
         return false;
     }
 
-    function invariant_votosYMiembrosEnRango() public view {
-        uint256 n = fondo.miembros().length;
-        uint256 votos = fondo.votosNecesarios();
-        assertGe(votos, 2);
-        assertLe(votos, n);
+    function invariant_votesAndMembersInRange() public view {
+        uint256 n = fund.members().length;
+        uint256 votes = fund.votesRequired();
+        assertGe(votes, 2);
+        assertLe(votes, n);
         assertLe(n, 10);
     }
 
-    function invariant_esMiembroSiYSoloSiEstaEnLaLista() public view {
-        address[] memory lista = fondo.miembros();
-        address[] memory actores = handler.actores();
-        for (uint256 i; i < actores.length; ++i) {
-            assertEq(fondo.esMiembro(actores[i]), _esta(lista, actores[i]));
+    function invariant_isMemberIfAndOnlyIfInTheList() public view {
+        address[] memory list = fund.members();
+        address[] memory actors = handler.actors();
+        for (uint256 i; i < actors.length; ++i) {
+            assertEq(fund.isMember(actors[i]), _contains(list, actors[i]));
         }
-        for (uint256 i; i < lista.length; ++i) {
-            assertTrue(fondo.esMiembro(lista[i]));
+        for (uint256 i; i < list.length; ++i) {
+            assertTrue(fund.isMember(list[i]));
         }
     }
 
-    function invariant_sinRepetidosEnLaLista() public view {
-        address[] memory lista = fondo.miembros();
-        for (uint256 i; i < lista.length; ++i) {
-            for (uint256 j = i + 1; j < lista.length; ++j) {
-                assertNotEq(lista[i], lista[j]);
+    function invariant_noDuplicatesInTheList() public view {
+        address[] memory list = fund.members();
+        for (uint256 i; i < list.length; ++i) {
+            for (uint256 j = i + 1; j < list.length; ++j) {
+                assertNotEq(list[i], list[j]);
             }
         }
     }
 
-    function invariant_loAportadoPorLosMiembrosSumaElTotal() public view {
-        address[] memory lista = fondo.miembros();
-        uint256 suma;
-        for (uint256 i; i < lista.length; ++i) {
-            suma += fondo.aportado(lista[i]);
+    function invariant_memberContributionsAddUpToTheTotal() public view {
+        address[] memory list = fund.members();
+        uint256 sum;
+        for (uint256 i; i < list.length; ++i) {
+            sum += fund.contributed(list[i]);
         }
-        assertEq(suma, fondo.totalAportado());
+        assertEq(sum, fund.totalContributed());
     }
 
-    function invariant_quienNoEsMiembroNoTieneAportado() public view {
-        address[] memory actores = handler.actores();
-        for (uint256 i; i < actores.length; ++i) {
-            if (!fondo.esMiembro(actores[i])) assertEq(fondo.aportado(actores[i]), 0);
+    function invariant_nonMembersHaveNoContribution() public view {
+        address[] memory actors = handler.actors();
+        for (uint256 i; i < actors.length; ++i) {
+            if (!fund.isMember(actors[i])) assertEq(fund.contributed(actors[i]), 0);
         }
     }
 }

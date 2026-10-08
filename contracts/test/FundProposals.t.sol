@@ -1,88 +1,88 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 pragma solidity 0.8.37;
 
-import {BaseFondoTest} from "./Base.t.sol";
-import {Fondo} from "../src/Fund.sol";
+import {BaseFundTest} from "./Base.t.sol";
+import {Fund} from "../src/Fund.sol";
 
-contract FondoPropuestasTest is BaseFondoTest {
+contract FundProposalsTest is BaseFundTest {
     function setUp() public override {
         super.setUp();
-        _aportarWars(miembros[0], 100_000e18);
+        _contributeWars(members[0], 100_000e18);
     }
 
-    function test_elProponenteMiembroVotaSolo() public {
-        uint256 id = _proponer(miembros[0], Fondo.Accion.Pagar, miembros[1], 20_000e18);
+    function test_memberProposerVotesAutomatically() public {
+        uint256 id = _propose(members[0], Fund.Action.Pay, members[1], 20_000e18);
         assertEq(id, 0);
-        assertEq(fondo.cantidadPropuestas(), 1);
-        assertTrue(fondo.votoDe(id, miembros[0]));
-        assertEq(fondo.votosDe(id), 1);
+        assertEq(fund.proposalCount(), 1);
+        assertTrue(fund.hasVoted(id, members[0]));
+        assertEq(fund.voteCount(id), 1);
     }
 
-    function test_elAgentePuedeProponerPeroNoVota() public {
-        uint256 id = _proponer(agente, Fondo.Accion.Pagar, miembros[1], 20_000e18);
-        assertEq(fondo.votosDe(id), 0);
-        vm.prank(agente);
-        vm.expectRevert(Fondo.NoEsMiembro.selector);
-        fondo.votar(id);
+    function test_agentCanProposeButNotVote() public {
+        uint256 id = _propose(agent, Fund.Action.Pay, members[1], 20_000e18);
+        assertEq(fund.voteCount(id), 0);
+        vm.prank(agent);
+        vm.expectRevert(Fund.NotMember.selector);
+        fund.vote(id);
     }
 
-    function test_unAjenoNoPuedeProponer() public {
-        vm.prank(ajeno);
-        vm.expectRevert(Fondo.SoloMiembroOAgente.selector);
-        fondo.proponer(Fondo.Accion.Pagar, miembros[1], address(0), 1e18, "x");
+    function test_outsiderCannotPropose() public {
+        vm.prank(outsider);
+        vm.expectRevert(Fund.OnlyMemberOrAgent.selector);
+        fund.propose(Fund.Action.Pay, members[1], address(0), 1e18, "x");
     }
 
-    function test_pagoConVotosSuficientesSeEjecuta() public {
-        uint256 id = _proponer(miembros[0], Fondo.Accion.Pagar, miembros[1], 20_000e18);
-        _aprobar(id, 1, 3); // miembros 1 y 2: con el proponente son 3
-        vm.prank(ajeno);
-        fondo.ejecutar(id);
-        assertEq(wars.balanceOf(miembros[1]), 20_000e18);
-        assertTrue(fondo.propuesta(id).ejecutada);
+    function test_paymentWithEnoughVotesIsExecuted() public {
+        uint256 id = _propose(members[0], Fund.Action.Pay, members[1], 20_000e18);
+        _castVotes(id, 1, 3); // members 1 and 2: with the proposer that makes 3
+        vm.prank(outsider);
+        fund.execute(id);
+        assertEq(wars.balanceOf(members[1]), 20_000e18);
+        assertTrue(fund.getProposal(id).executed);
     }
 
-    function test_sinVotosSuficientesNoSeEjecuta() public {
-        uint256 id = _proponer(miembros[0], Fondo.Accion.Pagar, miembros[1], 20_000e18);
-        _aprobar(id, 1, 2);
-        vm.expectRevert(Fondo.VotosInsuficientes.selector);
-        fondo.ejecutar(id);
+    function test_withoutEnoughVotesItIsNotExecuted() public {
+        uint256 id = _propose(members[0], Fund.Action.Pay, members[1], 20_000e18);
+        _castVotes(id, 1, 2);
+        vm.expectRevert(Fund.NotEnoughVotes.selector);
+        fund.execute(id);
     }
 
-    function test_noSePuedeVotarDosVeces() public {
-        uint256 id = _proponer(miembros[0], Fondo.Accion.Pagar, miembros[1], 1e18);
-        vm.prank(miembros[0]);
-        vm.expectRevert(Fondo.YaVoto.selector);
-        fondo.votar(id);
+    function test_cannotVoteTwice() public {
+        uint256 id = _propose(members[0], Fund.Action.Pay, members[1], 1e18);
+        vm.prank(members[0]);
+        vm.expectRevert(Fund.AlreadyVoted.selector);
+        fund.vote(id);
     }
 
-    function test_propuestaVencidaNoSeVotaNiSeEjecuta() public {
-        uint256 id = _proponer(miembros[0], Fondo.Accion.Pagar, miembros[1], 1e18);
-        _aprobar(id, 1, 2);
+    function test_expiredProposalCannotBeVotedOrExecuted() public {
+        uint256 id = _propose(members[0], Fund.Action.Pay, members[1], 1e18);
+        _castVotes(id, 1, 2);
         vm.warp(block.timestamp + 7 days + 1);
-        vm.prank(miembros[2]);
-        vm.expectRevert(Fondo.PropuestaVencida.selector);
-        fondo.votar(id);
-        vm.expectRevert(Fondo.PropuestaVencida.selector);
-        fondo.ejecutar(id);
+        vm.prank(members[2]);
+        vm.expectRevert(Fund.ProposalExpired.selector);
+        fund.vote(id);
+        vm.expectRevert(Fund.ProposalExpired.selector);
+        fund.execute(id);
     }
 
-    function test_noSeEjecutaDosVeces() public {
-        uint256 id = _proponer(miembros[0], Fondo.Accion.Pagar, miembros[1], 1e18);
-        _aprobar(id, 1, 3);
-        fondo.ejecutar(id);
-        vm.expectRevert(Fondo.PropuestaYaEjecutada.selector);
-        fondo.ejecutar(id);
+    function test_cannotExecuteTwice() public {
+        uint256 id = _propose(members[0], Fund.Action.Pay, members[1], 1e18);
+        _castVotes(id, 1, 3);
+        fund.execute(id);
+        vm.expectRevert(Fund.ProposalAlreadyExecuted.selector);
+        fund.execute(id);
     }
 
-    function test_pagoAUnNoMiembroRevierteAlEjecutar() public {
-        uint256 id = _proponer(miembros[0], Fondo.Accion.Pagar, ajeno, 1e18);
-        _aprobar(id, 1, 3);
-        vm.expectRevert(Fondo.DestinoNoMiembro.selector);
-        fondo.ejecutar(id);
+    function test_paymentToANonMemberRevertsOnExecute() public {
+        uint256 id = _propose(members[0], Fund.Action.Pay, outsider, 1e18);
+        _castVotes(id, 1, 3);
+        vm.expectRevert(Fund.RecipientNotMember.selector);
+        fund.execute(id);
     }
 
-    function test_propuestaInexistente() public {
-        vm.expectRevert(Fondo.PropuestaInexistente.selector);
-        fondo.ejecutar(99);
+    function test_proposalNotFound() public {
+        vm.expectRevert(Fund.ProposalNotFound.selector);
+        fund.execute(99);
     }
 }

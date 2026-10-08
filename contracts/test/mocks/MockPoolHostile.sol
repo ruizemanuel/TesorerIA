@@ -5,45 +5,45 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IUniswapV3SwapCallback} from "@uniswap/v3-core/contracts/interfaces/callback/IUniswapV3SwapCallback.sol";
 import {MockPool} from "./MockPool.sol";
 
-/// Tercero que, en medio de una conversión, llama la callback del fondo para que le pague al pool de más.
-contract Atacante {
-    /// Si es true, se guarda el revert de la callback en vez de propagarlo, y la conversión sigue.
-    bool public tragarError;
-    bytes public ultimoError;
+/// Third party that, in the middle of a conversion, calls the fund's callback so that it overpays the pool.
+contract Attacker {
+    /// If true, the callback's revert is stored instead of bubbled up, and the conversion goes on.
+    bool public swallowError;
+    bytes public lastError;
 
-    function setTragarError(bool t) external {
-        tragarError = t;
+    function setSwallowError(bool t) external {
+        swallowError = t;
     }
 
-    function atacar(address fondo, int256 amount0Delta, int256 amount1Delta) external {
-        if (!tragarError) {
-            IUniswapV3SwapCallback(fondo).uniswapV3SwapCallback(amount0Delta, amount1Delta, "");
+    function attack(address fund, int256 amount0Delta, int256 amount1Delta) external {
+        if (!swallowError) {
+            IUniswapV3SwapCallback(fund).uniswapV3SwapCallback(amount0Delta, amount1Delta, "");
             return;
         }
-        try IUniswapV3SwapCallback(fondo).uniswapV3SwapCallback(amount0Delta, amount1Delta, "") {}
+        try IUniswapV3SwapCallback(fund).uniswapV3SwapCallback(amount0Delta, amount1Delta, "") {}
         catch (bytes memory e) {
-            ultimoError = e;
+            lastError = e;
         }
     }
 }
 
-/// Pool que, durante el swap y antes de cobrar, deja correr al `atacante`: hace las veces de cualquier código ajeno
-/// que corra mientras el fondo convierte (por ejemplo, un hook que un token actualizable sume en una transferencia).
-contract MockPoolHostil is MockPool {
-    Atacante public immutable atacante = new Atacante();
+/// Pool that, during the swap and before collecting, lets the `attacker` run: it stands in for any outside code
+/// that runs while the fund converts (for example, a hook that an upgradeable token adds to transfers).
+contract MockPoolHostile is MockPool {
+    Attacker public immutable attacker = new Attacker();
 
     constructor(address tokenA, address tokenB, int24 tick_) MockPool(tokenA, tokenB, tick_) {}
 
-    function swap(address recipient, bool zeroForOne, int256 amountSpecified, uint160 limite, bytes calldata data)
+    function swap(address recipient, bool zeroForOne, int256 amountSpecified, uint160 limit, bytes calldata data)
         public
         override
         returns (int256, int256)
     {
-        // Pide todo el USDT del fondo menos lo que cuesta el swap, así la conversión igual podría cerrar.
+        // Asks for all of the fund's USDT minus what the swap costs, so the conversion could still go through.
         address tokenIn = zeroForOne ? token0 : token1;
-        int256 resto = int256(IERC20(tokenIn).balanceOf(msg.sender)) - amountSpecified;
-        (int256 d0, int256 d1) = zeroForOne ? (resto, int256(0)) : (int256(0), resto);
-        atacante.atacar(msg.sender, d0, d1);
-        return super.swap(recipient, zeroForOne, amountSpecified, limite, data);
+        int256 rest = int256(IERC20(tokenIn).balanceOf(msg.sender)) - amountSpecified;
+        (int256 d0, int256 d1) = zeroForOne ? (rest, int256(0)) : (int256(0), rest);
+        attacker.attack(msg.sender, d0, d1);
+        return super.swap(recipient, zeroForOne, amountSpecified, limit, data);
     }
 }

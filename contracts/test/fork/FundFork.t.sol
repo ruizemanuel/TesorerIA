@@ -4,83 +4,83 @@ pragma solidity 0.8.37;
 import {Test} from "forge-std/Test.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IUniswapV3Pool} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
-import {Fondo} from "../../src/Fund.sol";
-import {FabricaFondos} from "../../src/FundFactory.sol";
+import {Fund} from "../../src/Fund.sol";
+import {FundFactory} from "../../src/FundFactory.sol";
 
-/// Corre contra un fork local de Celo mainnet (lo crea `setUp`): `forge test --match-path "test/fork/*" -vv`.
-contract FondoForkTest is Test {
+/// Runs against a local fork of Celo mainnet (created by `setUp`): `forge test --match-path "test/fork/*" -vv`.
+contract FundForkTest is Test {
     IERC20 constant WARS = IERC20(0x0DC4F92879B7670e5f4e4e6e3c801D229129D90D);
     IERC20 constant USDT = IERC20(0x48065fbBE25f71C9282ddf5e1cD6D6A887483D5e);
     IUniswapV3Pool constant POOL = IUniswapV3Pool(0x5D8ef8B839be522b9E3d60a51EDB5837CD0b2391);
 
-    Fondo fondo;
-    address agente = makeAddr("agente");
-    address[] miembros;
+    Fund fund;
+    address agent = makeAddr("agent");
+    address[] members;
 
     function setUp() public {
         vm.createSelectFork(vm.rpcUrl("celo"));
-        for (uint256 i; i < 3; ++i) miembros.push(makeAddr(string.concat("miembro", vm.toString(i))));
-        FabricaFondos fabrica = new FabricaFondos(WARS, USDT, POOL);
-        Fondo.Parametros memory p;
-        p.nombre = "Fork";
-        p.miembros = miembros;
-        p.votosNecesarios = 2;
-        p.agente = agente;
-        p.gastoAcordado = "Cancha";
-        p.topeSemanal = 60_000e18;
-        p.topeSaldoTotal = 2_000_000e18;
-        fondo = Fondo(fabrica.crearFondo(p));
+        for (uint256 i; i < 3; ++i) members.push(makeAddr(string.concat("member", vm.toString(i))));
+        FundFactory factory = new FundFactory(WARS, USDT, POOL);
+        Fund.Params memory p;
+        p.name = "Fork";
+        p.members = members;
+        p.votesRequired = 2;
+        p.agent = agent;
+        p.agreedExpense = "Pitch";
+        p.weeklyCap = 60_000e18;
+        p.balanceCap = 2_000_000e18;
+        fund = Fund(factory.createFund(p));
     }
 
-    /// El pool tiene USDT y wARS de sobra: se los "presta" a los miembros en el fork.
-    function _dar(IERC20 token, address a, uint256 monto) internal {
+    /// The pool has plenty of USDT and wARS: on the fork, it "lends" them to the members.
+    function _give(IERC20 token, address to, uint256 amount) internal {
         vm.prank(address(POOL));
-        token.transfer(a, monto);
+        token.transfer(to, amount);
     }
 
-    function test_twapDaUnPrecioRazonable() public view {
-        uint256 q = fondo.cotizarUsdtEnWars(1e6);
+    function test_twapGivesAReasonablePrice() public view {
+        uint256 q = fund.quoteUsdtInWars(1e6);
         assertGt(q, 1_000e18);
         assertLt(q, 3_000e18);
     }
 
-    function test_aportarUsdtYConvertirContraElPoolReal() public {
-        _dar(USDT, miembros[0], 300e6);
-        vm.startPrank(miembros[0]);
-        USDT.approve(address(fondo), 300e6);
-        fondo.aportarUsdt(300e6);
+    function test_contributeUsdtAndConvertAgainstTheRealPool() public {
+        _give(USDT, members[0], 300e6);
+        vm.startPrank(members[0]);
+        USDT.approve(address(fund), 300e6);
+        fund.contributeUsdt(300e6);
         vm.stopPrank();
-        uint256 acreditado = fondo.aportado(miembros[0]);
-        assertApproxEqRel(acreditado, fondo.cotizarUsdtEnWars(300e6), 0.0001e18);
+        uint256 credited = fund.contributed(members[0]);
+        assertApproxEqRel(credited, fund.quoteUsdtInWars(300e6), 0.0001e18);
 
-        uint256 esperado = fondo.cotizarUsdtEnWars(300e6);
-        vm.prank(agente);
-        uint256 recibido = fondo.convertir(300e6, esperado * 99 / 100);
-        assertApproxEqRel(recibido, esperado, 0.01e18);
-        assertEq(USDT.balanceOf(address(fondo)), 0);
-        assertEq(WARS.balanceOf(address(fondo)), recibido);
+        uint256 expected = fund.quoteUsdtInWars(300e6);
+        vm.prank(agent);
+        uint256 received = fund.convert(300e6, expected * 99 / 100);
+        assertApproxEqRel(received, expected, 0.01e18);
+        assertEq(USDT.balanceOf(address(fund)), 0);
+        assertEq(WARS.balanceOf(address(fund)), received);
     }
 
-    function test_conversionChicaDe5Usdt() public {
-        _dar(USDT, miembros[1], 5e6);
-        vm.startPrank(miembros[1]);
-        USDT.approve(address(fondo), 5e6);
-        fondo.aportarUsdt(5e6);
+    function test_smallConversionOf5Usdt() public {
+        _give(USDT, members[1], 5e6);
+        vm.startPrank(members[1]);
+        USDT.approve(address(fund), 5e6);
+        fund.contributeUsdt(5e6);
         vm.stopPrank();
-        uint256 esperado = fondo.cotizarUsdtEnWars(5e6);
-        vm.prank(agente);
-        uint256 recibido = fondo.convertir(5e6, esperado * 99 / 100);
-        assertApproxEqRel(recibido, esperado, 0.01e18);
+        uint256 expected = fund.quoteUsdtInWars(5e6);
+        vm.prank(agent);
+        uint256 received = fund.convert(5e6, expected * 99 / 100);
+        assertApproxEqRel(received, expected, 0.01e18);
     }
 
-    function test_aportarWarsYReintegrar() public {
-        _dar(WARS, miembros[2], 50_000e18);
-        vm.startPrank(miembros[2]);
-        WARS.approve(address(fondo), 50_000e18);
-        fondo.aportarWars(50_000e18);
+    function test_contributeWarsAndReimburse() public {
+        _give(WARS, members[2], 50_000e18);
+        vm.startPrank(members[2]);
+        WARS.approve(address(fund), 50_000e18);
+        fund.contributeWars(50_000e18);
         vm.stopPrank();
-        vm.prank(agente);
-        fondo.reintegrarGastoAcordado(miembros[0], 45_000e18, keccak256("cancha"));
-        assertEq(WARS.balanceOf(miembros[0]), 45_000e18);
+        vm.prank(agent);
+        fund.reimburseAgreedExpense(members[0], 45_000e18, keccak256("pitch"));
+        assertEq(WARS.balanceOf(members[0]), 45_000e18);
     }
 }

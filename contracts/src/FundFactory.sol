@@ -3,37 +3,37 @@ pragma solidity 0.8.37;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IUniswapV3Pool} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
-import {Fondo} from "./Fund.sol";
+import {Fund} from "./Fund.sol";
 
-/// @title Fábrica de fondos de TesorerIA
-/// @notice Crea un `Fondo` por grupo, siempre con el mismo wARS, USDT y pool.
-contract FabricaFondos {
-    error PoolInvalido();
+/// @title TesorerIA fund factory
+/// @notice Creates one `Fund` per group, always with the same wARS, USDT and pool.
+contract FundFactory {
+    error InvalidPool();
 
-    event FondoCreado(address indexed fondo, address indexed creador, string nombre);
+    event FundCreated(address indexed fund, address indexed creator, string name);
 
     IERC20 public immutable wars;
     IERC20 public immutable usdt;
     IUniswapV3Pool public immutable pool;
-    address[] public fondos;
+    address[] public funds;
 
     constructor(IERC20 wars_, IERC20 usdt_, IUniswapV3Pool pool_) {
         address t0 = pool_.token0();
         address t1 = pool_.token1();
         bool ok = (t0 == address(wars_) && t1 == address(usdt_)) || (t0 == address(usdt_) && t1 == address(wars_));
-        if (!ok) revert PoolInvalido();
+        if (!ok) revert InvalidPool();
         wars = wars_;
         usdt = usdt_;
         pool = pool_;
     }
 
-    function crearFondo(Fondo.Parametros calldata p) external returns (address fondo) {
-        fondo = address(new Fondo(wars, usdt, pool, p));
-        fondos.push(fondo);
-        emit FondoCreado(fondo, msg.sender, p.nombre);
+    function createFund(Fund.Params calldata p) external returns (address fund) {
+        fund = address(new Fund(wars, usdt, pool, p));
+        funds.push(fund);
+        emit FundCreated(fund, msg.sender, p.name);
     }
 
-    function cantidadFondos() external view returns (uint256) {
-        return fondos.length;
+    function fundCount() external view returns (uint256) {
+        return funds.length;
     }
 }
