@@ -24,3 +24,7 @@ keystore/
 .DS_Store
 .vercel
 *.log
+
+# Local coding-agent tooling
+.claude/
+.agents/
