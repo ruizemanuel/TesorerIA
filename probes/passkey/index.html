@@ -11,7 +11,7 @@
       code, output { font-family: ui-monospace, monospace; word-break: break-all; }
       .warning { color: #a15c00; font-weight: 600; }
       #error { color: #b00020; white-space: pre-wrap; }
-      input { width: 100%; box-sizing: border-box; margin-bottom: 0.5rem; }
+      input, select { width: 100%; box-sizing: border-box; margin-bottom: 0.5rem; }
     </style>
   </head>
   <body>
@@ -43,10 +43,16 @@
     </section>
 
     <section>
-      <h2>4. Return USDT</h2>
+      <h2>4. Return tokens</h2>
+      <label>Token
+        <select id="token">
+          <option value="usdt" selected>USDT</option>
+          <option value="wars">wARS</option>
+        </select>
+      </label>
       <label>Destination address <input id="destination" placeholder="0x…" /></label>
-      <label>Amount (USDT) <input id="amount" placeholder="1.5" inputmode="decimal" /></label>
-      <button id="return" disabled>Return USDT</button>
+      <label>Amount <input id="amount" placeholder="1.5" inputmode="decimal" /></label>
+      <button id="return" disabled>Return tokens</button>
     </section>
 
     <section>

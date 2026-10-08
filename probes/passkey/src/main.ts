@@ -23,6 +23,11 @@ import { celo } from "viem/chains";
 
 const USDT: Address = "0x48065fbBE25f71C9282ddf5e1cD6D6A887483D5e"; // 6 decimals
 const WARS: Address = "0x0DC4F92879B7670e5f4e4e6e3c801D229129D90D"; // 18 decimals
+// Tokens the "Return tokens" section can send; the keys are the <select> option values.
+const TOKENS = {
+  usdt: { address: USDT, decimals: 6 },
+  wars: { address: WARS, decimals: 18 },
+} as const;
 const STORAGE_KEY = "tesoreria-probe-credential";
 
 type StoredCredential = { id: string; publicKey: Hex };
@@ -97,8 +102,8 @@ async function refresh() {
   setText("wars", formatUnits(wars, 18));
 }
 
-function usdtTransfer(to: Address, amount: bigint): Call {
-  return { to: USDT, data: encodeFunctionData({ abi: erc20Abi, functionName: "transfer", args: [to, amount] }) };
+function tokenTransfer(token: Address, to: Address, amount: bigint): Call {
+  return { to: token, data: encodeFunctionData({ abi: erc20Abi, functionName: "transfer", args: [to, amount] }) };
 }
 
 async function checkAttribution() {
@@ -151,16 +156,17 @@ onClick("check-again", checkAttribution);
 
 onClick("send-test", async () => {
   const self = requireAccount().address;
-  await send([usdtTransfer(self, 1n), usdtTransfer(self, 1n)]);
+  await send([tokenTransfer(USDT, self, 1n), tokenTransfer(USDT, self, 1n)]);
 });
 
 onClick("return", async () => {
+  const token = TOKENS[element<HTMLSelectElement>("token").value as keyof typeof TOKENS];
   const destination = element<HTMLInputElement>("destination").value.trim();
   // Accepts all-lowercase addresses; rejects mixed case with a wrong checksum (likely a typo).
   if (!isAddress(destination)) throw new Error("Destination is not a valid address.");
-  const amount = parseUnits(element<HTMLInputElement>("amount").value.trim(), 6);
+  const amount = parseUnits(element<HTMLInputElement>("amount").value.trim(), token.decimals);
   if (amount <= 0n) throw new Error("Amount must be greater than zero.");
-  await send([usdtTransfer(destination, amount)]);
+  await send([tokenTransfer(token.address, destination, amount)]);
 });
 
 const saved = loadCredential();
