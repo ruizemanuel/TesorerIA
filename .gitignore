@@ -29,3 +29,4 @@ keystore/
 .claude/
 .agents/
 .superpowers/
+.playwright-mcp/
