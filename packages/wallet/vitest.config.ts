@@ -10,6 +10,16 @@ export default defineConfig({
           exclude: [...configDefaults.exclude, "test/fork/**"],
         },
       },
+      {
+        test: {
+          name: "fork",
+          include: ["test/fork/**/*.test.ts"],
+          globalSetup: ["./test/support/anvil.globalSetup.ts"],
+          fileParallelism: false,
+          testTimeout: 120_000,
+          hookTimeout: 120_000,
+        },
+      },
     ],
   },
 });
