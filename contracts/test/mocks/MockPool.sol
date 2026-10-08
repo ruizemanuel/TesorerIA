@@ -5,12 +5,13 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {OracleLibrary} from "@uniswap/v3-periphery/contracts/libraries/OracleLibrary.sol";
 import {IUniswapV3SwapCallback} from "@uniswap/v3-core/contracts/interfaces/callback/IUniswapV3SwapCallback.sol";
 
-/// Pool falso con precio fijo: el TWAP siempre es `tick`, y el swap entrega según ese tick por `calidadBps`.
+/// Pool falso con precio fijo: el TWAP siempre es `tick` (salvo `ajusteAcumulado`, para probar el redondeo), y el swap entrega según ese tick por `calidadBps`.
 contract MockPool {
     address public immutable token0;
     address public immutable token1;
     int24 public tick;
     uint256 public calidadBps = 10_000;
+    int56 public ajusteAcumulado;
 
     constructor(address tokenA, address tokenB, int24 tick_) {
         (token0, token1) = tokenA < tokenB ? (tokenA, tokenB) : (tokenB, tokenA);
@@ -25,6 +26,10 @@ contract MockPool {
         calidadBps = bps;
     }
 
+    function setAjusteAcumulado(int56 a) external {
+        ajusteAcumulado = a;
+    }
+
     function observe(uint32[] calldata secondsAgos)
         external
         view
@@ -33,7 +38,8 @@ contract MockPool {
         tickCumulatives = new int56[](secondsAgos.length);
         secondsPerLiquidityCumulativeX128s = new uint160[](secondsAgos.length);
         for (uint256 i; i < secondsAgos.length; ++i) {
-            tickCumulatives[i] = -int56(tick) * int56(uint56(secondsAgos[i]));
+            tickCumulatives[i] = -int56(tick) * int56(uint56(secondsAgos[i]))
+                - (secondsAgos[i] > 0 ? ajusteAcumulado : int56(0));
         }
     }
 

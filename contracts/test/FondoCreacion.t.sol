@@ -7,6 +7,7 @@ import {MockERC20} from "./mocks/MockERC20.sol";
 import {MockPool} from "./mocks/MockPool.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IUniswapV3Pool} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
+import {OracleLibrary} from "@uniswap/v3-periphery/contracts/libraries/OracleLibrary.sol";
 
 contract FondoCreacionTest is BaseFondoTest {
     function test_guardaLosParametros() public view {
@@ -26,6 +27,31 @@ contract FondoCreacionTest is BaseFondoTest {
     function test_cotizaConElTwap() public view {
         assertApproxEqRel(fondo.cotizarUsdtEnWars(1e6), 1605.88e18, 0.001e18);
         assertEq(fondo.cotizarUsdtEnWars(0), 0);
+    }
+
+    function test_twapRedondeaHaciaAbajoConTickNegativo() public {
+        assertEq(pool.token0(), address(wars));
+
+        // Ajuste -1: delta -630255601, cociente -350142.2, redondeo hacia abajo a -350143.
+        pool.setAjusteAcumulado(-1);
+        assertEq(
+            fondo.cotizarUsdtEnWars(1e6),
+            OracleLibrary.getQuoteAtTick(-350143, 1e6, address(usdt), address(wars))
+        );
+
+        // Ajuste 0: delta -630255600, exacto en -350142.
+        pool.setAjusteAcumulado(0);
+        assertEq(
+            fondo.cotizarUsdtEnWars(1e6),
+            OracleLibrary.getQuoteAtTick(-350142, 1e6, address(usdt), address(wars))
+        );
+
+        // Ajuste +1: delta -630255599, cociente -350141.99, redondeo hacia abajo a -350142.
+        pool.setAjusteAcumulado(1);
+        assertEq(
+            fondo.cotizarUsdtEnWars(1e6),
+            OracleLibrary.getQuoteAtTick(-350142, 1e6, address(usdt), address(wars))
+        );
     }
 
     function test_semanasSonVentanasDeSieteDias() public {

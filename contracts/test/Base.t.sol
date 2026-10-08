@@ -22,9 +22,11 @@ abstract contract BaseFondoTest is Test {
     uint256 internal constant TOPE_TOTAL = 450_000e18;
 
     function setUp() public virtual {
-        wars = new MockERC20("wARS", "wARS", 18);
         usdt = new MockERC20("USDT", "USDT", 6);
-        int24 tick = address(wars) < address(usdt) ? int24(-350142) : int24(350142);
+        wars = new MockERC20("wARS", "wARS", 18);
+        require(address(wars) < address(usdt), "wARS tiene que ser token0, como en Celo");
+        // Orientación real del pool: token0 = wARS, tick -350142.
+        int24 tick = -350142;
         pool = new MockPool(address(wars), address(usdt), tick);
         wars.mint(address(pool), 1_000_000_000e18);
         usdt.mint(address(pool), 1_000_000e6);
