@@ -282,4 +282,83 @@ contract Fondo is ReentrancyGuardTransient, IUniswapV3SwapCallback {
         if (wars.balanceOf(address(this)) < monto) revert SaldoInsuficiente();
         wars.safeTransfer(a, monto);
     }
+
+    // ---------------------------------------------------------------- Propuestas y votos
+    function proponer(Accion accion, address a, address b, uint256 monto, string calldata nota)
+        external
+        abierto
+        returns (uint256 id)
+    {
+        bool miembro = esMiembro[msg.sender];
+        if (!miembro && msg.sender != agente) revert SoloMiembroOAgente();
+        id = _propuestas.length;
+        _propuestas.push(
+            Propuesta({
+                accion: accion,
+                a: a,
+                b: b,
+                monto: monto,
+                vence: uint64(block.timestamp + DURACION_PROPUESTA),
+                ejecutada: false,
+                proponente: msg.sender,
+                nota: nota
+            })
+        );
+        emit PropuestaCreada(id, accion, a, b, monto, msg.sender, nota);
+        if (miembro) _votar(id);
+    }
+
+    function votar(uint256 id) external soloMiembro abierto {
+        _propuestaVigente(id);
+        _votar(id);
+    }
+
+    function ejecutar(uint256 id) external abierto nonReentrant {
+        Propuesta storage p = _propuestaVigente(id);
+        if (votosDe(id) < votosNecesarios) revert VotosInsuficientes();
+        p.ejecutada = true;
+        _aplicar(p);
+        emit PropuestaEjecutada(id);
+    }
+
+    /// @notice Votos a favor, contando solo a los miembros actuales.
+    function votosDe(uint256 id) public view returns (uint256 n) {
+        uint256 cant = _miembros.length;
+        for (uint256 i; i < cant; ++i) {
+            if (votoDe[id][_miembros[i]]) ++n;
+        }
+    }
+
+    function cantidadPropuestas() external view returns (uint256) {
+        return _propuestas.length;
+    }
+
+    function propuesta(uint256 id) external view returns (Propuesta memory) {
+        if (id >= _propuestas.length) revert PropuestaInexistente();
+        return _propuestas[id];
+    }
+
+    function _votar(uint256 id) internal {
+        if (votoDe[id][msg.sender]) revert YaVoto();
+        votoDe[id][msg.sender] = true;
+        emit Voto(id, msg.sender);
+    }
+
+    function _propuestaVigente(uint256 id) internal view returns (Propuesta storage p) {
+        if (id >= _propuestas.length) revert PropuestaInexistente();
+        p = _propuestas[id];
+        if (p.ejecutada) revert PropuestaYaEjecutada();
+        if (block.timestamp > p.vence) revert PropuestaVencida();
+    }
+
+    function _aplicar(Propuesta storage p) internal {
+        if (p.accion == Accion.Pagar) {
+            if (!esMiembro[p.a]) revert DestinoNoMiembro();
+            if (p.monto == 0) revert MontoCero();
+            _pagarWars(p.a, p.monto);
+            emit Pago(p.a, p.monto);
+        } else {
+            revert ParametrosInvalidos(); // la Tarea 8 agrega las demás acciones
+        }
+    }
 }

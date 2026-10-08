@@ -65,4 +65,23 @@ abstract contract BaseFondoTest is Test {
         fondo.aportarUsdt(monto);
         vm.stopPrank();
     }
+
+    function _proponer(address quien, Fondo.Accion acc, address a, address b, uint256 monto)
+        internal
+        returns (uint256 id)
+    {
+        vm.prank(quien);
+        id = fondo.proponer(acc, a, b, monto, "nota");
+    }
+
+    function _proponer(address quien, Fondo.Accion acc, address a, uint256 monto) internal returns (uint256) {
+        return _proponer(quien, acc, a, address(0), monto);
+    }
+
+    function _aprobar(uint256 id, uint256 desde, uint256 hasta) internal {
+        for (uint256 i = desde; i < hasta; ++i) {
+            vm.prank(miembros[i]);
+            fondo.votar(id);
+        }
+    }
 }
