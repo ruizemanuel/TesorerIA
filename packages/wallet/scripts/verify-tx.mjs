@@ -2,7 +2,7 @@
 // for an EntryPoint handleOps bundle, every UserOperation with its codes. Read-only.
 //
 // Usage: node scripts/verify-tx.mjs <txHash> [sender] [--code <code>]
-//   RPC: https://forno.celo.org, or the CELO_RPC_URL environment variable.
+//   RPC: https://forno.celo.org, or the CELO_RPC_URL environment variable (never printed).
 //   With [sender], prints ATTRIBUTED / NOT ATTRIBUTED / UNKNOWN for that sender and
 //   exits 0 / 1 / 2. --code defaults to TesorerIA's celo_fbe4d00a2cb4. Bad arguments exit 64.
 import { verifyTx, verifyUserOps } from "@celo/attribution-tags";
@@ -38,7 +38,8 @@ async function main() {
   const rpcUrl = process.env.CELO_RPC_URL ?? "https://forno.celo.org";
   const client = createPublicClient({ chain: celo, transport: http(rpcUrl) });
   console.log(`Transaction: ${hash}`);
-  console.log(`RPC: ${rpcUrl}`);
+  // A custom endpoint usually carries an API key in its path or query: never print it.
+  console.log(process.env.CELO_RPC_URL === undefined ? `RPC: ${rpcUrl}` : "RPC: custom endpoint from CELO_RPC_URL");
 
   const first = await verifyTx({ client, hash });
   if (first) {
