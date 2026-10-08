@@ -258,4 +258,28 @@ contract Fondo is ReentrancyGuardTransient, IUniswapV3SwapCallback {
         uint256 aPagar = uint256(amount0Delta > 0 ? amount0Delta : amount1Delta);
         usdt.safeTransfer(address(pool), aPagar);
     }
+
+    // ---------------------------------------------------------------- Reintegro (agente)
+    /// @notice Devuelve a un miembro el gasto que el grupo acordó, sin votos, hasta `topeSemanal` por semana.
+    /// @param ref Hash del gasto cargado en la web (lo usa la línea de tiempo para enlazarlo).
+    function reintegrarGastoAcordado(address miembro, uint256 monto, bytes32 ref)
+        external
+        soloAgente
+        abierto
+        nonReentrant
+    {
+        if (!esMiembro[miembro]) revert DestinoNoMiembro();
+        if (monto == 0) revert MontoCero();
+        uint256 semana = semanaActual();
+        uint256 gastado = gastadoEnSemana[semana] + monto;
+        if (gastado > topeSemanal) revert TopeSemanalSuperado();
+        gastadoEnSemana[semana] = gastado;
+        _pagarWars(miembro, monto);
+        emit Reintegro(miembro, monto, ref, semana);
+    }
+
+    function _pagarWars(address a, uint256 monto) internal {
+        if (wars.balanceOf(address(this)) < monto) revert SaldoInsuficiente();
+        wars.safeTransfer(a, monto);
+    }
 }
