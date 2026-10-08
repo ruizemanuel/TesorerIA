@@ -131,7 +131,17 @@ async function send(calls: Call[]) {
 }
 
 onClick("create", async () => {
-  const { id, publicKey } = await createWebAuthnCredential({ name: "TesorerIA probe" });
+  // Re-read the storage: another tab may have created a passkey since this page loaded.
+  if (loadCredential())
+    throw new Error("A passkey is already stored in this browser. Reload the page to use it instead of creating another.");
+  // A random user handle per passkey: ox derives it from the name by default, and an authenticator
+  // replaces the earlier discoverable credential of the same site and user handle, which would
+  // destroy the key behind a funded Safe. The name carries the time to tell passkeys apart.
+  const name = `TesorerIA probe ${new Date().toISOString()}`;
+  const { id, publicKey } = await createWebAuthnCredential({
+    name,
+    user: { id: crypto.getRandomValues(new Uint8Array(16)), name },
+  });
   localStorage.setItem(STORAGE_KEY, JSON.stringify({ id, publicKey } satisfies StoredCredential));
   await connect({ id, publicKey });
 });
