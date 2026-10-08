@@ -2,9 +2,9 @@
 pragma solidity 0.8.37;
 
 import {BaseFondoTest} from "./Base.t.sol";
-import {Fondo} from "../src/Fondo.sol";
+import {Fondo} from "../src/Fund.sol";
 import {MockPool} from "./mocks/MockPool.sol";
-import {Atacante, MockPoolHostil} from "./mocks/MockPoolHostil.sol";
+import {Atacante, MockPoolHostil} from "./mocks/MockPoolHostile.sol";
 
 contract FondoConversionTest is BaseFondoTest {
     function setUp() public override {

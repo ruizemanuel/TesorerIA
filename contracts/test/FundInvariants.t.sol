@@ -5,7 +5,7 @@ import {CommonBase} from "forge-std/Base.sol";
 import {StdCheats} from "forge-std/StdCheats.sol";
 import {StdUtils} from "forge-std/StdUtils.sol";
 import {BaseFondoTest} from "./Base.t.sol";
-import {Fondo} from "../src/Fondo.sol";
+import {Fondo} from "../src/Fund.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
 
 /// Hace, en orden al azar, aportes en wARS y acciones de gobierno completas (proponer, votar hasta N y ejecutar).

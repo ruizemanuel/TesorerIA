@@ -3,7 +3,7 @@ pragma solidity 0.8.37;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IUniswapV3Pool} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
-import {Fondo} from "./Fondo.sol";
+import {Fondo} from "./Fund.sol";
 
 /// @title Fábrica de fondos de TesorerIA
 /// @notice Crea un `Fondo` por grupo, siempre con el mismo wARS, USDT y pool.

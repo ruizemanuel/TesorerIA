@@ -2,8 +2,8 @@
 pragma solidity 0.8.37;
 
 import {BaseFondoTest} from "./Base.t.sol";
-import {Fondo} from "../src/Fondo.sol";
-import {FabricaFondos} from "../src/FabricaFondos.sol";
+import {Fondo} from "../src/Fund.sol";
+import {FabricaFondos} from "../src/FundFactory.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
 import {MockPool} from "./mocks/MockPool.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";

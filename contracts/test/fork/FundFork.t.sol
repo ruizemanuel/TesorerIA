@@ -4,8 +4,8 @@ pragma solidity 0.8.37;
 import {Test} from "forge-std/Test.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IUniswapV3Pool} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
-import {Fondo} from "../../src/Fondo.sol";
-import {FabricaFondos} from "../../src/FabricaFondos.sol";
+import {Fondo} from "../../src/Fund.sol";
+import {FabricaFondos} from "../../src/FundFactory.sol";
 
 /// Corre contra un fork local de Celo mainnet (lo crea `setUp`): `forge test --match-path "test/fork/*" -vv`.
 contract FondoForkTest is Test {

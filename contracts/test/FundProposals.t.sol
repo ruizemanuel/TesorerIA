@@ -2,7 +2,7 @@
 pragma solidity 0.8.37;
 
 import {BaseFondoTest} from "./Base.t.sol";
-import {Fondo} from "../src/Fondo.sol";
+import {Fondo} from "../src/Fund.sol";
 
 contract FondoPropuestasTest is BaseFondoTest {
     function setUp() public override {
