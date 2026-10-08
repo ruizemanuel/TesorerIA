@@ -221,8 +221,41 @@ contract Fondo is ReentrancyGuardTransient, IUniswapV3SwapCallback {
         emit Aporte(miembro, token, recibido, enWars);
     }
 
-    // ---------------------------------------------------------------- Swap (lo completa la Tarea 5)
-    function uniswapV3SwapCallback(int256, int256, bytes calldata) external pure override {
-        revert SoloPool();
+    // ---------------------------------------------------------------- Conversión (agente)
+    /// @notice Cambia `montoUsdt` del fondo por wARS en el pool. `minWars` no puede estar más de 2 % por debajo
+    ///         de la cotización TWAP, y lo recibido no puede ser menor que `minWars`.
+    function convertir(uint256 montoUsdt, uint256 minWars)
+        external
+        soloAgente
+        abierto
+        nonReentrant
+        returns (uint256 recibido)
+    {
+        if (montoUsdt == 0) revert MontoCero();
+        if (usdt.balanceOf(address(this)) < montoUsdt) revert SaldoInsuficiente();
+        uint256 esperado = cotizarUsdtEnWars(montoUsdt);
+        if (minWars < esperado * (BPS - DESVIO_MAX_BPS) / BPS) revert MinimoMuyBajo();
+
+        bool zeroForOne = address(usdt) == pool.token0();
+        uint256 antes = wars.balanceOf(address(this));
+        _swapEnCurso = true;
+        pool.swap(
+            address(this),
+            zeroForOne,
+            int256(montoUsdt),
+            zeroForOne ? TickMath.MIN_SQRT_RATIO + 1 : TickMath.MAX_SQRT_RATIO - 1,
+            ""
+        );
+        _swapEnCurso = false;
+        recibido = wars.balanceOf(address(this)) - antes;
+        if (recibido < minWars) revert RecibidoInsuficiente();
+        emit Conversion(montoUsdt, recibido);
+    }
+
+    /// @dev Solo el pool, y solo durante `convertir`, puede cobrar el USDT del swap.
+    function uniswapV3SwapCallback(int256 amount0Delta, int256 amount1Delta, bytes calldata) external override {
+        if (msg.sender != address(pool) || !_swapEnCurso) revert SoloPool();
+        uint256 aPagar = uint256(amount0Delta > 0 ? amount0Delta : amount1Delta);
+        usdt.safeTransfer(address(pool), aPagar);
     }
 }
