@@ -18,3 +18,6 @@ runs = 1000
 
 [rpc_endpoints]
 celo = "https://forno.celo.org"
+
+[profile.ci]
+no_match_path = "test/fork/*"
