@@ -113,6 +113,36 @@ contract FundCreationTest is BaseFundTest {
         _newFund(p);
     }
 
+    // N < M: with N = M, one lost passkey would lock the fund forever.
+    function test_revertsIfVotesEqualTheMembers() public {
+        Fund.Params memory p = _params();
+        p.votesRequired = 5;
+        vm.expectRevert(Fund.InvalidParams.selector);
+        _newFund(p);
+    }
+
+    function test_acceptsThreeMembersWithTwoVotes() public {
+        Fund.Params memory p = _params();
+        address[] memory three = new address[](3);
+        for (uint256 i; i < 3; ++i) three[i] = members[i];
+        p.members = three;
+        p.votesRequired = 2;
+        Fund f = _newFund(p);
+        assertEq(f.members().length, 3);
+        assertEq(f.votesRequired(), 2);
+    }
+
+    function test_acceptsTenMembersWithNineVotes() public {
+        Fund.Params memory p = _params();
+        address[] memory ten = new address[](10);
+        for (uint256 i; i < 10; ++i) ten[i] = makeAddr(string.concat("member", vm.toString(i)));
+        p.members = ten;
+        p.votesRequired = 9;
+        Fund f = _newFund(p);
+        assertEq(f.members().length, 10);
+        assertEq(f.votesRequired(), 9);
+    }
+
     function test_revertsWithZeroBalanceCap() public {
         Fund.Params memory p = _params();
         p.balanceCap = 0;

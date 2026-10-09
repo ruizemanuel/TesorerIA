@@ -49,7 +49,7 @@ contract FundHandler is CommonBase, StdCheats, StdUtils {
 
     function removeMember(uint256 seed) external {
         address[] memory list = fund.members();
-        if (list.length - 1 < fund.votesRequired()) return;
+        if (list.length - 1 <= fund.votesRequired()) return;
         _approveAndExecute(Fund.Action.RemoveMember, list[seed % list.length], address(0), 0, seed);
     }
 
@@ -61,7 +61,7 @@ contract FundHandler is CommonBase, StdCheats, StdUtils {
     }
 
     function setVotesRequired(uint256 votes, uint256 seed) external {
-        votes = bound(votes, fund.MIN_VOTES(), fund.members().length);
+        votes = bound(votes, fund.MIN_VOTES(), fund.members().length - 1);
         _approveAndExecute(Fund.Action.SetVotesRequired, address(0), address(0), votes, seed);
     }
 
@@ -124,7 +124,7 @@ contract FundInvariantsTest is BaseFundTest {
         uint256 n = fund.members().length;
         uint256 votes = fund.votesRequired();
         assertGe(votes, 2);
-        assertLe(votes, n);
+        assertLt(votes, n);
         assertLe(n, 10);
     }
 

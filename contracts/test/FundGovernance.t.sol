@@ -88,12 +88,34 @@ contract FundGovernanceTest is BaseFundTest {
         assertEq(wars.balanceOf(members[1]), 1_000e18);
     }
 
-    function test_cannotRemoveIfNWouldExceedTheMembers() public {
-        _pass(Fund.Action.SetVotesRequired, address(0), address(0), 5);
+    // N < M: a removal has to leave more members than the votes required.
+    function test_cannotRemoveIfNWouldReachTheMembers() public {
+        _pass(Fund.Action.SetVotesRequired, address(0), address(0), 4);
         uint256 id = _propose(members[0], Fund.Action.RemoveMember, members[4], address(0), 0);
-        _castVotes(id, 1, 5);
+        _castVotes(id, 1, 4);
         vm.expectRevert(Fund.InvalidParams.selector);
         fund.execute(id);
+    }
+
+    // A group of 3 (N = 2) can't remove anyone, but it can replace a member who lost their passkey.
+    function test_groupOfThreeCanReplaceButNotRemove() public {
+        Fund.Params memory p = _params();
+        address[] memory three = new address[](3);
+        for (uint256 i; i < 3; ++i) three[i] = members[i];
+        p.members = three;
+        p.votesRequired = 2;
+        fund = _newFund(p);
+
+        uint256 removal = _propose(members[0], Fund.Action.RemoveMember, members[2], address(0), 0);
+        _castVotes(removal, 1, 2);
+        vm.expectRevert(Fund.InvalidParams.selector);
+        fund.execute(removal);
+
+        uint256 replacement = _propose(members[0], Fund.Action.ReplaceMember, members[2], newcomer, 0);
+        _castVotes(replacement, 1, 2);
+        fund.execute(replacement);
+        assertTrue(fund.isMember(newcomer));
+        assertFalse(fund.isMember(members[2]));
     }
 
     function test_replaceMemberMovesTheContribution() public {
@@ -136,6 +158,13 @@ contract FundGovernanceTest is BaseFundTest {
 
     function test_setVotesRequiredOutOfRangeReverts() public {
         uint256 id = _propose(members[0], Fund.Action.SetVotesRequired, address(0), address(0), 1);
+        _castVotes(id, 1, 3);
+        vm.expectRevert(Fund.InvalidParams.selector);
+        fund.execute(id);
+    }
+
+    function test_setVotesRequiredToTheMemberCountReverts() public {
+        uint256 id = _propose(members[0], Fund.Action.SetVotesRequired, address(0), address(0), 5);
         _castVotes(id, 1, 3);
         vm.expectRevert(Fund.InvalidParams.selector);
         fund.execute(id);

@@ -145,7 +145,7 @@ contract Fund is ReentrancyGuardTransient, IUniswapV3SwapCallback {
         uint256 n = p.members.length;
         if (
             !tokensOk || n < MIN_MEMBERS || n > MAX_MEMBERS || p.votesRequired < MIN_VOTES
-                || p.votesRequired > n || p.balanceCap == 0
+                || p.votesRequired >= n || p.balanceCap == 0
         ) revert InvalidParams();
         for (uint256 i; i < n; ++i) {
             address m = p.members[i];
@@ -366,7 +366,7 @@ contract Fund is ReentrancyGuardTransient, IUniswapV3SwapCallback {
             _members.push(p.a);
             emit MemberAdded(p.a);
         } else if (action == Action.RemoveMember) {
-            if (!isMember[p.a] || _members.length - 1 < votesRequired) revert InvalidParams();
+            if (!isMember[p.a] || _members.length - 1 <= votesRequired) revert InvalidParams();
             (uint256 w, uint256 u) = _shareOf(p.a);
             totalContributed -= contributed[p.a];
             contributed[p.a] = 0;
@@ -394,7 +394,7 @@ contract Fund is ReentrancyGuardTransient, IUniswapV3SwapCallback {
             weeklyCap = p.amount;
             emit WeeklyCapChanged(p.amount);
         } else if (action == Action.SetVotesRequired) {
-            if (p.amount < MIN_VOTES || p.amount > _members.length) revert InvalidParams();
+            if (p.amount < MIN_VOTES || p.amount >= _members.length) revert InvalidParams();
             votesRequired = uint8(p.amount);
             emit VotesRequiredChanged(uint8(p.amount));
         } else if (action == Action.SetAgent) {
