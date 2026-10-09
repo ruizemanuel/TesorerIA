@@ -97,6 +97,24 @@ contract FundConversionTest is BaseFundTest {
         fund.uniswapV3SwapCallback(0, 1e6, "");
     }
 
+    // The pool itself can't collect more than the USDT being converted...
+    function test_poolCannotCollectMoreThanTheAmountConverted() public {
+        pool.setOvercharge(1);
+        uint256 expected = fund.quoteUsdtInWars(10e6);
+        vm.prank(agent);
+        vm.expectRevert(Fund.SwapOverpayment.selector);
+        fund.convert(10e6, expected * 99 / 100);
+    }
+
+    // ...nor collect twice in the same conversion.
+    function test_poolCannotCollectTwice() public {
+        pool.setCollectTwice(true);
+        uint256 expected = fund.quoteUsdtInWars(10e6);
+        vm.prank(agent);
+        vm.expectRevert(Fund.OnlyPool.selector);
+        fund.convert(10e6, expected * 99 / 100);
+    }
+
     /// New fund on a pool that, in the middle of the swap, lets a third party call the fund's callback.
     function _fundWithHostilePool() internal returns (Attacker attacker) {
         MockPoolHostile hostile = new MockPoolHostile(address(wars), address(usdt), -350142);

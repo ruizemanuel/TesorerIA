@@ -12,6 +12,10 @@ contract MockPool {
     int24 public tick;
     uint256 public qualityBps = 10_000;
     int56 public cumulativeOffset;
+    /// Extra amount the pool asks for in the callback, on top of the swap's input.
+    uint256 public overcharge;
+    /// If true, the pool calls the callback twice.
+    bool public collectTwice;
 
     constructor(address tokenA, address tokenB, int24 tick_) {
         (token0, token1) = tokenA < tokenB ? (tokenA, tokenB) : (tokenB, tokenA);
@@ -28,6 +32,14 @@ contract MockPool {
 
     function setCumulativeOffset(int56 a) external {
         cumulativeOffset = a;
+    }
+
+    function setOvercharge(uint256 extra) external {
+        overcharge = extra;
+    }
+
+    function setCollectTwice(bool t) external {
+        collectTwice = t;
     }
 
     function observe(uint32[] calldata secondsAgos)
@@ -54,9 +66,11 @@ contract MockPool {
         uint256 amountIn = uint256(amountSpecified);
         uint256 out = OracleLibrary.getQuoteAtTick(tick, uint128(amountIn), tokenIn, tokenOut) * qualityBps / 10_000;
         IERC20(tokenOut).transfer(recipient, out);
-        (amount0, amount1) = zeroForOne ? (int256(amountIn), -int256(out)) : (-int256(out), int256(amountIn));
+        uint256 owed = amountIn + overcharge;
+        (amount0, amount1) = zeroForOne ? (int256(owed), -int256(out)) : (-int256(out), int256(owed));
         uint256 balanceBefore = IERC20(tokenIn).balanceOf(address(this));
         IUniswapV3SwapCallback(msg.sender).uniswapV3SwapCallback(amount0, amount1, data);
-        require(IERC20(tokenIn).balanceOf(address(this)) >= balanceBefore + amountIn, "not paid");
+        if (collectTwice) IUniswapV3SwapCallback(msg.sender).uniswapV3SwapCallback(amount0, amount1, data);
+        require(IERC20(tokenIn).balanceOf(address(this)) >= balanceBefore + owed, "not paid");
     }
 }

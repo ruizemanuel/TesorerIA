@@ -77,6 +77,7 @@ contract Fund is ReentrancyGuardTransient, IUniswapV3SwapCallback {
     error ProposalAlreadyExecuted();
     error AlreadyVoted();
     error NotEnoughVotes();
+    error SwapOverpayment();
 
     // ---------------------------------------------------------------- Events
     event Contribution(address indexed member, address indexed token, uint256 amount, uint256 creditedWars);
@@ -102,6 +103,7 @@ contract Fund is ReentrancyGuardTransient, IUniswapV3SwapCallback {
     IUniswapV3Pool public immutable pool;
     uint256 public immutable startTime;
     uint256 public immutable balanceCap;
+    bool private immutable _usdtIsToken0;
 
     string public name;
     string public agreedExpense;
@@ -119,7 +121,8 @@ contract Fund is ReentrancyGuardTransient, IUniswapV3SwapCallback {
     Proposal[] private _proposals;
     mapping(uint256 => mapping(address => bool)) public hasVoted;
 
-    bool private _swapInProgress;
+    /// @dev USDT the pool may still collect in the current conversion; zero outside `convert`.
+    uint256 private transient _swapUsdtLimit;
 
     // ---------------------------------------------------------------- Modifiers
     modifier onlyMember() {
@@ -156,6 +159,7 @@ contract Fund is ReentrancyGuardTransient, IUniswapV3SwapCallback {
         wars = wars_;
         usdt = usdt_;
         pool = pool_;
+        _usdtIsToken0 = t0 == address(usdt_);
         startTime = block.timestamp;
         balanceCap = p.balanceCap;
         name = p.name;
@@ -236,9 +240,9 @@ contract Fund is ReentrancyGuardTransient, IUniswapV3SwapCallback {
         uint256 expected = quoteUsdtInWars(usdtAmount);
         if (minWarsOut < expected * (BPS - MAX_DEVIATION_BPS) / BPS) revert MinOutTooLow();
 
-        bool zeroForOne = address(usdt) == pool.token0();
+        bool zeroForOne = _usdtIsToken0;
         uint256 balanceBefore = wars.balanceOf(address(this));
-        _swapInProgress = true;
+        _swapUsdtLimit = usdtAmount;
         pool.swap(
             address(this),
             zeroForOne,
@@ -246,17 +250,21 @@ contract Fund is ReentrancyGuardTransient, IUniswapV3SwapCallback {
             zeroForOne ? TickMath.MIN_SQRT_RATIO + 1 : TickMath.MAX_SQRT_RATIO - 1,
             ""
         );
-        _swapInProgress = false;
+        _swapUsdtLimit = 0;
         received = wars.balanceOf(address(this)) - balanceBefore;
         if (received < minWarsOut) revert InsufficientOutput();
         emit Conversion(usdtAmount, received);
     }
 
-    /// @dev Only the pool, and only during `convert`, can collect the swap's USDT.
+    /// @dev Only the pool, only during `convert` and only once, can collect the swap's USDT, and never more than
+    ///      the `usdtAmount` being converted.
     function uniswapV3SwapCallback(int256 amount0Delta, int256 amount1Delta, bytes calldata) external override {
-        if (msg.sender != address(pool) || !_swapInProgress) revert OnlyPool();
-        uint256 amountToPay = uint256(amount0Delta > 0 ? amount0Delta : amount1Delta);
-        usdt.safeTransfer(address(pool), amountToPay);
+        uint256 limit = _swapUsdtLimit;
+        if (msg.sender != address(pool) || limit == 0) revert OnlyPool();
+        int256 owed = _usdtIsToken0 ? amount0Delta : amount1Delta;
+        if (owed <= 0 || uint256(owed) > limit) revert SwapOverpayment();
+        _swapUsdtLimit = 0;
+        usdt.safeTransfer(address(pool), uint256(owed));
     }
 
     // ---------------------------------------------------------------- Reimbursement (agent)
