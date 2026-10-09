@@ -4,8 +4,10 @@
 // Usage: node scripts/verify-tx.mjs <txHash> [sender] [--code <code>]
 //   RPC: https://forno.celo.org, or the CELO_RPC_URL environment variable (never printed).
 //   With [sender], prints ATTRIBUTED / NOT ATTRIBUTED / UNKNOWN for that sender and
-//   exits 0 / 1 / 2. --code defaults to TesorerIA's celo_fbe4d00a2cb4. Bad arguments exit 64.
-import { verifyTx, verifyUserOps } from "@celo/attribution-tags";
+//   exits 0 / 1 / 2. The sender is a UserOperation's account in a bundle, or the account
+//   that sent any other transaction (the agent's wallet, for example).
+//   --code defaults to TesorerIA's celo_fbe4d00a2cb4. Bad arguments exit 64.
+import { fromDataSuffix, verifyTx, verifyUserOps } from "@celo/attribution-tags";
 import { createPublicClient, http, isAddress, isHash } from "viem";
 import { celo } from "viem/chains";
 
@@ -62,12 +64,25 @@ async function main() {
 
   if (sender === undefined) return 0;
   if (userOps === null) {
+    // Not a bundle: the sender is whoever sent the transaction itself.
+    const tx = await client.getTransaction({ hash }).catch(() => null);
+    if (tx === null) {
+      console.log(
+        `UNKNOWN: the transaction could not be read, so ${sender} cannot be checked for ${code} ` +
+          "(for a smart account, make sure this is the bundle transaction hash, not the UserOperation hash; " +
+          "a just-mined transaction may need a few seconds to be indexed)",
+      );
+      return 2;
+    }
+    if (tx.from.toLowerCase() !== sender.toLowerCase()) {
+      console.log(`NOT ATTRIBUTED: ${sender} did not send this transaction (${tx.from} did)`);
+      return 1;
+    }
+    const tagged = fromDataSuffix(tx.input)?.codes.includes(code) ?? false;
     console.log(
-      `UNKNOWN: no readable bundle, so ${sender} cannot be checked for ${code} ` +
-        "(make sure this is the bundle transaction hash, not the UserOperation hash; " +
-        "a just-mined transaction may need a few seconds to be indexed)",
+      tagged ? `ATTRIBUTED: ${sender} has ${code}` : `NOT ATTRIBUTED: the transaction from ${sender} does not carry ${code}`,
     );
-    return 2;
+    return tagged ? 0 : 1;
   }
   const attributed = userOps.some(
     (op) => op.sender.toLowerCase() === sender.toLowerCase() && (op.attribution?.codes.includes(code) ?? false),

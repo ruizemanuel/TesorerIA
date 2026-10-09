@@ -13,6 +13,8 @@ const OTHER = getAddress("0x2be9a1b6de16bd7dec13d5aa6e3c8a5c8be1f2a7");
 const BUNDLER = getAddress("0x4337000c2828f5260d8921fd25829f606b9e8680");
 const HASH: Hash = `0x${"ab".repeat(32)}`;
 const OTHER_SUFFIX = toDataSuffix("celo_other");
+const AGENT = getAddress("0x6be3c1eb63a4edbc6c23c281f93f81b14ef3a671");
+const USDT_FEE_ADAPTER = getAddress("0x0e2a3e05bc9a16f5292a6170456a710cb89c6f72");
 // Stands in for a provider URL with an API key in its path: it must never be printed.
 const SECRET_PATH = "/v2/s3cret-key-8f3a1c";
 const RPC_LINE = "RPC: custom endpoint from CELO_RPC_URL";
@@ -51,6 +53,28 @@ function sharedBundle() {
     gasPrice: "0x6fc23ac00",
     value: "0x0",
     type: "0x0",
+    blockHash: `0x${"ef".repeat(32)}`,
+    blockNumber: "0x4be61b6",
+    transactionIndex: "0x0",
+  };
+}
+
+/** A CIP-64 transaction (gas paid in USDT) that `from` sent itself, in the JSON-RPC shape. */
+function eoaTransaction(from: Address, input: Hex) {
+  return {
+    hash: HASH,
+    from,
+    to: getAddress("0x8004a169fb4a3325136eb29fa0ceb6d2e539a432"),
+    input,
+    nonce: "0x1",
+    gas: "0x30d40",
+    maxFeePerGas: "0x6fc23ac00",
+    maxPriorityFeePerGas: "0x3b9aca00",
+    feeCurrency: USDT_FEE_ADAPTER,
+    value: "0x0",
+    type: "0x7b",
+    chainId: "0xa4ec",
+    accessList: [],
     blockHash: `0x${"ef".repeat(32)}`,
     blockNumber: "0x4be61b6",
     transactionIndex: "0x0",
@@ -111,7 +135,8 @@ function expectEndpointHidden({ stdout, stderr, port }: Run) {
   }
 }
 
-describe("scripts/verify-tx.mjs", () => {
+// Every test runs the script in a child process; a cold start can take more than Vitest's default 5 s.
+describe("scripts/verify-tx.mjs", { timeout: 30_000 }, () => {
   it("exits 0 and prints ATTRIBUTED for our tagged operation in a shared bundle", async () => {
     const run = await runScript([HASH, OURS], sharedBundle());
 
@@ -163,6 +188,36 @@ describe("scripts/verify-tx.mjs", () => {
       expect(output).not.toContain("boom");
       expect(output).not.toContain("rpc.example");
     }
+    expectEndpointHidden(run);
+  });
+
+  it("exits 0 and prints ATTRIBUTED for a tagged transaction that the sender sent itself", async () => {
+    const run = await runScript([HASH, AGENT], eoaTransaction(AGENT, concat(["0x1234", ATTRIBUTION_SUFFIX])));
+
+    expect(run.code).toBe(0);
+    expect(run.stdout).toContain(`verifyTx: codes=${ATTRIBUTION_CODE} schema=0`);
+    expect(run.stdout).toMatch(new RegExp(`^ATTRIBUTED: ${AGENT} has ${ATTRIBUTION_CODE}$`, "m"));
+    expect(run.unexpected).toEqual([]);
+    expectEndpointHidden(run);
+  });
+
+  it("exits 1 and prints NOT ATTRIBUTED for an untagged transaction that the sender sent itself", async () => {
+    const run = await runScript([HASH, AGENT], eoaTransaction(AGENT, "0x1234"));
+
+    expect(run.code).toBe(1);
+    expect(run.stdout).toMatch(
+      new RegExp(`^NOT ATTRIBUTED: the transaction from ${AGENT} does not carry ${ATTRIBUTION_CODE}$`, "m"),
+    );
+    expect(run.unexpected).toEqual([]);
+    expectEndpointHidden(run);
+  });
+
+  it("exits 1 and prints NOT ATTRIBUTED when someone else sent the transaction", async () => {
+    const run = await runScript([HASH, OURS], eoaTransaction(AGENT, concat(["0x1234", ATTRIBUTION_SUFFIX])));
+
+    expect(run.code).toBe(1);
+    expect(run.stdout).toContain(`NOT ATTRIBUTED: ${OURS} did not send this transaction (${AGENT} did)`);
+    expect(run.unexpected).toEqual([]);
     expectEndpointHidden(run);
   });
 
