@@ -60,6 +60,75 @@ contract FundCloseTest is BaseFundTest {
         fund.propose(Fund.Action.Pay, members[1], address(0), 1, "x");
     }
 
+    // What closing takes away: open proposals, votes, conversions and USDT contributions.
+    function test_closingCancelsOpenProposalsAndAgentActions() public {
+        _contributeUsdt(members[0], 10e6);
+        uint256 pending = _propose(members[0], Fund.Action.Pay, members[1], 1);
+        _close();
+        vm.prank(members[2]);
+        vm.expectRevert(Fund.FundIsClosed.selector);
+        fund.vote(pending);
+        vm.expectRevert(Fund.FundIsClosed.selector);
+        fund.execute(pending);
+        vm.prank(agent);
+        vm.expectRevert(Fund.FundIsClosed.selector);
+        fund.convert(1e6, 0);
+        usdt.mint(members[0], 1e6);
+        vm.startPrank(members[0]);
+        usdt.approve(address(fund), 1e6);
+        vm.expectRevert(Fund.FundIsClosed.selector);
+        fund.contributeUsdt(1e6);
+        vm.stopPrank();
+    }
+
+    // What arrives after closing (for example, a withdrawal still in transit) is split with the close's rule.
+    function test_distributeRemainderSplitsWhatArrivedAfterClosing() public {
+        _contributeWars(members[0], 30_000e18);
+        _contributeWars(members[1], 10_000e18);
+        _close();
+        usdt.mint(address(fund), 8e6);
+        wars.mint(address(fund), 4_000e18);
+        vm.prank(outsider);
+        fund.distributeRemainder();
+        assertEq(usdt.balanceOf(members[0]), 6e6);
+        assertEq(usdt.balanceOf(members[1]), 2e6);
+        assertEq(wars.balanceOf(members[0]), 33_000e18);
+        assertEq(wars.balanceOf(members[1]), 11_000e18);
+    }
+
+    function test_distributeRemainderEmitsTheBalancesItSplit() public {
+        _close();
+        wars.mint(address(fund), 5_000e18);
+        vm.expectEmit(address(fund));
+        emit Fund.RemainderDistributed(5_000e18, 0);
+        fund.distributeRemainder();
+        for (uint256 i; i < 5; ++i) assertEq(wars.balanceOf(members[i]), 1_000e18);
+    }
+
+    function test_distributeRemainderRevertsWhileOpen() public {
+        wars.mint(address(fund), 1_000e18);
+        vm.expectRevert(Fund.FundNotClosed.selector);
+        fund.distributeRemainder();
+    }
+
+    function test_distributeRemainderRevertsWithNothingToSplit() public {
+        _close();
+        vm.expectRevert(Fund.ZeroAmount.selector);
+        fund.distributeRemainder();
+    }
+
+    function testFuzz_distributeRemainderLeavesOnlyDust(uint96 a, uint96 b, uint96 extraW, uint64 extraU) public {
+        _contributeWars(members[0], bound(a, 1, 200_000e18));
+        _contributeWars(members[1], bound(b, 1, 200_000e18));
+        _close();
+        wars.mint(address(fund), extraW);
+        usdt.mint(address(fund), extraU);
+        vm.assume(wars.balanceOf(address(fund)) > 0 || usdt.balanceOf(address(fund)) > 0);
+        fund.distributeRemainder();
+        assertLt(wars.balanceOf(address(fund)), 5);
+        assertLt(usdt.balanceOf(address(fund)), 5);
+    }
+
     function testFuzz_closeConservesTheBalance(uint96 a, uint96 b, uint96 c) public {
         uint256 x = bound(a, 1, 100_000e18);
         uint256 y = bound(b, 1, 100_000e18);

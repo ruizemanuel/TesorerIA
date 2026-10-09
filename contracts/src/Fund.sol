@@ -78,6 +78,7 @@ contract Fund is ReentrancyGuardTransient, IUniswapV3SwapCallback {
     error AlreadyVoted();
     error NotEnoughVotes();
     error SwapOverpayment();
+    error FundNotClosed();
 
     // ---------------------------------------------------------------- Events
     event Contribution(address indexed member, address indexed token, uint256 amount, uint256 creditedWars);
@@ -96,6 +97,7 @@ contract Fund is ReentrancyGuardTransient, IUniswapV3SwapCallback {
     event VotesRequiredChanged(uint8 votes);
     event AgentChanged(address indexed agent);
     event FundClosed(uint256 warsBalance, uint256 usdtBalance);
+    event RemainderDistributed(uint256 warsBalance, uint256 usdtBalance);
 
     // ---------------------------------------------------------------- State
     IERC20 public immutable wars;
@@ -433,12 +435,29 @@ contract Fund is ReentrancyGuardTransient, IUniswapV3SwapCallback {
         isMember[m] = false;
     }
 
-    /// @dev Splits wARS and USDT in proportion to contributions (equally if no one contributed) and closes the fund.
-    ///      Emits the balances read before the split. Rounding dust (under 1 wei per member) stays in the contract.
+    /// @dev Closes the fund and splits its balances. Emits the balances read before the split.
     function _close() internal {
         closed = true;
-        uint256 bw = wars.balanceOf(address(this));
-        uint256 bu = usdt.balanceOf(address(this));
+        (uint256 bw, uint256 bu) = _split();
+        emit FundClosed(bw, bu);
+    }
+
+    // ---------------------------------------------------------------- After closing
+    /// @notice Splits whatever reached the fund after it closed (for example, an exchange withdrawal that was still
+    ///         in transit) with the same rule as the close. Anyone can call it.
+    function distributeRemainder() external nonReentrant {
+        if (!closed) revert FundNotClosed();
+        (uint256 bw, uint256 bu) = _split();
+        if (bw == 0 && bu == 0) revert ZeroAmount();
+        emit RemainderDistributed(bw, bu);
+    }
+
+    /// @dev Splits all of the fund's wARS and USDT among the members in proportion to contributions (equally if no
+    ///      one contributed) and returns the balances read before the split. Rounding dust (under 1 wei per member)
+    ///      stays in the contract, and the next `distributeRemainder` splits it along with what arrived.
+    function _split() internal returns (uint256 bw, uint256 bu) {
+        bw = wars.balanceOf(address(this));
+        bu = usdt.balanceOf(address(this));
         uint256 n = _members.length;
         uint256 total = totalContributed;
         for (uint256 i; i < n; ++i) {
@@ -448,6 +467,5 @@ contract Fund is ReentrancyGuardTransient, IUniswapV3SwapCallback {
             if (w > 0) wars.safeTransfer(m, w);
             if (u > 0) usdt.safeTransfer(m, u);
         }
-        emit FundClosed(bw, bu);
     }
 }
