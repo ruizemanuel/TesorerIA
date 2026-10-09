@@ -10,7 +10,11 @@ export const identityRegistryAbi = parseAbi([
   "event Registered(uint256 indexed agentId, string agentURI, address indexed owner)",
 ]);
 
-/** Where the registration file is served: this repo's copy on GitHub. */
+/**
+ * Where the registration file is served: this repo's copy on GitHub. Once the agent is registered this URI is
+ * fixed on chain: moving packages/agent/registration.json, or renaming the `main` branch, breaks it, and fixing
+ * it costs a `setAgentURI` transaction.
+ */
 export const AGENT_URI = "https://raw.githubusercontent.com/ruizemanuel/TesorerIA/main/packages/agent/registration.json";
 
 /** The agent's ERC-8004 id on Celo, once registered. */

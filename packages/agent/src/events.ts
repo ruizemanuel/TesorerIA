@@ -127,7 +127,10 @@ export function blockscoutLogReader({
   };
 }
 
-/** A fund's events between two blocks, decoded and in chain order. Logs it can't decode are left out. */
+/**
+ * A fund's events between two blocks, decoded and in chain order. Logs with an event signature that isn't in
+ * fundAbi are left out; a known event that fails to decode throws, so the history is never read with a hole.
+ */
 export async function readFundEvents(
   reader: LogReader,
   fund: Address,
