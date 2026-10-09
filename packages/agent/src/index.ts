@@ -17,6 +17,7 @@ export {
   dailyActivity,
 } from "./limits";
 export { type ConversionQuote, type ContractReader, type Feed, type References, quoteConversion, readReferences } from "./market";
+export { AGENT_ID, AGENT_URI, agentRegistration, identityRegistryAbi } from "./registration";
 export { type CloseShare, type MemberDues, closeShares, joinWeeks, memberDues } from "./remind";
 export { type AgentContext, type ChainView, type Decision, MIN_GAS_USDT, handleExpense, runHeartbeat } from "./run";
 export { type AgentSigner, type AgentTransaction, createAgentSigner } from "./signer";

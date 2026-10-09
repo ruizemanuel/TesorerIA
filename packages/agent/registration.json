@@ -1,0 +1,14 @@
+{
+  "type": "https://eips.ethereum.org/EIPS/eip-8004#registration-v1",
+  "name": "TesorerIA",
+  "description": "TesorerIA runs a group's shared fund in Argentine pesos (wARS) on Celo. Members contribute wARS or USDT; the agent converts the USDT to wARS on Uniswap, pays members back for the expense the group agreed on, up to a weekly cap, and turns every other payment into a proposal the members vote on. A contract deployed by FundFactory 0xdF3B0d9edCA58Aac7c9Db4F2931f3559daf82020 enforces its limits: it can only pay members, never above the weekly cap, and it can't change the rules. Its own code adds more: at most 100,000 wARS per reimbursement and 150,000 wARS a day per fund, 500 USDT per conversion and 1,000 USDT a day, and 20 transactions a day per fund. Its wallet, 0x6BE3c1eB63A4edbc6C23c281F93F81B14eF3a671, pays gas in USDT and tags every transaction with celo_fbe4d00a2cb4.",
+  "services": [
+    {
+      "name": "web",
+      "endpoint": "https://github.com/ruizemanuel/TesorerIA"
+    }
+  ],
+  "x402Support": false,
+  "active": true,
+  "registrations": []
+}
