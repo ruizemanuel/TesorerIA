@@ -1,0 +1,25 @@
+{
+  "name": "@tesoreria/agent",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "deploy:factory": "tsx --env-file-if-exists=.env.local scripts/deploy-factory.ts"
+  },
+  "dependencies": {
+    "@celo/attribution-tags": "0.5.0",
+    "@tesoreria/wallet": "workspace:*",
+    "viem": "2.57.4"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.4",
+    "tsx": "4.23.15",
+    "typescript": "7.0.2",
+    "vitest": "5.0.3"
+  }
+}
