@@ -7,9 +7,11 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "test": "vitest run",
+    "test": "vitest run --project unit",
+    "test:fork": "vitest run --project fork",
     "typecheck": "tsc --noEmit",
-    "deploy:factory": "tsx --env-file-if-exists=.env.local scripts/deploy-factory.ts"
+    "deploy:factory": "tsx --env-file-if-exists=.env.local scripts/deploy-factory.ts",
+    "agent:tick": "tsx --env-file-if-exists=.env.local scripts/tick.ts"
   },
   "dependencies": {
     "@celo/attribution-tags": "0.5.0",
