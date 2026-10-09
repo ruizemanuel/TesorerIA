@@ -60,6 +60,29 @@ contract FundContributionsTest is BaseFundTest {
         vm.stopPrank();
     }
 
+    // CIP-64 rule: the fund credits what actually arrived, measured by balance difference, never the amount sent.
+    function test_contributeWarsCreditsOnlyWhatArrivesWithATransferFee() public {
+        wars.setFeeBps(100); // 1% never arrives
+        _contributeWars(members[0], 10_000e18);
+        assertEq(wars.balanceOf(address(fund)), 9_900e18);
+        assertEq(fund.contributed(members[0]), 9_900e18);
+        assertEq(fund.totalContributed(), 9_900e18);
+    }
+
+    function test_contributeUsdtCreditsOnlyWhatArrivesWithATransferFee() public {
+        usdt.setFeeBps(100);
+        uint256 credited = fund.quoteUsdtInWars(9.9e6);
+        usdt.mint(members[0], 10e6);
+        vm.startPrank(members[0]);
+        usdt.approve(address(fund), 10e6);
+        vm.expectEmit(address(fund));
+        emit Fund.Contribution(members[0], address(usdt), 9.9e6, credited);
+        fund.contributeUsdt(10e6);
+        vm.stopPrank();
+        assertEq(usdt.balanceOf(address(fund)), 9.9e6);
+        assertEq(fund.contributed(members[0]), credited);
+    }
+
     function testFuzz_balanceCapIsNeverExceeded(uint256 a, uint256 b) public {
         a = bound(a, 1, 500_000e18);
         b = bound(b, 1, 500_000e18);

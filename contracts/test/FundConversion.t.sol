@@ -22,8 +22,8 @@ contract FundConversionTest is BaseFundTest {
     }
 
     function test_emitsConversion() public {
-        uint256 expected = fund.quoteUsdtInWars(10e6);
-        vm.expectEmit(false, false, false, false, address(fund));
+        uint256 expected = fund.quoteUsdtInWars(10e6); // the mock pool delivers exactly the TWAP quote
+        vm.expectEmit(address(fund));
         emit Fund.Conversion(10e6, expected);
         vm.prank(agent);
         fund.convert(10e6, expected * 99 / 100);
@@ -125,7 +125,7 @@ contract FundConversionTest is BaseFundTest {
         attacker = hostile.attacker();
     }
 
-    // Final review: while the conversion runs (`_swapInProgress`), only the pool can collect through the callback.
+    // Final review: while the conversion runs (`_swapUsdtLimit` set), only the pool can collect through the callback.
     function test_nonPoolCannotCollectDuringTheConversion() public {
         _fundWithHostilePool();
         uint256 expected = fund.quoteUsdtInWars(10e6);

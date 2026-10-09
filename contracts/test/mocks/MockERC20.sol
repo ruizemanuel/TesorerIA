@@ -6,6 +6,9 @@ import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 contract MockERC20 is ERC20 {
     uint8 private immutable _decimals;
 
+    /// Share of each transfer (in basis points) that is burned on the way, so less arrives than was sent.
+    uint256 public feeBps;
+
     constructor(string memory name_, string memory symbol_, uint8 decimals_) ERC20(name_, symbol_) {
         _decimals = decimals_;
     }
@@ -16,5 +19,16 @@ contract MockERC20 is ERC20 {
 
     function mint(address to, uint256 amount) external {
         _mint(to, amount);
+    }
+
+    function setFeeBps(uint256 bps) external {
+        feeBps = bps;
+    }
+
+    function _update(address from, address to, uint256 value) internal override {
+        if (feeBps == 0 || from == address(0) || to == address(0)) return super._update(from, to, value);
+        uint256 fee = value * feeBps / 10_000;
+        super._update(from, address(0), fee);
+        super._update(from, to, value - fee);
     }
 }
