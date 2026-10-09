@@ -13,6 +13,12 @@ Everything else (other payments, member changes, the weekly cap, quorum, replaci
     FOUNDRY_PROFILE=ci forge test                 # unit, fuzz and invariant tests with mocks, no network
     forge test --match-path "test/fork/*" -vv     # against a local fork of Celo mainnet
 
+## Deployment
+
+`FundFactory` is deployed on Celo mainnet at `0xdF3B0d9edCA58Aac7c9Db4F2931f3559daf82020` (transaction `0x0e96c1e48e0e95c6b734a64e0f9c452dfa9d35bcc33dfa10268af5cdeaee60dc`, block `79659548`), with wARS `0x0DC4F92879B7670e5f4e4e6e3c801D229129D90D`, USDT `0x48065fbBE25f71C9282ddf5e1cD6D6A887483D5e` and the Uniswap v3 pool `0x5D8ef8B839be522b9E3d60a51EDB5837CD0b2391` (the one `UniswapV3Factory.getPool(wARS, USDT, 100)` returns). It was deployed with `pnpm deploy:factory --send` from `packages/agent`, which checks the pool first. The deploy carries the ERC-8021 attribution suffix after the constructor arguments, which doesn't change the deployed code (`test_attributionSuffixAfterTheConstructorArgsDeploysTheSameCode`). Its source is verified on Sourcify (exact match of the deployed code). To check that the deployed factory is exactly this code:
+
+    FACTORY=0xdF3B0d9edCA58Aac7c9Db4F2931f3559daf82020 forge test --match-path "test/fork/*" -vv
+
 ## Security review
 
 Internal review before the first mainnet deploy, not an external audit: Slither 0.11.6 and the Pashov checklist over `src/`. It was first done on 2026-10-08 and redone after the pre-deploy changes: N below the member count, `distributeRemainder`, and a swap callback that pays at most the converted amount, once. No finding needed a code change. Line numbers are in `src/Fund.sol` unless noted.
