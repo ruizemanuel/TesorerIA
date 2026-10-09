@@ -8,6 +8,7 @@ import {Fund} from "../../src/Fund.sol";
 import {FundFactory} from "../../src/FundFactory.sol";
 
 /// Runs against a local fork of Celo mainnet (created by `setUp`): `forge test --match-path "test/fork/*" -vv`.
+/// With `FACTORY=<address>` it runs on the factory deployed on mainnet instead of a fresh one.
 contract FundForkTest is Test {
     IERC20 constant WARS = IERC20(0x0DC4F92879B7670e5f4e4e6e3c801D229129D90D);
     IERC20 constant USDT = IERC20(0x48065fbBE25f71C9282ddf5e1cD6D6A887483D5e);
@@ -20,7 +21,7 @@ contract FundForkTest is Test {
     function setUp() public {
         vm.createSelectFork(vm.rpcUrl("celo"));
         for (uint256 i; i < 3; ++i) members.push(makeAddr(string.concat("member", vm.toString(i))));
-        FundFactory factory = new FundFactory(WARS, USDT, POOL);
+        FundFactory factory = _factory();
         Fund.Params memory p;
         p.name = "Fork";
         p.members = members;
@@ -30,6 +31,19 @@ contract FundForkTest is Test {
         p.weeklyCap = 60_000e18;
         p.balanceCap = 2_000_000e18;
         fund = Fund(factory.createFund(p));
+    }
+
+    function _factory() internal returns (FundFactory) {
+        address deployed = vm.envOr("FACTORY", address(0));
+        if (deployed == address(0)) return new FundFactory(WARS, USDT, POOL);
+        return FundFactory(deployed);
+    }
+
+    /// The deployed factory runs exactly this repo's code: same bytecode and immutables as a fresh build.
+    function test_deployedFactoryMatchesTheSource() public {
+        address deployed = vm.envOr("FACTORY", address(0));
+        vm.skip(deployed == address(0));
+        assertEq(deployed.code, address(new FundFactory(WARS, USDT, POOL)).code);
     }
 
     /// The pool has plenty of USDT and wARS: on the fork, it "lends" them to the members.

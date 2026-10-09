@@ -29,6 +29,22 @@ contract FundFactoryTest is BaseFundTest {
         assertEq(f.members().length, 5);
     }
 
+    // The deploy appends the ERC-8021 attribution suffix after the constructor arguments: it must not change what
+    // gets deployed (the constructor only decodes the arguments it expects).
+    function test_attributionSuffixAfterTheConstructorArgsDeploysTheSameCode() public {
+        bytes memory initcode = abi.encodePacked(
+            type(FundFactory).creationCode,
+            abi.encode(address(wars), address(usdt), address(pool)),
+            hex"63656c6f5f666265346430306132636234110080218021802180218021802180218021"
+        );
+        address suffixed;
+        assembly {
+            suffixed := create(0, add(initcode, 0x20), mload(initcode))
+        }
+        assertTrue(suffixed != address(0));
+        assertEq(suffixed.code, address(factory).code);
+    }
+
     function test_emitsFundCreated() public {
         vm.expectEmit(false, true, false, true, address(factory));
         emit FundFactory.FundCreated(address(0), members[0], "Thursday football");
