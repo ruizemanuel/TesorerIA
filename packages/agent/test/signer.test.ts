@@ -1,5 +1,6 @@
+import { toDataSuffix } from "@celo/attribution-tags";
 import { ATTRIBUTION_SUFFIX } from "@tesoreria/wallet";
-import { type Hex, custom } from "viem";
+import { type Hex, concat, custom } from "viem";
 import { generatePrivateKey } from "viem/accounts";
 import { type TransactionSerializableCIP64, parseTransaction } from "viem/celo";
 import { describe, expect, it } from "vitest";
@@ -89,5 +90,15 @@ describe("createAgentSigner", () => {
       feeCurrency: USDT_FEE_ADAPTER,
     });
     expect(calls.find((c) => c.method === "eth_gasPrice")?.params).toEqual([USDT_FEE_ADAPTER]);
+  });
+
+  it("refuses data that already ends in an ERC-8021 suffix, so its own tag can't go missing", async () => {
+    const { transport, sent, calls } = fakeCelo();
+    const agent = createAgentSigner({ privateKey: generatePrivateKey(), transport });
+    const tagged = concat(["0x1234", toDataSuffix("celo_other")]);
+    await expect(agent.send({ data: tagged })).rejects.toThrow("already ends in an ERC-8021 suffix");
+    await expect(agent.estimate({ data: tagged })).rejects.toThrow("already ends in an ERC-8021 suffix");
+    expect(sent).toHaveLength(0);
+    expect(calls).toHaveLength(0);
   });
 });

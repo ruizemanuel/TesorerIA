@@ -1,13 +1,20 @@
 import { type Abi, type Address, decodeAbiParameters, parseAbi, parseAbiParameters, size, slice } from "viem";
 import { describe, expect, it } from "vitest";
-import { POOL, USDT, WARS } from "../src/chain";
+import { POOL, UNISWAP_V3_FACTORY, USDT, WARS } from "../src/chain";
 import { type ChainReader, checkPool, factoryDeployData } from "../src/deploy";
 
-/** Celo as it was on 2026-10-09 (slot0 included), with one thing changed per test. */
-function fakeCelo(change: { chainId?: number; officialPool?: Address; token0?: Address; observeReverts?: boolean } = {}) {
+type Read = { address: Address; functionName: string; args?: readonly unknown[] };
+
+/** Celo as it was on 2026-10-09 (slot0 included), with one thing changed per test. Keeps every read it gets. */
+function fakeCelo(
+  change: { chainId?: number; officialPool?: Address; token0?: Address; observeReverts?: boolean } = {},
+  reads: Read[] = [],
+) {
   const reader = {
     getChainId: async () => change.chainId ?? 42220,
-    readContract: async ({ functionName }: { functionName: string }) => {
+    readContract: async (read: Read) => {
+      reads.push(read);
+      const { functionName } = read;
       switch (functionName) {
         case "getPool":
           return change.officialPool ?? POOL;
@@ -30,7 +37,12 @@ function fakeCelo(change: { chainId?: number; officialPool?: Address; token0?: A
 
 describe("checkPool", () => {
   it("accepts the official wARS/USDT pool and returns its cardinality", async () => {
-    await expect(checkPool(fakeCelo())).resolves.toEqual({ cardinality: 1200, cardinalityNext: 1200 });
+    const reads: Read[] = [];
+    await expect(checkPool(fakeCelo({}, reads))).resolves.toEqual({ cardinality: 1200, cardinalityNext: 1200 });
+    const getPool = reads.find((r) => r.functionName === "getPool");
+    expect(getPool).toMatchObject({ address: UNISWAP_V3_FACTORY, args: [WARS, USDT, 100] });
+    const observe = reads.find((r) => r.functionName === "observe");
+    expect(observe).toMatchObject({ address: POOL, args: [[1800, 0]] });
   });
 
   it("rejects another chain", async () => {
