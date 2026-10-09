@@ -1,4 +1,12 @@
-import { type Address, type DecodeEventLogReturnType, type Hash, type Hex, type PublicClient, decodeEventLog } from "viem";
+import {
+  AbiEventSignatureNotFoundError,
+  type Address,
+  type DecodeEventLogReturnType,
+  type Hash,
+  type Hex,
+  type PublicClient,
+  decodeEventLog,
+} from "viem";
 import { fundAbi } from "./abi";
 
 /** A log as the agent needs it: where it is, and what it says. */
@@ -54,8 +62,9 @@ const BLOCKSCOUT_PAGE = 1_000;
 
 /**
  * Reads a whole log history from Blockscout's API in a request or two, plus the last RPC_LOG_RANGE blocks
- * from the node, because the indexer can lag behind the chain. Any failure throws: the agent never decides
- * on a history it could not read in full.
+ * from the node, because the indexer can lag behind the chain. Any failure throws, and so does an indexer
+ * more than RPC_LOG_RANGE blocks behind (the node's blocks would leave a gap): the agent never decides on a
+ * history it could not read in full.
  */
 export function blockscoutLogReader({
   apiUrl,
@@ -67,6 +76,22 @@ export function blockscoutLogReader({
   fetchFn?: typeof fetch;
 }): LogReader {
   return async ({ address, fromBlock, toBlock }) => {
+    const tailFrom = toBlock - RPC_LOG_RANGE + 1n > fromBlock ? toBlock - RPC_LOG_RANGE + 1n : fromBlock;
+    // Blockscout and the node together must cover fromBlock..toBlock with no gap: check how far the index got.
+    const headResponse = await fetchFn(`${apiUrl}?module=block&action=eth_block_number`);
+    if (!headResponse.ok) throw new Error(`Blockscout answered HTTP ${headResponse.status} for its indexed block`);
+    const headResult = ((await headResponse.json()) as { result?: unknown }).result;
+    if (typeof headResult !== "string" || !/^0x[0-9a-f]+$/i.test(headResult)) {
+      throw new Error(`Blockscout answered ${JSON.stringify(headResult)} for its indexed block`);
+    }
+    const indexed = BigInt(headResult);
+    const gapFrom = indexed + 1n > fromBlock ? indexed + 1n : fromBlock;
+    if (gapFrom < tailFrom) {
+      throw new Error(
+        `Blockscout has indexed only up to block ${indexed}, ${toBlock - indexed} blocks behind block ${toBlock}: ` +
+          `blocks ${gapFrom} to ${tailFrom - 1n} are in neither its index nor the node's last ${RPC_LOG_RANGE} blocks`,
+      );
+    }
     const byPosition = new Map<string, RawLog>();
     const add = (log: RawLog) => byPosition.set(`${log.transactionHash}:${log.logIndex}`, log);
     let from = fromBlock;
@@ -97,7 +122,6 @@ export function blockscoutLogReader({
       if (lastBlock === from) throw new Error(`More than ${BLOCKSCOUT_PAGE} logs in block ${lastBlock}`);
       from = lastBlock;
     }
-    const tailFrom = toBlock - RPC_LOG_RANGE + 1n > fromBlock ? toBlock - RPC_LOG_RANGE + 1n : fromBlock;
     for (const log of await rpc({ address, fromBlock: tailFrom, toBlock })) add(log);
     return [...byPosition.values()];
   };
@@ -116,8 +140,10 @@ export async function readFundEvents(
     try {
       const decoded = decodeEventLog({ abi: fundAbi, data: log.data, topics: log.topics as [Hex, ...Hex[]] });
       events.push({ ...decoded, blockNumber: log.blockNumber, transactionHash: log.transactionHash, logIndex: log.logIndex });
-    } catch {
-      // Not one of the fund's events.
+    } catch (error) {
+      // An unknown topic is not one of the fund's events. Anything else is a known event that doesn't match
+      // fundAbi: dropping it would leave a hole in the history, so it stops the read.
+      if (!(error instanceof AbiEventSignatureNotFoundError)) throw error;
     }
   }
   return events.sort((a, b) =>
