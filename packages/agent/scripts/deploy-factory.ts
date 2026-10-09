@@ -36,13 +36,19 @@ async function main(): Promise<number> {
 
   const artifact = JSON.parse(readFileSync(ARTIFACT, "utf8")) as FactoryArtifact;
   const data = factoryDeployData(artifact);
-  const { gas, maxCost } = await agent.estimate({ data });
   const balance = await publicClient.readContract({
     address: USDT,
     abi: erc20Abi,
     functionName: "balanceOf",
     args: [agent.address],
   });
+  // Celo nodes refuse to estimate with fee caps for a sender that can't pay any gas, so don't try.
+  if (balance === 0n) {
+    console.log("The agent holds 0 USDT.");
+    console.error("Not enough USDT for the gas: send USDT on Celo to the agent's address first.");
+    return 1;
+  }
+  const { gas, maxCost } = await agent.estimate({ data });
   console.log(
     `Deploy: ${gas} gas, at most ${formatUnits(maxCost, 18)} USDT. ` +
       `The agent holds ${formatUnits(balance, 6)} USDT.`,
@@ -56,7 +62,8 @@ async function main(): Promise<number> {
     console.log("Dry run: nothing was sent. Run again with --send to deploy.");
     return 0;
   }
-  const nonce = await publicClient.getTransactionCount({ address: agent.address });
+  // "pending", like the nonce `send` signs with: a deploy that was broadcast but not yet mined still counts.
+  const nonce = await publicClient.getTransactionCount({ address: agent.address, blockTag: "pending" });
   if (nonce > 0 && !process.argv.includes("--again")) {
     console.error(`The agent already sent ${nonce} transaction(s). If you really want another factory, add --again.`);
     return 1;
