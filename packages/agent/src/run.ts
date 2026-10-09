@@ -78,9 +78,25 @@ async function act(
   // The fee adapter counts USDT with 18 decimals; the token has 6.
   if (gas * 10n ** 12n < maxCost) return blocked("The agent doesn't hold enough USDT for this transaction's gas");
   if (!ctx.send) return { fund: fund.address, kind: action.kind, reason: `${reason} (dry run: not sent)`, action };
-  const hash = await ctx.signer.send(tx);
-  const status = await ctx.chain.receipt(hash);
-  return { fund: fund.address, kind: action.kind, reason, action, tx: hash, status };
+  let hash: Hash;
+  try {
+    hash = await ctx.signer.send(tx);
+  } catch (error) {
+    return blocked(`Could not send the transaction: ${shortMessage(error)}`);
+  }
+  try {
+    const status = await ctx.chain.receipt(hash);
+    return { fund: fund.address, kind: action.kind, reason, action, tx: hash, status };
+  } catch (error) {
+    // The transaction went out: keep its hash so the timeline doesn't call it blocked.
+    return {
+      fund: fund.address,
+      kind: action.kind,
+      reason: `${reason} (sent; receipt unknown: ${shortMessage(error)})`,
+      action,
+      tx: hash,
+    };
+  }
 }
 
 /** A fund the agent runs, read with its history and the agent's activity over the last day. */
@@ -128,6 +144,11 @@ export async function runHeartbeat(ctx: AgentContext): Promise<Decision[]> {
 /** What the web app calls after a member enters an expense (spec, 8.1 and 8.3). */
 export async function handleExpense(ctx: AgentContext, address: Address, expense: Expense): Promise<Decision> {
   try {
+    // Only the factory's funds: for any other contract, the history and the gas cost are its own to choose.
+    const funds = await ctx.chain.funds();
+    if (!funds.some((f) => isAddressEqual(f, address))) {
+      return { fund: address, kind: "reject", reason: "That fund wasn't created by TesorerIA's FundFactory" };
+    }
     const { fund, events, today } = await load(ctx, address);
     if (!isAddressEqual(fund.agent, ctx.signer.address)) {
       return { fund: address, kind: "reject", reason: "This agent doesn't run that fund" };

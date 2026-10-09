@@ -26,7 +26,13 @@ const MEMBER = MEMBERS[1] as Address;
 /** A chain with the given funds and histories; everything else as on 2026-10-09. */
 function fakeChain(
   funds: FundSnapshot[],
-  { events = [] as FundEvent[], gas = 1n * USDT_UNIT, references = REFERENCES, failing = [] as Address[] } = {},
+  {
+    events = [] as FundEvent[],
+    gas = 1n * USDT_UNIT,
+    references = REFERENCES,
+    failing = [] as Address[],
+    receiptError,
+  }: { events?: FundEvent[]; gas?: bigint; references?: References; failing?: Address[]; receiptError?: Error } = {},
 ): ChainView {
   return {
     gasBalance: async () => gas,
@@ -40,7 +46,10 @@ function fakeChain(
     events: async () => events,
     references: async () => references,
     quote: async (_fund, usdtAmount) => ({ ...QUOTE, usdtAmount }),
-    receipt: async () => "success",
+    receipt: async () => {
+      if (receiptError) throw receiptError;
+      return "success";
+    },
   };
 }
 
@@ -133,6 +142,19 @@ describe("runHeartbeat", () => {
     expect(sent).toHaveLength(1);
   });
 
+  it("keeps the hash of a sent transaction whose receipt it couldn't read", async () => {
+    const { signer, sent } = fakeSigner();
+    const chain = fakeChain([fundSnapshot({ usdtBalance: 300n * USDT_UNIT })], { receiptError: new Error("timed out") });
+    const [decision] = await runHeartbeat(context(chain, signer));
+    expect(decision).toMatchObject({
+      kind: "convert",
+      tx: HASH,
+      reason: expect.stringContaining("(sent; receipt unknown: timed out)"),
+    });
+    expect(decision?.status).toBeUndefined();
+    expect(sent).toHaveLength(1);
+  });
+
   it("sends nothing when the agent is short of gas or the transaction would fail", async () => {
     const fund = fundSnapshot({ usdtBalance: 300n * USDT_UNIT });
     const poor = fakeSigner();
@@ -167,6 +189,17 @@ describe("handleExpense", () => {
       functionName: "propose",
       args: [0, MEMBER, expect.any(String), 45_000n * WARS_UNIT, "Cancha"],
     });
+  });
+
+  it("rejects a fund the factory didn't create, without reading it", async () => {
+    const { signer, sent } = fakeSigner();
+    const chain = fakeChain([fundSnapshot()]);
+    expect(await handleExpense(context(chain, signer), SECOND_FUND, PITCH)).toEqual({
+      fund: SECOND_FUND,
+      kind: "reject",
+      reason: "That fund wasn't created by TesorerIA's FundFactory",
+    });
+    expect(sent).toEqual([]);
   });
 
   it("sends nothing for an expense already paid back, or a fund another agent runs", async () => {
