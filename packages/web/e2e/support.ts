@@ -35,7 +35,7 @@ export async function phone(context: BrowserContext): Promise<Page> {
 
 /**
  * Opens `url` once the page answers to taps. `next dev` sends the HTML before its scripts, and a tap that lands
- * before React hydrates the page does nothing (a form even goes out as the browser's own GET), so it waits
+ * before React hydrates the page is lost (a form goes out as the browser's own POST and comes back empty), so it waits
  * until no request has been made for half a second.
  */
 export async function open(page: Page, url: string): Promise<void> {
