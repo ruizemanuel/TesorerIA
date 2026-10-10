@@ -60,7 +60,7 @@ describe("the fork bundler", () => {
       functionName: "transfer",
       args: [account.address, 5_000_000n],
     });
-    await publicClient.waitForTransactionReceipt({ hash: funding });
+    await publicClient.waitForTransactionReceipt({ hash: funding, timeout: 60_000 });
     await testClient.stopImpersonatingAccount({ address: USDT_HOLDER });
 
     const bundlerClient = webBundlerClient();

@@ -35,6 +35,9 @@ export default async function setup() {
       ...FORK_URLS.flatMap((url) => ["--fork-url", url]),
       "--timeout", "10000", // per remote request (default 45 s); a stalled endpoint fails over sooner
       "--port", String(ANVIL_PORT),
+      // A block every second, like Celo, besides one for each transaction: viem waits for a receipt by watching for
+      // new blocks, so on an anvil that only mines transactions a wait that missed its block hangs until the next one.
+      "--block-time", "1", "--mixed-mining",
       "--silent", // keeps anvil's dev-account banner out of the test output
     ],
     { stdio: ["ignore", "ignore", "pipe"] },

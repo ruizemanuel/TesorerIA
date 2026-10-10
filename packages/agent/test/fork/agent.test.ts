@@ -47,7 +47,7 @@ let ctx: AgentContext;
 
 async function send(from: (typeof members)[number], to: Address, data: Hex) {
   const hash = await walletClient.sendTransaction({ account: from, to, data });
-  const receipt = await publicClient.waitForTransactionReceipt({ hash });
+  const receipt = await publicClient.waitForTransactionReceipt({ hash, timeout: 60_000 });
   expect(receipt.status).toBe("success");
   return receipt;
 }
@@ -60,7 +60,7 @@ async function giveFromPool(token: Address, to: Address, amount: bigint) {
     to: token,
     data: encodeFunctionData({ abi: erc20Abi, functionName: "transfer", args: [to, amount] }),
   });
-  await publicClient.waitForTransactionReceipt({ hash });
+  await publicClient.waitForTransactionReceipt({ hash, timeout: 60_000 });
   await testClient.stopImpersonatingAccount({ address: POOL });
 }
 

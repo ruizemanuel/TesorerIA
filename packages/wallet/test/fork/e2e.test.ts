@@ -121,7 +121,7 @@ async function fund(account: Address) {
     functionName: "transfer",
     args: [account, 5_000_000n],
   });
-  await publicClient.waitForTransactionReceipt({ hash });
+  await publicClient.waitForTransactionReceipt({ hash, timeout: 60_000 });
   await testClient.stopImpersonatingAccount({ address: USDT_HOLDER });
 }
 
