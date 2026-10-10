@@ -62,7 +62,10 @@ const anvil = spawn(
   ANVIL,
   [
     ...FORK_URLS.flatMap((url) => ["--fork-url", url]),
-    ...["--timeout", "10000", "--port", String(FORK_PORT), "--block-time", "1", "--mixed-mining", "--silent"],
+    "--timeout", "10000",
+    "--port", String(FORK_PORT),
+    "--block-time", "1", "--mixed-mining",
+    "--silent",
   ],
   { stdio: ["ignore", "ignore", "inherit"] },
 );
@@ -72,9 +75,9 @@ for (let tries = 0; ; tries++) {
   try {
     await client.getChainId();
     break;
-  } catch {
-    if (anvil.exitCode !== null) throw new Error(`anvil exited with code ${anvil.exitCode}`);
-    if (tries > 240) throw new Error("anvil did not start within 60 s");
+  } catch (error) {
+    if (anvil.exitCode !== null) throw new Error(`anvil exited with code ${anvil.exitCode}`, { cause: error });
+    if (tries > 240) throw new Error("anvil did not start within 60 s", { cause: error });
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
 }

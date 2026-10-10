@@ -1,5 +1,6 @@
 // Shared by the test and by serve.ts, which Node runs as is: so nothing here may import the workspace packages
-// (their TypeScript imports have no extensions), and the addresses are repeated from @tesoreria/agent.
+// (their TypeScript imports have no extensions), and the addresses are repeated from @tesoreria/agent. A unit
+// test (test/e2e-addresses.test.ts) checks they are the same. Playwright comes in for its types only.
 import type { BrowserContext, Locator, Page } from "@playwright/test";
 import { type Address, createPublicClient, createTestClient, createWalletClient, erc20Abi, http, parseEther } from "viem";
 import { celo } from "viem/chains";
@@ -10,7 +11,7 @@ const transport = http(FORK_RPC);
 const client = createPublicClient({ chain: celo, transport });
 const test = createTestClient({ chain: celo, mode: "anvil", transport });
 const wallet = createWalletClient({ chain: celo, transport });
-const POOL: Address = "0x5D8ef8B839be522b9E3d60a51EDB5837CD0b2391"; // Uniswap's wARS/USDT pool: it holds both
+export const POOL: Address = "0x5D8ef8B839be522b9E3d60a51EDB5837CD0b2391"; // Uniswap's wARS/USDT pool: it holds both
 export const USDT: Address = "0x48065fbBE25f71C9282ddf5e1cD6D6A887483D5e";
 export const WARS: Address = "0x0DC4F92879B7670e5f4e4e6e3c801D229129D90D";
 

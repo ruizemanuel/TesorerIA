@@ -30,7 +30,7 @@ test("three friends create a fund, contribute, get the agreed expense back and v
   await ana.getByLabel(/Votos necesarios/).selectOption("2");
   await ana.getByRole("button", { name: "Crear el fondo" }).click();
   await expect(ana).toHaveURL(/\/f\/0x[0-9a-fA-F]{40}$/);
-  await expect(ana.getByText(/debe/)).toHaveCount(3); // the fund's inicio, with nobody paid yet
+  await expect(onScreen(ana, /debe/)).toHaveCount(3); // the fund's inicio, with nobody paid yet
   const fund = new URL(ana.url()).pathname;
 
   // Ana leaves, and comes back to the fund by entering with her passkey (spec, 11: "entrar").
@@ -58,12 +58,13 @@ test("three friends create a fund, contribute, get the agreed expense back and v
   await give(await accountOf(ana), { wars: 10_000n * 10n ** 18n });
   await open(ana, `${fund}?p=aportar`);
   await ana.getByRole("tab", { name: "Tengo pesos en Ripio" }).click();
-  // The run after a contribution (or its once-a-minute refusal): it ends before Ana's expense, which then finds the agent free.
-  const runAfterContribution = ana.waitForResponse((response) => response.url().endsWith("/api/agent/run"));
+  // The run after a contribution must end before Ana's expense, which then finds the agent free. The route answers
+  // 202 once it ran (or found the agent busy), and 429 when the once-a-minute limit refuses it.
+  const runAfterContribution = ana.waitForResponse((response) => response.url().endsWith("/api/agent/run"), { timeout: 30_000 });
   await ana.getByRole("button", { name: /Aportar \$\s10\.000/ }).click();
   await expect(ana).toHaveURL(/\?aporte=/);
   await expect(ana.getByRole("img", { name: "pagó" })).toHaveCount(2);
-  await runAfterContribution;
+  expect([202, 429]).toContain((await runAfterContribution).status());
 
   // 5. Ana enters the pitch: the agent pays it back.
   await open(ana, `${fund}?p=gasto`);
@@ -76,7 +77,6 @@ test("three friends create a fund, contribute, get the agreed expense back and v
   await expect(onScreen(ana, /Le devolví \$\s5\.000 a Ana por la cancha/)).toBeVisible();
 
   // 6. Caro enters another expense: the agent proposes it.
-  await give(await accountOf(caro));
   await open(caro, `${fund}?p=gasto`);
   await caro.getByLabel("Otro gasto (se vota)").check();
   await caro.getByLabel("Cuánto pagaste").fill("3.000");
