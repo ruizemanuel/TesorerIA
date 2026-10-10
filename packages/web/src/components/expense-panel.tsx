@@ -75,6 +75,8 @@ export function ExpensePanel({ fund, agreedExpense }: { fund: string; agreedExpe
   return (
     <form
       ref={form}
+      // Submitted before hydration, it goes out as the browser's own submit: by POST, its fields stay out of the URL.
+      method="post"
       className="grid gap-4"
       onChange={() => setTwin(null)} // a changed form is asked about again
       onSubmit={(event) => {

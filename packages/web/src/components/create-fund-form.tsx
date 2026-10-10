@@ -15,6 +15,8 @@ export function CreateFundForm({ loggedIn }: { loggedIn: boolean }) {
   const [error, setError] = useState("");
   return (
     <form
+      // Submitted before hydration, it goes out as the browser's own submit: by POST, its fields stay out of the URL.
+      method="post"
       className="grid gap-4"
       onSubmit={async (event) => {
         event.preventDefault();
