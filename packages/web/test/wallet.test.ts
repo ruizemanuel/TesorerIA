@@ -71,7 +71,7 @@ describe("sendCalls", () => {
     expect(result).toEqual(RECEIPT);
     expect(events).toEqual(["signed", "sent", "post /api/operations", "receipt", "post /api/operations/done"]);
     expect(posted()).toEqual([
-      ["/api/operations", { kind: "contribute", fund: FUND, amount: "10000000", token: "usdt", nonce: "7", userOpHash: OP }],
+      ["/api/operations", { kind: "contribute", fund: FUND, amount: "10000000", token: "usdt", userOpHash: OP }],
       ["/api/operations/done", { userOpHash: OP, transactionHash: TX, success: true }],
     ]);
     expect(passkey.sign).toHaveBeenCalledWith({ hash: "0xdead" });
@@ -150,12 +150,12 @@ describe("sendCalls", () => {
     expect(posted()[0]).toEqual(["/api/operations", { kind: "create-fund", draftId, nonce: "7", userOpHash: OP }]);
   });
 
-  it("sends with the account's nonce (key 0), or the one it's pinned to, and records it either way", async () => {
+  it("sends a createFund with the account's key-0 nonce, or the one it's pinned to, and records it either way", async () => {
     wallet.sendTaggedCalls.mockImplementation(async ({ onSent }) => {
       await onSent(OP);
       return RECEIPT;
     });
-    await sendCalls(me, CALLS, INFO);
+    await sendCalls(me, CALLS, { kind: "create-fund", draftId: crypto.randomUUID() });
     expect(NONCE).toHaveBeenCalledWith({ key: 0n });
     expect(wallet.sendTaggedCalls.mock.calls[0]![0].nonce).toBe(7n);
 
@@ -164,6 +164,19 @@ describe("sendCalls", () => {
     expect(NONCE).not.toHaveBeenCalled();
     expect(wallet.sendTaggedCalls.mock.calls[0]![0].nonce).toBe(5n);
     expect(posted()[0]![1]).toMatchObject({ nonce: "5" });
+  });
+
+  it("lets a contribution or a vote take its own nonce key, as before: two of them can be out at once", async () => {
+    wallet.sendTaggedCalls.mockImplementation(async ({ onSent }) => {
+      await onSent(OP);
+      return RECEIPT;
+    });
+    await sendCalls(me, CALLS, INFO);
+    await sendCalls(me, CALLS, { kind: "vote", fund: FUND });
+    expect(NONCE).not.toHaveBeenCalled();
+    expect(wallet.sendTaggedCalls.mock.calls.map(([parameters]) => parameters.nonce)).toEqual([undefined, undefined]);
+    const recorded = posted().filter(([path]) => path === "/api/operations");
+    expect(recorded.map(([, body]) => (body as { nonce?: unknown }).nonce)).toEqual([undefined, undefined]); // and JSON leaves it out
   });
 
   it("waits for /api/bundler longer than it waits for Pimlico (30 s), so a slow send is never taken for an unsent one", async () => {

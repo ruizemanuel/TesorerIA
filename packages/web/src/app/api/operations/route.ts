@@ -17,7 +17,7 @@ const Operation = z
       .regex(/^\d{1,78}$/)
       .optional(),
     token: z.enum(["wars", "usdt"]).optional(),
-    /** Its EntryPoint nonce, in decimal. */
+    /** For `create-fund`: its EntryPoint nonce (key 0), in decimal. */
     nonce: z
       .string()
       .regex(/^\d{1,78}$/)

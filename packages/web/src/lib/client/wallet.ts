@@ -40,7 +40,7 @@ const ON_ITS_WAY = "Tu operación está en camino. En unos minutos la vas a ver 
  * (spec, 12). The operation is recorded before its receipt, so it shows "en camino" and is never sent twice.
  *
  * `onSigned` is called as soon as the person has confirmed with the passkey, before the operation is sent.
- * `nonce` pins the operation's EntryPoint nonce: a resend of one that never came back, so both can't land.
+ * `nonce` pins a createFund's EntryPoint nonce: the resend of one that never came back, so both can't land.
  * Its own errors are `UserFacingError`s; viem's and the bundler's pass through for `userMessage` to map.
  */
 export async function sendCalls(
@@ -71,11 +71,12 @@ export async function sendCalls(
     sponsorshipPolicyId: "set by the server", // /api/bundler replaces it
   });
 
-  // Its nonce (key 0, the Safe's) is read here rather than inside the send, so the record can keep it: the server
-  // releases a createFund that never came back only while the chain still has that nonce (funds.ts).
-  const useNonce = nonce ?? (await nonceOf(account));
+  // A createFund goes on nonce key 0, read here so the record keeps it: the server releases one that never came
+  // back only while the chain still has that nonce, and pins its resend to it (funds.ts). Anything else lets viem
+  // pick a fresh key per operation, as before, so a contribution and a vote can be out at the same time.
+  const useNonce = info.kind === "create-fund" ? (nonce ?? (await nonceOf(account))) : nonce;
   const record = (userOpHash: Hash) =>
-    post("/api/operations", { ...info, amount: info.amount?.toString(), nonce: useNonce.toString(), userOpHash });
+    post("/api/operations", { ...info, amount: info.amount?.toString(), nonce: useNonce?.toString(), userOpHash });
   let sent = undefined as Hash | undefined; // the hash as soon as the bundler took the operation, whatever happens next
   let result: SendTaggedCallsResult;
   try {

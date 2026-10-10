@@ -11,7 +11,7 @@ export type OperationInput = {
   token?: "wars" | "usdt";
   /** For `create-fund`: the draft (a `funds` row) it deploys. */
   draftId?: string;
-  /** Its EntryPoint nonce (key 0). */
+  /** For `create-fund`: its EntryPoint nonce, on key 0. */
   nonce?: bigint;
 };
 
