@@ -1,6 +1,6 @@
 import { shortMessage } from "@tesoreria/agent";
 import { createForkBundler } from "@tesoreria/wallet/fork";
-import { type BundlerRequest, authorizeBundlerRequest } from "../../../lib/bundler-proxy";
+import { type BundlerRequest, authorizeBundlerRequest, checkBundlerAnswer } from "../../../lib/bundler-proxy";
 import { currentUser } from "../../../lib/current-user";
 import { getDb } from "../../../lib/db/client";
 import { env } from "../../../lib/env";
@@ -56,13 +56,16 @@ export async function POST(request: Request) {
     user,
     body,
     PIMLICO_SPONSORSHIP_POLICY_ID ?? "fork",
-    CHAIN_MODE === "fork" ? undefined : fastMaxFeePerGas,
+    CHAIN_MODE === "fork" ? null : fastMaxFeePerGas, // the fork has no paymaster to protect
   );
   if (!check.ok) return rpcError((body as { id?: unknown } | undefined)?.id, check.status, check.error);
+  let answer: Answer;
   try {
-    const { status, text } = await ask(check.request);
-    return new Response(text, { status, headers: { "content-type": "application/json" } });
+    answer = await ask(check.request);
   } catch {
     return rpcError(check.request.id, 502, "The bundler didn't answer"); // nothing of the failed request (its URL carries the key) goes back
   }
+  const checked = checkBundlerAnswer(check.request.method, answer.text);
+  if (!checked.ok) return rpcError(check.request.id, checked.status, checked.error);
+  return new Response(answer.text, { status: answer.status, headers: { "content-type": "application/json" } });
 }

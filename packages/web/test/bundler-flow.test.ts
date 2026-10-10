@@ -1,10 +1,15 @@
-import { ATTRIBUTION_SUFFIX, createMemberAccount, createPimlicoBundlerClient } from "@tesoreria/wallet";
+import { AGENT_ADDRESS, FUND_FACTORY } from "@tesoreria/agent";
+import { ATTRIBUTION_SUFFIX, type Call, createMemberAccount, createPimlicoBundlerClient } from "@tesoreria/wallet";
 import { createFakePasskey } from "@tesoreria/wallet/testing";
 import { type Address, type Hash, createPublicClient, custom, encodeAbiParameters, getAddress, numberToHex, pad, toFunctionSelector } from "viem";
 import { toWebAuthnAccount } from "viem/account-abstraction";
 import { celo } from "viem/chains";
 import { describe, expect, it } from "vitest";
-import { checkBundlerRequest, checkSponsoredGas } from "../src/lib/bundler-proxy";
+import { authorizeBundlerRequest } from "../src/lib/bundler-proxy";
+import { contributeCalls } from "../src/lib/contribute";
+import { createDraft, deployCall, joinFund } from "../src/lib/funds";
+import { voteCalls } from "../src/lib/vote";
+import { WARS, addLiveFund, addUser, randomAccount, testDb } from "./support/db";
 
 const POLICY = "sp_server";
 const FAST = 5_000_000_000n;
@@ -29,22 +34,31 @@ const node = custom({
 });
 
 describe("the requests viem really sends for a sponsored operation", () => {
-  it("all get through the gate, each as the logged-in member's own, with the server's policy", async () => {
+  it("all get through the gate for every call the web makes, each as the member's own, with the server's policy", async () => {
     const client = createPublicClient({ chain: celo, transport: node });
     const passkey = createFakePasskey();
     const account = await createMemberAccount({ client, owner: toWebAuthnAccount({ ...passkey, rpId: "localhost" }) });
-    const forwarded: { method: string; params: unknown[] }[] = [];
 
+    // Ana is creating a fund (deployCall froze it), and is in a live one: every call she can make is hers to make.
+    const db = await testDb();
+    const ana = await addUser(db, "Ana", account.address);
+    const draft = await createDraft(db, ana.id, { name: "Fútbol", agreedExpense: "la cancha", weeklyFee: 10_000n * WARS, weeklyCap: 60_000n * WARS });
+    if (!draft.ok) throw new Error(draft.error);
+    for (const name of ["Beto", "Caro"]) await joinFund(db, (await addUser(db, name)).id, draft.inviteCode);
+    const deploy = await deployCall(db, { fundId: draft.id, userId: ana.id, votesRequired: 2, agent: AGENT_ADDRESS });
+    if (!deploy.ok) throw new Error(deploy.error);
+    const fund = randomAccount();
+    await addLiveFund(db, { creatorId: ana.id, address: fund, members: [ana.id] });
+    const user = { id: ana.id, account: account.address };
+
+    const forwarded: { method: string; params: unknown[] }[] = [];
     // /api/bundler without the HTTP: each request is checked as the route checks it, and answered as Pimlico would.
     const gate = custom({
       async request({ method, params }: { method: string; params?: unknown }) {
-        const check = checkBundlerRequest({ jsonrpc: "2.0", id: 1, method, params }, account.address, POLICY);
+        const check = await authorizeBundlerRequest(db, user, { jsonrpc: "2.0", id: 1, method, params }, POLICY, async () => FAST);
         if (!check.ok) throw new Error(`${method}: ${check.status} ${check.error}`);
-        if (method === "pm_getPaymasterData") {
-          const gas = checkSponsoredGas(check.request.params[0], FAST);
-          if (!gas.ok) throw new Error(`${method}: ${gas.status} ${gas.error}`);
-        }
         forwarded.push({ method, params: check.request.params });
+        const creating = JSON.stringify(params).toLowerCase().includes(FUND_FACTORY.slice(2).toLowerCase());
         switch (method) {
           case "eth_chainId":
             return numberToHex(celo.id);
@@ -59,7 +73,7 @@ describe("the requests viem really sends for a sponsored operation", () => {
             };
           case "eth_estimateUserOperationGas":
             return {
-              callGasLimit: numberToHex(300_000n),
+              callGasLimit: numberToHex(creating ? 5_000_000n : 300_000n), // createFund deploys a whole Fund
               verificationGasLimit: numberToHex(700_000n),
               preVerificationGas: numberToHex(80_000n),
               paymasterVerificationGasLimit: numberToHex(40_000n),
@@ -75,24 +89,31 @@ describe("the requests viem really sends for a sponsored operation", () => {
     });
     const bundler = createPimlicoBundlerClient({ client, transport: gate, sponsorshipPolicyId: "set by the server" });
 
-    const hash = await bundler.sendUserOperation({ account, calls: [{ to: PAYMASTER, data: "0x" }] });
+    // Every call shape the web sends: deploy-form's createFund, Aportar's two, and VoteButton's two (lib/vote.ts).
+    const shapes: Record<string, Call[]> = {
+      createFund: [deploy.call],
+      "contribute wARS": contributeCalls({ fund, token: "wars", amount: 10_000n * WARS }),
+      "contribute USDT": contributeCalls({ fund, token: "usdt", amount: 10_000_000n }),
+      vote: voteCalls({ fund, proposalId: 0n, completes: false }),
+      "vote and execute": voteCalls({ fund, proposalId: 0n, completes: true }),
+    };
+    for (const [shape, calls] of Object.entries(shapes)) {
+      forwarded.length = 0;
+      expect(await bundler.sendUserOperation({ account, calls }), shape).toBe(OP);
 
-    expect(hash).toBe(OP);
-    expect(forwarded.map(({ method }) => method)).toContain("pm_getPaymasterData");
-    expect(forwarded.at(-1)?.method).toBe("eth_sendUserOperation");
-    for (const { method, params } of forwarded.filter(({ method }) => method.startsWith("pm_"))) {
-      expect(params[3], method).toEqual({ sponsorshipPolicyId: POLICY });
-    }
-    // viem tags the callData before it asks for anything, so the estimate and the stub carry the tag too.
-    const withOperation = forwarded.filter(({ params }) => typeof params[0] === "object" && params[0] !== null);
-    expect(withOperation.map(({ method }) => method)).toEqual([
-      "pm_getPaymasterStubData",
-      "eth_estimateUserOperationGas",
-      "pm_getPaymasterData",
-      "eth_sendUserOperation",
-    ]);
-    for (const { method, params } of withOperation) {
-      expect((params[0] as { callData: string }).callData.endsWith(ATTRIBUTION_SUFFIX.slice(2)), method).toBe(true);
+      expect(forwarded.at(-1)?.method, shape).toBe("eth_sendUserOperation");
+      for (const { method, params } of forwarded.filter(({ method }) => method.startsWith("pm_"))) {
+        expect(params[3], `${shape}, ${method}`).toEqual({ sponsorshipPolicyId: POLICY });
+      }
+      // viem tags the callData before it asks for anything, so the estimate and the stub carry the tag too.
+      const withOperation = forwarded.filter(({ params }) => typeof params[0] === "object" && params[0] !== null);
+      expect(
+        withOperation.map(({ method }) => method),
+        shape,
+      ).toEqual(["pm_getPaymasterStubData", "eth_estimateUserOperationGas", "pm_getPaymasterData", "eth_sendUserOperation"]);
+      for (const { method, params } of withOperation) {
+        expect((params[0] as { callData: string }).callData.endsWith(ATTRIBUTION_SUFFIX.slice(2)), `${shape}, ${method}`).toBe(true);
+      }
     }
   });
 });

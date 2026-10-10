@@ -1,9 +1,28 @@
+import { FUND_FACTORY, USDT, WARS, fundFactoryAbi } from "@tesoreria/agent";
 import { ATTRIBUTION_SUFFIX } from "@tesoreria/wallet";
-import { eq } from "drizzle-orm";
-import { type Address, isAddress, isAddressEqual, numberToHex } from "viem";
+import { and, eq, isNotNull } from "drizzle-orm";
+import {
+  type Abi,
+  type Address,
+  type Hex,
+  decodeFunctionData,
+  encodeFunctionData,
+  erc20Abi,
+  getAddress,
+  hexToBigInt,
+  hexToNumber,
+  isAddress,
+  isAddressEqual,
+  isHex,
+  numberToHex,
+  parseAbi,
+  size,
+  slice,
+} from "viem";
 import { entryPoint07Address } from "viem/account-abstraction";
 import type { Db } from "./db/client";
-import { memberships } from "./db/schema";
+import { funds, memberships } from "./db/schema";
+import { memberFundAbi } from "./fund-abi";
 
 /** The JSON-RPC methods a member's browser needs to send a sponsored UserOperation, and nothing else. */
 export const BUNDLER_METHODS = new Set([
@@ -18,16 +37,18 @@ export const BUNDLER_METHODS = new Set([
   "pm_getPaymasterData",
 ]);
 
-/** The methods that carry a UserOperation: [userOp, entryPoint, …]. */
+/**
+ * The methods that carry a UserOperation ([userOp, entryPoint, …]), and with it the sponsorship: what they estimate,
+ * stub, sign or send is paid by the paymaster. The others only read.
+ */
 const WITH_USER_OP = new Set(["eth_estimateUserOperationGas", "eth_sendUserOperation", "pm_getPaymasterStubData", "pm_getPaymasterData"]);
-/** The methods whose operation must end with TesorerIA's attribution tag (ERC-8021): what's sent, and what's signed. */
-const TAGGED = new Set(["eth_sendUserOperation", "pm_getPaymasterData"]);
 const CELO = numberToHex(42220);
+const SUFFIX = ATTRIBUTION_SUFFIX.slice(2).toLowerCase();
 
 /** Whether the operation's callData ends with TesorerIA's attribution suffix, which every operation the web makes carries. */
 function isTagged(userOp: unknown): boolean {
   const callData = typeof userOp === "object" && userOp !== null ? (userOp as { callData?: unknown }).callData : undefined;
-  return typeof callData === "string" && callData.toLowerCase().endsWith(ATTRIBUTION_SUFFIX.slice(2).toLowerCase());
+  return typeof callData === "string" && callData.toLowerCase().endsWith(SUFFIX);
 }
 
 export type BundlerRequest = { jsonrpc: "2.0"; id: number | string | null; method: string; params: unknown[] };
@@ -36,8 +57,8 @@ export type BundlerCheck = { ok: true; request: BundlerRequest } | { ok: false; 
 /**
  * What /api/bundler forwards, rebuilt from scratch (spec, 6): only the flow's methods, only operations from
  * `account` (the logged-in member's Safe), only EntryPoint v0.7 on Celo, only operations that carry the attribution
- * tag to be signed or sent, and the paymaster's context replaced by the server's sponsorship policy. Anything else
- * never reaches Pimlico.
+ * tag (viem tags the callData before it asks for anything, so the estimate and the stub carry it too), and the
+ * paymaster's context replaced by the server's sponsorship policy. Anything else never reaches Pimlico.
  */
 export function checkBundlerRequest(body: unknown, account: Address | null, sponsorshipPolicyId: string): BundlerCheck {
   if (account === null) return { ok: false, status: 401, error: "Log in first" };
@@ -60,7 +81,7 @@ export function checkBundlerRequest(body: unknown, account: Address | null, spon
   if (typeof entryPoint !== "string" || !isAddress(entryPoint, { strict: false }) || !isAddressEqual(entryPoint, entryPoint07Address)) {
     return { ok: false, status: 400, error: "EntryPoint v0.7 only" };
   }
-  if (TAGGED.has(method) && !isTagged(userOp)) return { ok: false, status: 400, error: "The operation must end with TesorerIA's attribution tag" };
+  if (!isTagged(userOp)) return { ok: false, status: 400, error: "The operation must end with TesorerIA's attribution tag" };
   if (method.startsWith("pm_")) {
     // ERC-7677: [userOp, entryPoint, chainId, context]. The policy is always the server's.
     if (params[2] !== CELO) return { ok: false, status: 400, error: "Celo only" };
@@ -69,19 +90,140 @@ export function checkBundlerRequest(body: unknown, account: Address | null, spon
   return { ok: true, request: { jsonrpc: "2.0", id, method, params: [userOp, entryPoint] } };
 }
 
+/** A call the operation makes from the member's Safe. */
+export type OperationCall = { to: Address; value: bigint; data: Hex };
+
+/** Safe4337Module: the Safe runs `to`, `value`, `data` with `operation` 0 (call) or 1 (delegatecall). */
+const safe4337Abi = parseAbi([
+  "function executeUserOp(address to, uint256 value, bytes data, uint8 operation)",
+  "function executeUserOpWithErrorString(address to, uint256 value, bytes data, uint8 operation)",
+]);
+const multiSendAbi = parseAbi(["function multiSend(bytes transactions)"]);
+/** Safe 1.4.1's MultiSendCallOnly, which permissionless delegates a batch to: it can only call, never delegatecall. */
+const MULTI_SEND_CALL_ONLY: Address = "0x9641d764fc13c8B624c04430C7356C1C7C8102e2";
+
+/**
+ * `data` decoded with `abi`, but only if encoding what was decoded gives back exactly `data`: then what's checked is
+ * what the contract runs, whatever bytes someone squeezed in or left out.
+ */
+function decodeExactly<const abi extends Abi>(abi: abi, data: Hex) {
+  try {
+    const decoded = decodeFunctionData({ abi, data });
+    const again = encodeFunctionData({ abi, functionName: decoded.functionName, args: decoded.args } as Parameters<typeof encodeFunctionData>[0]);
+    return again === data.toLowerCase() ? decoded : null;
+  } catch {
+    return null;
+  }
+}
+
+/** MultiSend's packed list: per call, operation (1 byte), to (20), value (32), data length (32) and data. Only calls. */
+function unpackMultiSend(transactions: Hex): OperationCall[] | null {
+  const calls: OperationCall[] = [];
+  const total = size(transactions);
+  for (let at = 0; at < total; ) {
+    if (total - at < 85) return null;
+    if (hexToNumber(slice(transactions, at, at + 1)) !== 0) return null;
+    const to = getAddress(slice(transactions, at + 1, at + 21));
+    const value = hexToBigInt(slice(transactions, at + 21, at + 53));
+    const length = hexToBigInt(slice(transactions, at + 53, at + 85));
+    if (length > BigInt(total - at - 85)) return null;
+    const data = length === 0n ? "0x" : slice(transactions, at + 85, at + 85 + Number(length));
+    calls.push({ to, value, data });
+    at += 85 + Number(length);
+  }
+  return calls.length > 0 ? calls : null;
+}
+
+/**
+ * The calls a member's Safe makes for this callData, without the attribution suffix: Safe4337Module's
+ * `executeUserOp` or `executeUserOpWithErrorString`, with one call, or with a batch delegated to MultiSendCallOnly.
+ * Null for anything else, including an encoding other than the exact one those functions make.
+ */
+export function operationCalls(callData: string): OperationCall[] | null {
+  if (!isHex(callData)) return null;
+  const body = callData.toLowerCase().endsWith(SUFFIX) ? slice(callData, 0, size(callData) - size(ATTRIBUTION_SUFFIX)) : callData;
+  const executed = decodeExactly(safe4337Abi, body);
+  if (executed === null) return null;
+  const [to, value, data, operation] = executed.args;
+  if (operation === 0) return [{ to: getAddress(to), value, data }];
+  if (operation !== 1 || !isAddressEqual(to, MULTI_SEND_CALL_ONLY) || value !== 0n) return null;
+  const batch = decodeExactly(multiSendAbi, data);
+  return batch === null ? null : unpackMultiSend(batch.args[0]);
+}
+
+/** Who may be sponsored, and for which funds. */
+export type Sponsorship = {
+  /** The live funds the person is a member of. */
+  liveFunds: Address[];
+  /** Whether they created a draft that is being created right now (`deploying`): its createFund is theirs to send. */
+  creatingFund: boolean;
+};
+
+/** What a live fund's member calls on it (spec, 9): contribute, and vote and execute. */
+const FUND_CALLS = new Set(["contributeWars", "contributeUsdt", "vote", "execute"]);
+
+/** Whether a member of the live funds `isLive` knows may make this call: approve one for wARS or USDT, or call it. */
+function memberCall({ to, data }: OperationCall, isLive: (address: Address) => boolean): boolean {
+  if (isAddressEqual(to, WARS) || isAddressEqual(to, USDT)) {
+    const decoded = decodeExactly(erc20Abi, data);
+    return decoded?.functionName === "approve" && isLive(decoded.args[0]);
+  }
+  if (!isLive(to)) return false;
+  const decoded = decodeExactly(memberFundAbi, data);
+  return decoded !== null && FUND_CALLS.has(decoded.functionName);
+}
+
+/**
+ * The calls the paymaster pays for, and nothing else (spec, 6: no open sponsored bundler), all with no value:
+ * - FundFactory.createFund, alone, from the creator of a fund being created;
+ * - approve(fund, x) on wARS or USDT, and contributeWars, contributeUsdt, vote and execute on the fund, for a
+ *   live fund the person is a member of.
+ * `createsFund` says which: it gets the larger gas ceiling.
+ */
+export function checkCalls(
+  calls: OperationCall[],
+  { liveFunds, creatingFund }: Sponsorship,
+): { ok: true; createsFund: boolean } | { ok: false; status: 403; error: string } {
+  const refuse = (error: string) => ({ ok: false, status: 403, error }) as const;
+  if (calls.some((call) => call.value !== 0n)) return refuse("Sponsored calls can't send CELO");
+  const [only] = calls;
+  if (calls.length === 1 && only !== undefined && isAddressEqual(only.to, FUND_FACTORY)) {
+    if (decodeExactly(fundFactoryAbi, only.data)?.functionName !== "createFund") return refuse("Only createFund is sponsored on the factory");
+    return creatingFund ? { ok: true, createsFund: true } : refuse("Only the creator of a fund being created can create it");
+  }
+  const isLive = (address: Address) => liveFunds.some((fund) => isAddressEqual(fund, address));
+  const refused = calls.find((call) => !memberCall(call, isLive));
+  if (refused !== undefined) return refuse(`Call not sponsored: ${refused.data.slice(0, 10)} on ${refused.to}`);
+  return { ok: true, createsFund: false };
+}
+
 /** The operation's fee may be this many times Pimlico's current "fast" price: the client prices at "fast", the rest is room for the price to move before the paymaster signs. */
 export const MAX_FEE_MULTIPLE = 2n;
-/** The heaviest flow (a first Safe deployment plus FundFactory.createFund) used 3.8M gas on the fork; this leaves room and still caps what one operation can take from the paymaster. */
-export const MAX_OPERATION_GAS = 10_000_000n;
+/**
+ * The creator's createFund: a first Safe deployment plus FundFactory.createFund used 3.85M gas on the fork (the
+ * Fund's code deposit alone is ~2.95M). This leaves room for Pimlico's estimate and still caps what it can take.
+ */
+export const MAX_CREATE_FUND_GAS = 10_000_000n;
+/**
+ * Every other operation. The heaviest measured on the fork, a first contribution in USDT with the Safe's deployment,
+ * used 642k gas (vote and execute with the deployment, 626k; once deployed, a contribution 230k and a vote 176k):
+ * about three times that leaves room for Pimlico's estimate, and keeps what one operation can take small.
+ */
+export const MAX_OPERATION_GAS = 2_000_000n;
 
 const QUANTITY = /^0x[0-9a-fA-F]{1,64}$/;
 
 /**
  * What the paymaster signs when it sponsors (pm_getPaymasterData) is the operation with its fees and gas limits,
  * so those are bounded here: a member can't get a signature for an operation that overpays its bundler (itself,
- * if it submits the operation) out of the paymaster's deposit. `fastMaxFeePerGas` is Pimlico's current price.
+ * if it submits the operation) out of the paymaster's deposit. `fastMaxFeePerGas` is Pimlico's current price, and
+ * `maxGas` the most the limits may add up to.
  */
-export function checkSponsoredGas(userOp: unknown, fastMaxFeePerGas: bigint): { ok: true } | { ok: false; status: 400; error: string } {
+export function checkSponsoredGas(
+  userOp: unknown,
+  fastMaxFeePerGas: bigint,
+  maxGas: bigint,
+): { ok: true } | { ok: false; status: 400; error: string } {
   const fields = (typeof userOp === "object" && userOp !== null ? userOp : {}) as Record<string, unknown>;
   const quantity = (name: string, optional = false): bigint | undefined => {
     const value = fields[name];
@@ -102,38 +244,85 @@ export function checkSponsoredGas(userOp: unknown, fastMaxFeePerGas: bigint): { 
   }
   if (maxPriorityFee > maxFee) return { ok: false, status: 400, error: "maxPriorityFeePerGas above maxFeePerGas" };
   if (maxFee > MAX_FEE_MULTIPLE * fastMaxFeePerGas) return { ok: false, status: 400, error: "maxFeePerGas too high" };
-  if ((gas as bigint[]).reduce((sum, limit) => sum + limit, 0n) > MAX_OPERATION_GAS) {
-    return { ok: false, status: 400, error: "Gas limits too high" };
-  }
+  if ((gas as bigint[]).reduce((sum, limit) => sum + limit, 0n) > maxGas) return { ok: false, status: 400, error: "Gas limits too high" };
   return { ok: true };
 }
 
+/** The live funds `userId` is a member of, and whether a draft they created is being created. */
+async function sponsorshipOf(db: Db, userId: string): Promise<Sponsorship> {
+  const live = await db
+    .select({ address: funds.address })
+    .from(memberships)
+    .innerJoin(funds, eq(funds.id, memberships.fundId))
+    .where(and(eq(memberships.userId, userId), eq(funds.status, "live"), isNotNull(funds.address)));
+  const [creating] = await db
+    .select({ id: funds.id })
+    .from(funds)
+    .where(and(eq(funds.creatorId, userId), eq(funds.status, "deploying")))
+    .limit(1);
+  return { liveFunds: live.map((row) => getAddress(row.address!)), creatingFund: creating !== undefined };
+}
+
 /**
- * `checkBundlerRequest`, and the gas is paid only for people who belong to a draft or live fund (a row in
- * `memberships`): a stranger with an account gets nothing, however well-formed the request.
+ * `checkBundlerRequest`, and then who gets what:
+ * - reading (the chain's id, a receipt, the price) is for anyone in a fund, draft or live;
+ * - what carries the sponsorship (estimating, stubbing, signing or sending an operation) is only for a member of a
+ *   live fund, or the creator of a draft being created (deployCall freezes it to `deploying` before the browser
+ *   asks for anything), and only for the calls `checkCalls` allows: a stranger who makes an account and a draft
+ *   gets nothing paid.
  *
- * With `fastMaxFeePerGas` (Pimlico's current price, read only when it is needed), a sponsoring request
- * (pm_getPaymasterData) also has to pass `checkSponsoredGas`; if the price can't be read, it is refused with 502
- * rather than signed blind. The fork has no paymaster to protect and passes none.
+ * `fastMaxFeePerGas` reads Pimlico's current price, only when it's needed: a sponsoring request (pm_getPaymasterData)
+ * also has to pass `checkSponsoredGas`, with 10M gas for a createFund and 2M for anything else, and if the price can't
+ * be read it's refused with 502 rather than signed blind. It's null only on the fork, which has no paymaster to protect.
  */
 export async function authorizeBundlerRequest(
   db: Db,
   user: { id: string; account: Address } | null,
   body: unknown,
   sponsorshipPolicyId: string,
-  fastMaxFeePerGas?: () => Promise<bigint>,
+  fastMaxFeePerGas: (() => Promise<bigint>) | null,
 ): Promise<BundlerCheck> {
   const check = checkBundlerRequest(body, user?.account ?? null, sponsorshipPolicyId);
   if (!check.ok || user === null) return check; // without a user the check never passes
-  const [membership] = await db.select({ fundId: memberships.fundId }).from(memberships).where(eq(memberships.userId, user.id)).limit(1);
-  if (membership === undefined) return { ok: false, status: 403, error: "Only members of a fund are sponsored" };
-  if (fastMaxFeePerGas === undefined || check.request.method !== "pm_getPaymasterData") return check;
+  const { method, params } = check.request;
+  if (!WITH_USER_OP.has(method)) {
+    const [membership] = await db.select({ fundId: memberships.fundId }).from(memberships).where(eq(memberships.userId, user.id)).limit(1);
+    return membership === undefined ? { ok: false, status: 403, error: "Only members of a fund use the bundler" } : check;
+  }
+  const sponsorship = await sponsorshipOf(db, user.id);
+  if (sponsorship.liveFunds.length === 0 && !sponsorship.creatingFund) {
+    return { ok: false, status: 403, error: "Only members of a live fund, and the creator of a fund being created, are sponsored" };
+  }
+  const calls = operationCalls((params[0] as { callData: string }).callData); // a string: checkBundlerRequest saw its tag
+  if (calls === null) return { ok: false, status: 403, error: "Only a Safe's calls, one or a MultiSendCallOnly batch, are sponsored" };
+  const allowed = checkCalls(calls, sponsorship);
+  if (!allowed.ok) return allowed;
+
+  if (fastMaxFeePerGas === null || method !== "pm_getPaymasterData") return check;
   let price: bigint;
   try {
     price = await fastMaxFeePerGas();
   } catch {
     return { ok: false, status: 502, error: "Couldn't read the current gas price" };
   }
-  const gas = checkSponsoredGas(check.request.params[0], price);
+  const gas = checkSponsoredGas(params[0], price, allowed.createsFund ? MAX_CREATE_FUND_GAS : MAX_OPERATION_GAS);
   return gas.ok ? check : gas;
+}
+
+/**
+ * Pimlico's answer, before it goes back to the browser. A paymaster stub that says it's final (ERC-7677 `isFinal`)
+ * would make viem skip pm_getPaymasterData and send with the stub's data: a sponsorship signed without the gas and
+ * fee checks above. Only the checked pm_getPaymasterData may sign, so such a stub is refused with 502.
+ */
+export function checkBundlerAnswer(method: string, text: string): { ok: true } | { ok: false; status: 502; error: string } {
+  if (method !== "pm_getPaymasterStubData") return { ok: true };
+  let answer: unknown;
+  try {
+    answer = JSON.parse(text);
+  } catch {
+    return { ok: true }; // not JSON: viem fails on it by itself
+  }
+  const result = typeof answer === "object" && answer !== null ? (answer as { result?: unknown }).result : undefined;
+  const isFinal = typeof result === "object" && result !== null && (result as { isFinal?: unknown }).isFinal === true;
+  return isFinal ? { ok: false, status: 502, error: "The paymaster's stub must not be final" } : { ok: true };
 }

@@ -1,10 +1,11 @@
-import { ATTRIBUTION_SUFFIX } from "@tesoreria/wallet";
-import { getAddress, numberToHex } from "viem";
+import { type Address, encodeFunctionData, erc20Abi, getAddress, numberToHex } from "viem";
 import { entryPoint07Address } from "viem/account-abstraction";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CurrentUser } from "../src/lib/current-user";
 import type { Db } from "../src/lib/db/client";
+import { contributeCalls } from "../src/lib/contribute";
 import { addLiveFund, addUser, randomAccount, testDb } from "./support/db";
+import { safeCallData } from "./support/safe";
 
 // The route as the server runs it, with the session and the database standing in, and Pimlico's answer faked.
 const KEY = "pim_test_key_8b1f";
@@ -17,7 +18,13 @@ vi.mock("../src/lib/db/client", async (importOriginal) => ({
 }));
 
 const CELO = numberToHex(42220);
-const op = (sender: string) => ({ sender, nonce: "0x0", callData: ATTRIBUTION_SUFFIX });
+const FUND: Address = randomAccount(); // the member's live fund
+/** An operation from `sender`: by default, contributing to the member's fund, as Aportar sends it. */
+const op = (sender: string, callData: string = safeCallData(contributeCalls({ fund: FUND, token: "wars", amount: 10n ** 18n }))) => ({
+  sender,
+  nonce: "0x0",
+  callData,
+});
 const rpc = (method: string, params: unknown[] = []) => ({ jsonrpc: "2.0", id: 5, method, params });
 
 let POST: (request: Request) => Promise<Response>;
@@ -37,7 +44,7 @@ beforeAll(async () => {
   state.db = db;
   const ana = await addUser(db, "Ana");
   const outsider = await addUser(db, "Outsider");
-  await addLiveFund(db, { creatorId: ana.id, address: randomAccount(), members: [ana.id] });
+  await addLiveFund(db, { creatorId: ana.id, address: FUND, members: [ana.id] });
   member = { id: ana.id, name: ana.name, account: getAddress(ana.account) };
   stranger = { id: outsider.id, name: outsider.name, account: getAddress(outsider.account) };
   ({ POST } = await import("../src/app/api/bundler/route"));
@@ -111,12 +118,30 @@ describe("POST /api/bundler", () => {
     });
   });
 
+  it("answers 403 to a call the paymaster doesn't pay for, and asks Pimlico nothing", async () => {
+    const transfer = safeCallData([{ to: FUND, data: encodeFunctionData({ abi: erc20Abi, functionName: "transfer", args: [stranger.account, 1n] }) }]);
+    for (const method of ["eth_estimateUserOperationGas", "pm_getPaymasterStubData", "pm_getPaymasterData", "eth_sendUserOperation"]) {
+      const params = method.startsWith("pm_") ? [op(member.account, transfer), entryPoint07Address, CELO, {}] : [op(member.account, transfer), entryPoint07Address];
+      expect((await call(rpc(method, params))).status, method).toBe(403);
+    }
+    expect(pimlico).not.toHaveBeenCalled();
+  });
+
+  it("answers 502 to a paymaster stub that says it's final, and passes nothing of it on", async () => {
+    pimlico.mockImplementation(async () =>
+      Response.json({ jsonrpc: "2.0", id: 5, result: { paymaster: stranger.account, paymasterData: "0x5167", isFinal: true } }),
+    );
+    const response = await call(rpc("pm_getPaymasterStubData", [op(member.account), entryPoint07Address, CELO, {}]));
+    expect(response.status).toBe(502);
+    expect(await response.json()).toEqual({ jsonrpc: "2.0", id: 5, error: { code: -32600, message: "The paymaster's stub must not be final" } });
+  });
+
   describe("when the paymaster is about to sign", () => {
     const sponsored = (change: Record<string, unknown> = {}) => ({
       ...op(member.account),
       maxFeePerGas: numberToHex(2n * FAST),
       maxPriorityFeePerGas: numberToHex(1_000_000_000n),
-      callGasLimit: numberToHex(3_000_000n),
+      callGasLimit: numberToHex(1_000_000n), // 2M in all, the ceiling for anything but a createFund
       verificationGasLimit: numberToHex(900_000n),
       preVerificationGas: numberToHex(100_000n),
       ...change,
