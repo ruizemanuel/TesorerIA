@@ -23,7 +23,7 @@ vi.mock("viem/account-abstraction", async (importOriginal) => ({
 const api = vi.hoisted(() => ({ post: vi.fn(async (_path: string, _body?: unknown) => ({ ok: true })), get: vi.fn() }));
 vi.mock("../src/lib/client/api", () => api);
 
-import { UserFacingError } from "../src/lib/client/errors";
+import { OnItsWayError, UserFacingError } from "../src/lib/client/errors";
 import { type Me, sendCalls, settleOperation } from "../src/lib/client/wallet";
 
 const ACCOUNT = getAddress("0x2F8218c7cF6d822091EDe24Db9c46B0324c21A6F");
@@ -82,6 +82,7 @@ describe("sendCalls", () => {
     const error = await sendCalls(me, CALLS, INFO).catch((caught) => caught);
     expect(error).toBeInstanceOf(UserFacingError);
     expect(error.message).toBe("Tu passkey no coincide con tu cuenta. Entrá de nuevo.");
+    expect(error).not.toBeInstanceOf(OnItsWayError);
     expect(wallet.sendTaggedCalls).not.toHaveBeenCalled();
   });
 
@@ -97,6 +98,7 @@ describe("sendCalls", () => {
     const error = await sendCalls(me, CALLS, INFO).catch((caught) => caught);
     expect(error).toBeInstanceOf(UserFacingError);
     expect(error.message).toBe("La operación no se pudo completar. No se movió plata.");
+    expect(error).not.toBeInstanceOf(OnItsWayError); // it landed and failed: trying again is the right thing
     expect(posted().at(-1)).toEqual(["/api/operations/done", { userOpHash: OP, transactionHash: TX, success: false }]);
   });
 
@@ -110,7 +112,7 @@ describe("sendCalls", () => {
 
     const error = await sendCalls(me, CALLS, INFO).catch((caught) => caught);
 
-    expect(error).toBeInstanceOf(UserFacingError);
+    expect(error).toBeInstanceOf(OnItsWayError);
     expect(error.message).toMatch(/en camino/);
     expect(error.message).not.toMatch(/prob[aá] de nuevo/i);
     expect(posted()).toEqual([
@@ -125,7 +127,7 @@ describe("sendCalls", () => {
       throw new Error("Timed out while waiting for User Operation receipt.");
     });
     const error = await sendCalls(me, CALLS, INFO).catch((caught) => caught);
-    expect(error).toBeInstanceOf(UserFacingError);
+    expect(error).toBeInstanceOf(OnItsWayError);
     expect(error.message).toMatch(/en camino/);
     expect(posted().every(([path]) => path === "/api/operations")).toBe(true); // idempotent: the server keeps one row
   });
@@ -222,7 +224,7 @@ describe("settleOperation", () => {
   it("says it's on its way, and records nothing, while the bundler has no receipt for it", async () => {
     bundler(null);
     const error = await settleOperation(OP).catch((caught) => caught);
-    expect(error).toBeInstanceOf(UserFacingError);
+    expect(error).toBeInstanceOf(OnItsWayError);
     expect(error.message).toMatch(/en camino/);
     expect(api.post).not.toHaveBeenCalled();
   });

@@ -4,7 +4,22 @@
  * sentence, so no English and no technical word reaches the screen (spec, 9.2).
  */
 export class UserFacingError extends Error {
-  override readonly name = "UserFacingError";
+  override readonly name: string = "UserFacingError";
+}
+
+/**
+ * The operation went out but its receipt or its record never came back: it may well land. It is told apart
+ * so nothing sends it again (spec, 6): no second Aportar, and a createFund that went out is never called off.
+ */
+export class OnItsWayError extends UserFacingError {
+  override readonly name: string = "OnItsWayError";
+  constructor(options?: ErrorOptions) {
+    super("Tu operación está en camino. En unos minutos la vas a ver reflejada: no la mandes de nuevo.", options);
+  }
+}
+
+export function isOnItsWay(error: unknown): error is OnItsWayError {
+  return error instanceof OnItsWayError;
 }
 
 const CANCELLED = "Cancelaste la confirmación. Probá de nuevo.";

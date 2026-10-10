@@ -3,7 +3,7 @@ import { type Address, type Hash, type Hex, createPublicClient, http } from "vie
 import { UserOperationReceiptNotFoundError, createBundlerClient, toWebAuthnAccount } from "viem/account-abstraction";
 import { celo } from "viem/chains";
 import { get, post } from "./api";
-import { UserFacingError } from "./errors";
+import { OnItsWayError, UserFacingError } from "./errors";
 
 export type Me = { name: string; account: Address; credential: { id: string; publicKey: Hex } };
 export type OperationInfo = {
@@ -32,8 +32,6 @@ function bundlerTransport() {
   return http(new URL("/api/bundler", window.location.origin).toString(), { timeout: BUNDLER_TIMEOUT_MS });
 }
 
-const ON_ITS_WAY = "Tu operación está en camino. En unos minutos la vas a ver reflejada: no la mandes de nuevo.";
-
 /**
  * Signs `calls` with the member's passkey and sends them as one sponsored UserOperation through /api/bundler.
  * The only function that knows a Safe with a passkey is behind it: the rest of the web just asks to sign calls
@@ -41,7 +39,8 @@ const ON_ITS_WAY = "Tu operación está en camino. En unos minutos la vas a ver 
  *
  * `onSigned` is called as soon as the person has confirmed with the passkey, before the operation is sent.
  * `nonce` pins a createFund's EntryPoint nonce: the resend of one that never came back, so both can't land.
- * Its own errors are `UserFacingError`s; viem's and the bundler's pass through for `userMessage` to map.
+ * Its own errors are `UserFacingError`s, and an `OnItsWayError` when the operation is out and may still land;
+ * viem's and the bundler's pass through for `userMessage` to map.
  */
 export async function sendCalls(
   me: Me,
@@ -94,7 +93,7 @@ export async function sendCalls(
     if (sent === undefined) throw error; // it never left: the error says why
     // It is out, and either its receipt didn't come or it isn't recorded. Try to record it again and don't invite a retry.
     await record(sent).catch(() => {});
-    throw new UserFacingError(ON_ITS_WAY, { cause: error });
+    throw new OnItsWayError({ cause: error });
   }
   if (result.unrecorded !== undefined) await record(result.userOpHash).catch(() => {});
   await post("/api/operations/done", {
@@ -123,7 +122,7 @@ export async function settleOperation(userOpHash: Hash): Promise<void> {
   try {
     receipt = await bundlerClient.getUserOperationReceipt({ hash: userOpHash });
   } catch (error) {
-    if (error instanceof UserOperationReceiptNotFoundError) throw new UserFacingError(ON_ITS_WAY, { cause: error });
+    if (error instanceof UserOperationReceiptNotFoundError) throw new OnItsWayError({ cause: error });
     throw error;
   }
   await post("/api/operations/done", { userOpHash, transactionHash: receipt.receipt.transactionHash, success: receipt.success });

@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { del, post } from "../lib/client/api";
-import { userMessage } from "../lib/client/errors";
+import { isOnItsWay, userMessage } from "../lib/client/errors";
 import { loadMe, sendCalls, settleOperation } from "../lib/client/wallet";
 import type { DeployStep } from "../lib/funds";
 import { Button } from "./ui";
@@ -77,9 +77,10 @@ export function DeployForm({ fundId, memberCount, chosenVotes }: { fundId: strin
             }
           } catch (caught) {
             // Only a deploy this click built is called off, so people can join again: a refusal from the server,
-            // say while another tab is signing, leaves the draft as it is. The server also keeps the list frozen
-            // while a createFund is on its way.
-            if (built) await del(`/api/drafts/${fundId}/deploy`).catch(() => {});
+            // say while another tab is signing, leaves the draft as it is. Nor is one that went out and may still
+            // land: reopening the draft would let the list change under a createFund that is about to be created.
+            // The server also keeps the list frozen while a createFund is on its way.
+            if (built && !isOnItsWay(caught)) await del(`/api/drafts/${fundId}/deploy`).catch(() => {});
             setError(userMessage(caught));
             setStep("idle");
           }

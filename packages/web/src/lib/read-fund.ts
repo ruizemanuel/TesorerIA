@@ -11,7 +11,15 @@ import { type FundView, buildFundView } from "./fund-view";
 import { pendingOperations } from "./operations";
 import { type ProposalState, type TimelineItem, buildTimeline } from "./timeline";
 
-export type FundScreen = { fundId: string; view: FundView; timeline: TimelineItem[]; viewerIsMember: boolean; publicView: boolean };
+export type FundScreen = {
+  fundId: string;
+  view: FundView;
+  timeline: TimelineItem[];
+  viewerIsMember: boolean;
+  publicView: boolean;
+  /** The viewer has a contribution here that went out and has no receipt yet: Aportar must not offer to send another. */
+  contributionOnItsWay: boolean;
+};
 
 /** The history read doesn't add up: some event is missing, so nothing is shown from it. */
 export class HistoryGapError extends Error {
@@ -109,7 +117,8 @@ export async function loadFundScreen(
     viewerIsMember: !publicView && viewerIsMember,
     now: new Date(Number(clock.timestamp) * 1000),
   });
-  return { fundId: fund.id, view, timeline, viewerIsMember, publicView };
+  const contributionOnItsWay = pending.some((operation) => operation.kind === "contribute");
+  return { fundId: fund.id, view, timeline, viewerIsMember, publicView, contributionOnItsWay };
 }
 
 /** Each proposal's state now: votes, executed, deadline, and whether `viewer` voted. */

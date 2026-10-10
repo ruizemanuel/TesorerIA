@@ -35,6 +35,7 @@ export default async function FundPage({ params, searchParams }: { params: Promi
           balance={screen.view.balance}
           owed={screen.view.me?.owed ?? 0n}
           weeklyFee={screen.view.weeklyFee}
+          contributionOnItsWay={screen.contributionOnItsWay}
         />
       </Panel>
     );

@@ -1,7 +1,7 @@
 import { WebAuthnP256 } from "ox";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { post } from "../src/lib/client/api";
-import { UserFacingError, userMessage } from "../src/lib/client/errors";
+import { OnItsWayError, UserFacingError, isOnItsWay, userMessage } from "../src/lib/client/errors";
 
 const CANCELLED = "Cancelaste la confirmación. Probá de nuevo.";
 const GENERIC = "No se pudo completar. Probá de nuevo en un rato.";
@@ -11,6 +11,19 @@ afterEach(() => vi.unstubAllGlobals());
 describe("userMessage", () => {
   it("passes through the messages our own code wrote for people", () => {
     expect(userMessage(new UserFacingError("Ese mail no parece válido."))).toBe("Ese mail no parece válido.");
+  });
+
+  it("tells an operation that is out and may still land from every other error, and shows its own sentence", () => {
+    const cause = new Error("Timed out while waiting for User Operation receipt.");
+    const onItsWay = new OnItsWayError({ cause });
+    expect(isOnItsWay(onItsWay)).toBe(true);
+    expect(onItsWay).toBeInstanceOf(UserFacingError);
+    expect(onItsWay.cause).toBe(cause);
+    expect(userMessage(onItsWay)).toBe("Tu operación está en camino. En unos minutos la vas a ver reflejada: no la mandes de nuevo.");
+    // Anything else, a Spanish message of ours included, is a failure that may be tried again.
+    for (const other of [new UserFacingError("Tu passkey no coincide con tu cuenta. Entrá de nuevo."), cause, "en camino", undefined, null]) {
+      expect(isOnItsWay(other)).toBe(false);
+    }
   });
 
   it("passes through the Spanish error an API route answered with", async () => {

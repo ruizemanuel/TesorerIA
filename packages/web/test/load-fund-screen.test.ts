@@ -1,10 +1,10 @@
 import { WARS as WARS_TOKEN } from "@tesoreria/agent";
 import { eq } from "drizzle-orm";
-import { getAddress } from "viem";
+import { type Address, getAddress } from "viem";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CurrentUser } from "../src/lib/current-user";
 import type { Db } from "../src/lib/db/client";
-import { expenses, funds } from "../src/lib/db/schema";
+import { expenses, funds, operations } from "../src/lib/db/schema";
 import { formatPesos } from "../src/lib/format";
 import { recordOperation } from "../src/lib/operations";
 import { HistoryGapError, loadFundScreen } from "../src/lib/read-fund";
@@ -192,5 +192,48 @@ describe("loadFundScreen: the public view", () => {
     await recordOperation(db, beto.id, { userOpHash: `0x${"b2".repeat(32)}`, kind: "contribute", fund: address, amount: 20_000n * WARS, token: "wars" });
     const forBeto = (await loadFundScreen(address, asViewer(beto)))!;
     expect(texts(forBeto)).toEqual([`Tu aporte de ${formatPesos(20_000n * WARS)} está en camino.`]);
+  });
+
+  describe("a contribution on its way", () => {
+    const send = (userId: string, address: Address, hash: string, kind: "contribute" | "vote" = "contribute") =>
+      recordOperation(db, userId, { userOpHash: `0x${hash.repeat(32)}`, kind, fund: address, amount: 10_000n * WARS, token: "wars" });
+    const onItsWay = async (address: Address, viewer: Person) => (await loadFundScreen(address, asViewer(viewer)))!.contributionOnItsWay;
+
+    it("is reported to the member who sent it, and to no one else", async () => {
+      const address = await liveFund();
+      expect(await onItsWay(address, ana)).toBe(false);
+      await send(ana.id, address, "c1");
+      expect(await onItsWay(address, ana)).toBe(true);
+      expect(await onItsWay(address, beto)).toBe(false);
+    });
+
+    it("is not reported for a vote, for another fund's contribution, or once it has its receipt", async () => {
+      const address = await liveFund();
+      await send(ana.id, address, "c2", "vote");
+      await send(ana.id, randomAccount(), "c3");
+      expect(await onItsWay(address, ana)).toBe(false);
+      await send(ana.id, address, "c4");
+      await db
+        .update(operations)
+        .set({ transactionHash: `0x${"c4".repeat(32)}`, success: true })
+        .where(eq(operations.userOpHash, `0x${"c4".repeat(32)}`));
+      expect(await onItsWay(address, ana)).toBe(false);
+    });
+
+    it("is reported only within the window, so a lost one doesn't block the button for good", async () => {
+      const address = await liveFund();
+      await send(ana.id, address, "c5");
+      const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000);
+      await db.update(operations).set({ createdAt: ago(14) }).where(eq(operations.userOpHash, `0x${"c5".repeat(32)}`));
+      expect(await onItsWay(address, ana)).toBe(true);
+      await db.update(operations).set({ createdAt: ago(16) }).where(eq(operations.userOpHash, `0x${"c5".repeat(32)}`));
+      expect(await onItsWay(address, ana)).toBe(false);
+    });
+
+    it("is never reported on a public view", async () => {
+      const address = await liveFund({ publicView: true });
+      await send(ana.id, address, "c6");
+      expect((await loadFundScreen(address, asViewer(ana), { publicView: true }))!.contributionOnItsWay).toBe(false);
+    });
   });
 });

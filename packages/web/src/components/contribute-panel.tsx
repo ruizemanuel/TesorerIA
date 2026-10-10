@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { type Address, erc20Abi } from "viem";
 import { post } from "../lib/client/api";
-import { userMessage } from "../lib/client/errors";
+import { isOnItsWay, userMessage } from "../lib/client/errors";
 import { celoBrowserClient, loadMe, sendCalls } from "../lib/client/wallet";
 import {
   MIN_BINANCE_USDT,
@@ -39,6 +39,7 @@ export function ContributePanel({
   balance,
   owed,
   weeklyFee,
+  contributionOnItsWay,
 }: {
   fund: Address;
   account: Address;
@@ -46,6 +47,8 @@ export function ContributePanel({
   /** What this member still owes through this week. */
   owed: bigint;
   weeklyFee: bigint;
+  /** A contribution of this member's already went out and has no receipt yet: the button is not offered again. */
+  contributionOnItsWay: boolean;
 }) {
   const router = useRouter();
   const [tab, setTab] = useState<Token>("usdt");
@@ -54,6 +57,7 @@ export function ContributePanel({
   const [typed, setTyped] = useState<string | null>(null);
   const [step, setStep] = useState<"idle" | "signing" | "sending">("idle");
   const [error, setError] = useState("");
+  const [sentNow, setSentNow] = useState(false);
   const busy = useRef(false); // a second click lands before the button re-renders as disabled
 
   // Every 10 s, what has reached the member's account (spec, 9, pantalla 3).
@@ -95,6 +99,8 @@ export function ContributePanel({
   const amount = tab === "usdt" ? usdtOffer : warsReading.ok ? warsReading.amount : 0n;
   const label = tab === "usdt" ? formatUsdt(amount) : formatPesos(amount);
   const holding = held === null ? 0n : held[tab];
+  // Whether the server knows of one (a reopened panel, another tab) or this click just sent one: either way, no second.
+  const onItsWay = contributionOnItsWay || sentNow;
 
   async function contribute() {
     if (busy.current || amount === 0n) return;
@@ -112,7 +118,13 @@ export function ContributePanel({
     } catch (caught) {
       setError(userMessage(caught));
       setStep("idle");
-      busy.current = false;
+      if (isOnItsWay(caught)) {
+        // It went out and may still land: the button stays off, and the page shows it "en camino" meanwhile.
+        setSentNow(true);
+        router.refresh();
+      } else {
+        busy.current = false;
+      }
     }
   }
 
@@ -156,7 +168,9 @@ export function ContributePanel({
         <AddressBox address={account} />
 
         <div className="grid gap-3 rounded-[14px] bg-surface p-4">
-          {held === null ? (
+          {onItsWay ? (
+            !sentNow && <p className="font-semibold">Tu aporte está en camino. Cuando se confirme, lo ves en el fondo.</p>
+          ) : held === null ? (
             <p className="text-muted">{lookFailed ? "No pudimos mirar tu cuenta. Probamos de nuevo en unos segundos." : "Mirando tu cuenta…"}</p>
           ) : holding === 0n ? (
             <p className="text-muted">Todavía no llegó nada. Cuando llegue, aparece acá; puede tardar unos minutos.</p>
