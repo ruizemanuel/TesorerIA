@@ -2,6 +2,7 @@ import { type PasskeyAssertion, verifyPasskeyAssertion } from "@tesoreria/wallet
 import { eq } from "drizzle-orm";
 import { Base64, Hex as OxHex } from "ox";
 import { type Address, type Hex, isHex, size } from "viem";
+import { personProblem } from "./checks";
 import type { Db } from "./db/client";
 import { credentials, users } from "./db/schema";
 import type { Session } from "./session";
@@ -68,10 +69,10 @@ export async function registerMember({
     return { ok: false, status, error };
   };
   if (challenge === null) return fail(400, LATE);
+  const problem = personProblem(input); // the same check the form ran before making the passkey
+  if (problem !== null) return fail(400, problem);
   const name = input.name.trim();
-  if (name.length === 0 || name.length > 30) return fail(400, "Poné tu nombre, de hasta 30 letras.");
   const email = input.email?.trim() || undefined;
-  if (email !== undefined && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return fail(400, "Ese mail no parece válido.");
   if (!isHex(input.publicKey) || size(input.publicKey) !== 64) return fail(400, BAD_PASSKEY);
   if (!isHex(input.userHandle) || size(input.userHandle) !== 16) return fail(400, BAD_PASSKEY);
   let client: { type?: unknown; challenge?: unknown; origin?: unknown } | null;

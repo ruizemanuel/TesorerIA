@@ -1,7 +1,7 @@
 import { z } from "zod";
+import { readDraft } from "../../../lib/checks";
 import { currentUser } from "../../../lib/current-user";
 import { getDb } from "../../../lib/db/client";
-import { parsePesos } from "../../../lib/format";
 import { createDraft } from "../../../lib/funds";
 import { jsonError, readJson } from "../../../lib/http";
 
@@ -18,10 +18,8 @@ export async function POST(request: Request) {
   if (user === null) return jsonError(401, "Entrá con tu passkey.");
   const body = await readJson(request, Draft);
   if (!body.ok) return body.response;
-  const weeklyFee = parsePesos(body.value.weeklyFee);
-  const weeklyCap = parsePesos(body.value.weeklyCap);
-  if (weeklyFee === null) return jsonError(400, "No entendimos la cuota. Escribila como 10.000 o 10.000,50.");
-  if (weeklyCap === null) return jsonError(400, "No entendimos el tope. Escribilo como 60.000 o 60.000,50.");
-  const result = await createDraft(await getDb(), user.id, { ...body.value, weeklyFee, weeklyCap });
+  const read = readDraft(body.value); // the same checks the form ran before making the passkey
+  if (!read.ok) return jsonError(400, read.error);
+  const result = await createDraft(await getDb(), user.id, read.draft);
   return result.ok ? Response.json({ id: result.id }) : jsonError(result.status, result.error);
 }

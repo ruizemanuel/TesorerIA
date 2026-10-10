@@ -5,6 +5,7 @@ import { useState } from "react";
 import { post } from "../lib/client/api";
 import { userMessage } from "../lib/client/errors";
 import { createAccount } from "../lib/client/passkey";
+import { withAccount } from "../lib/client/sign-up";
 import { PersonFields, personFrom } from "./person-fields";
 import { Button } from "./ui";
 
@@ -13,6 +14,8 @@ export function JoinForm({ code, loggedIn }: { code: string; loggedIn: boolean }
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  // Once the account is made it stays made, even if the join fails: a retry never makes another.
+  const [hasAccount, setHasAccount] = useState(loggedIn);
   return (
     <form
       // Submitted before hydration, it goes out as the browser's own submit: by POST, its fields stay out of the URL.
@@ -24,8 +27,14 @@ export function JoinForm({ code, loggedIn }: { code: string; loggedIn: boolean }
         setBusy(true);
         setError("");
         try {
-          if (!loggedIn) await createAccount(personFrom(form));
-          const joined = await post<{ fundId: string; status: string; address: string | null }>(`/api/invites/${encodeURIComponent(code)}/join`);
+          const joined = await withAccount({
+            hasAccount,
+            person: personFrom(form),
+            problem: null,
+            createAccount,
+            created: () => setHasAccount(true),
+            then: () => post<{ fundId: string; status: string; address: string | null }>(`/api/invites/${encodeURIComponent(code)}/join`),
+          });
           router.push(joined.address ? `/f/${joined.address}` : `/f/borrador/${joined.fundId}`);
         } catch (caught) {
           setError(userMessage(caught));
@@ -33,7 +42,7 @@ export function JoinForm({ code, loggedIn }: { code: string; loggedIn: boolean }
         }
       }}
     >
-      {!loggedIn && (
+      {!hasAccount && (
         <>
           <PersonFields />
           <p className="text-[13px] text-muted">

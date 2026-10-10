@@ -14,14 +14,14 @@ import {
 } from "viem";
 import { entryPoint07Abi, entryPoint07Address } from "viem/account-abstraction";
 import { z } from "zod";
+import { type DraftSettings, draftProblem } from "./checks";
 import { type Db, inTransaction } from "./db/client";
 import { funds, memberships, operations, users } from "./db/schema";
-import { MAX_PESOS, formatPesos } from "./format";
 import { DEFAULT_BALANCE_CAP, memberFundAbi } from "./fund-abi";
 import { PENDING_FOR_MS } from "./operations";
 
 export const MIN_MEMBERS = 3;
-const MAX_MEMBERS = 10;
+export const MAX_MEMBERS = 10;
 
 export type FundsResult<T> = ({ ok: true } & T) | { ok: false; status: number; error: string };
 
@@ -54,16 +54,12 @@ export type DraftSummary = {
 export async function createDraft(
   db: Db,
   creatorId: string,
-  input: { name: string; agreedExpense: string; weeklyFee: bigint; weeklyCap: bigint },
+  input: DraftSettings,
 ): Promise<FundsResult<{ id: string; inviteCode: string }>> {
+  const problem = draftProblem(input);
+  if (problem !== null) return fail(400, problem);
   const name = input.name.trim();
   const agreedExpense = input.agreedExpense.trim();
-  if (name.length === 0 || name.length > 40) return fail(400, "Poné un nombre para el fondo, de hasta 40 letras.");
-  if (agreedExpense.length === 0 || agreedExpense.length > 40) return fail(400, "Poné cuál es el gasto acordado, de hasta 40 letras.");
-  if (input.weeklyFee <= 0n) return fail(400, "La cuota tiene que ser más que cero.");
-  if (input.weeklyCap <= 0n) return fail(400, "El tope tiene que ser más que cero.");
-  if (input.weeklyFee > MAX_PESOS) return fail(400, `La cuota no puede pasar de ${formatPesos(MAX_PESOS)}.`);
-  if (input.weeklyCap > MAX_PESOS) return fail(400, `El tope no puede pasar de ${formatPesos(MAX_PESOS)}.`);
   const inviteCode = Base64.fromBytes(Bytes.random(9), { url: true, pad: false });
   const [fund] = await db
     .insert(funds)

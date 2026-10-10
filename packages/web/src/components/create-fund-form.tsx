@@ -2,9 +2,11 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { readDraft } from "../lib/checks";
 import { post } from "../lib/client/api";
 import { userMessage } from "../lib/client/errors";
 import { createAccount } from "../lib/client/passkey";
+import { withAccount } from "../lib/client/sign-up";
 import { PersonFields, personFrom } from "./person-fields";
 import { Button, FIELD } from "./ui";
 
@@ -13,6 +15,8 @@ export function CreateFundForm({ loggedIn }: { loggedIn: boolean }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  // Once the account is made it stays made, even if what comes after it fails: a retry never makes another.
+  const [hasAccount, setHasAccount] = useState(loggedIn);
   return (
     <form
       // Submitted before hydration, it goes out as the browser's own submit: by POST, its fields stay out of the URL.
@@ -22,15 +26,18 @@ export function CreateFundForm({ loggedIn }: { loggedIn: boolean }) {
         event.preventDefault();
         const form = new FormData(event.currentTarget);
         const text = (name: string) => String(form.get(name) ?? "");
+        const fields = { name: text("name"), agreedExpense: text("agreedExpense"), weeklyFee: text("weeklyFee"), weeklyCap: text("weeklyCap") };
+        const draft = readDraft(fields);
         setBusy(true);
         setError("");
         try {
-          if (!loggedIn) await createAccount(personFrom(form));
-          const { id } = await post<{ id: string }>("/api/drafts", {
-            name: text("name"),
-            agreedExpense: text("agreedExpense"),
-            weeklyFee: text("weeklyFee"),
-            weeklyCap: text("weeklyCap"),
+          const { id } = await withAccount({
+            hasAccount,
+            person: personFrom(form),
+            problem: draft.ok ? null : draft.error,
+            createAccount,
+            created: () => setHasAccount(true),
+            then: () => post<{ id: string }>("/api/drafts", fields),
           });
           router.push(`/f/borrador/${id}`);
         } catch (caught) {
@@ -39,7 +46,7 @@ export function CreateFundForm({ loggedIn }: { loggedIn: boolean }) {
         }
       }}
     >
-      {!loggedIn && <PersonFields />}
+      {!hasAccount && <PersonFields />}
       <label className="grid gap-1">
         <span className="font-semibold">Nombre del fondo</span>
         <input className={FIELD} name="name" required maxLength={40} placeholder="Fútbol de los jueves" />
@@ -58,7 +65,7 @@ export function CreateFundForm({ loggedIn }: { loggedIn: boolean }) {
         <input className={`${FIELD} money`} name="weeklyCap" required inputMode="decimal" defaultValue="60.000" />
       </label>
       <Button type="submit" disabled={busy}>
-        {busy ? "Creando…" : loggedIn ? "Crear el fondo" : "Crear mi passkey y el fondo"}
+        {busy ? "Creando…" : hasAccount ? "Crear el fondo" : "Crear mi passkey y el fondo"}
       </Button>
       <p role="alert" className="text-sm text-owe">
         {error}
