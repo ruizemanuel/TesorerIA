@@ -16,23 +16,31 @@ export type SendTaggedCallsResult = {
  * Sends `calls` as one UserOperation and waits up to `timeout` ms for it to be included.
  * The suffix is also passed per call, so the operation is tagged even if
  * `bundlerClient` was not created with `createTaggedBundlerClient`.
+ *
+ * `onSent` gets the UserOperation's hash before the wait, so the caller can keep it and never send the same
+ * thing twice after a timeout. If it throws, the wait goes on: the operation is already out.
  */
 export async function sendTaggedCalls({
   bundlerClient,
   account,
   calls,
   timeout = 120_000,
+  onSent,
 }: {
   bundlerClient: BundlerClient;
   account: SmartAccount;
   calls: readonly Call[];
   timeout?: number;
+  onSent?: (userOpHash: Hash) => Promise<void> | void;
 }): Promise<SendTaggedCallsResult> {
   const userOpHash = await bundlerClient.sendUserOperation({
     account,
     calls,
     dataSuffix: ATTRIBUTION_SUFFIX,
   });
+  try {
+    await onSent?.(userOpHash);
+  } catch {} // the operation is out either way
   const receipt = await bundlerClient.waitForUserOperationReceipt({ hash: userOpHash, timeout });
   return {
     userOpHash,
