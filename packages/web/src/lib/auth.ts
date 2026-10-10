@@ -93,17 +93,40 @@ export async function registerMember({
   const taken = await db.select({ id: users.id }).from(users).where(eq(users.account, account));
   const known = await db.select({ id: credentials.id }).from(credentials).where(eq(credentials.id, input.credentialId));
   if (taken.length > 0 || known.length > 0) return fail(409, TAKEN);
+  let userId: string;
   try {
     const [user] = await db.insert(users).values({ name, email, account }).returning({ id: users.id });
+    userId = user!.id;
+  } catch (error) {
+    if (isUniqueViolation(error)) return fail(409, TAKEN); // someone registered the same account in the meantime
+    throw error;
+  }
+  try {
     await db
       .insert(credentials)
-      .values({ id: input.credentialId, userId: user!.id, publicKey: input.publicKey, userHandle: input.userHandle });
-    session.userId = user!.id;
-    await session.save();
-    return { ok: true, userId: user!.id };
-  } catch {
-    return fail(409, TAKEN); // someone registered the same account in the meantime: the unique columns decide
+      .values({ id: input.credentialId, userId, publicKey: input.publicKey, userHandle: input.userHandle });
+  } catch (error) {
+    // No transactions over Neon's HTTP driver: take the person we just added out again, so none is left without a passkey.
+    await db.delete(users).where(eq(users.id, userId)).catch(() => undefined);
+    if (isUniqueViolation(error)) return fail(409, TAKEN);
+    throw error;
   }
+  session.userId = userId;
+  await session.save();
+  return { ok: true, userId };
+}
+
+/**
+ * Postgres' unique_violation (23505). The driver's error carries the code, and drizzle wraps it as the `cause`
+ * of its own, so both are looked at. Anything else (an outage, a bug) is not a taken passkey and must surface.
+ */
+function isUniqueViolation(error: unknown): boolean {
+  for (let depth = 0; depth < 3 && typeof error === "object" && error !== null; depth++) {
+    const { code, cause } = error as { code?: unknown; cause?: unknown };
+    if (code === "23505") return true;
+    error = cause;
+  }
+  return false;
 }
 
 /** Checks a passkey's answer to this session's challenge, and starts the session (spec, 6). */

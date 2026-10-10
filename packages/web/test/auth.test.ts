@@ -12,7 +12,7 @@ import {
   registerMember,
 } from "../src/lib/auth";
 import type { Db } from "../src/lib/db/client";
-import { users } from "../src/lib/db/schema";
+import { credentials, users } from "../src/lib/db/schema";
 import { testDb } from "./support/db";
 import { fakeSession } from "./support/session";
 
@@ -35,7 +35,7 @@ beforeAll(async () => {
 
 async function register(
   passkey = createFakePasskey(),
-  change: { origin?: string; type?: string; now?: number; input?: Partial<Registration> } = {},
+  change: { origin?: string; type?: string; now?: number; input?: Partial<Registration>; db?: Db } = {},
 ) {
   const session = fakeSession();
   const challenge = issueChallenge(session, NOW);
@@ -47,9 +47,34 @@ async function register(
     clientDataJSON: creation(challenge, change.origin, change.type),
     ...change.input,
   };
-  const result = await registerMember({ db, session, input, deriveAccount, origin: ORIGIN, now: change.now ?? NOW });
+  const result = await registerMember({ db: change.db ?? db, session, input, deriveAccount, origin: ORIGIN, now: change.now ?? NOW });
   return { result, session, passkey };
 }
+
+/**
+ * The shared database, but its "is it taken?" lookups find nothing, as if two registrations raced between the
+ * check and the insert. With `failing`, inserts into that table throw `error` as a database outage would.
+ */
+function racing(failing?: { table: typeof users | typeof credentials; error: Error }): Db {
+  const nothing = { from: () => ({ where: async () => [] }) };
+  const outage = (error: Error) => ({
+    returning: () => Promise.reject(error),
+    then: (resolve: never, reject: (reason: unknown) => void) => Promise.reject(error).then(resolve, reject),
+  });
+  return new Proxy(db, {
+    get(target, prop) {
+      if (prop === "select") return () => nothing;
+      if (prop === "insert" && failing) {
+        return (table: typeof users | typeof credentials) =>
+          table === failing.table ? { values: () => outage(failing.error) } : target.insert(table as never);
+      }
+      const value = Reflect.get(target, prop, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+}
+
+const countUsers = async () => (await db.select().from(users)).length;
 
 describe("registerMember", () => {
   it("creates the person with the account derived on the server, and starts their session", async () => {
@@ -107,6 +132,28 @@ describe("registerMember", () => {
     expect(taken.result).toMatchObject({ ok: false, status: 409 });
     expect(taken.session.userId).toBeUndefined();
     expect((await db.select().from(users)).length).toBe(before);
+  });
+
+  it("answers 409 only for a unique violation, wherever the race is lost", async () => {
+    const mine = createFakePasskey();
+    expect((await register(mine)).result.ok).toBe(true);
+    const before = await countUsers();
+    // The same account, past the lookups: the unique column refuses it.
+    const sameKey = await register({ ...mine, credential: { ...mine.credential, id: "other-id" } }, { db: racing() });
+    expect(sameKey.result).toMatchObject({ ok: false, status: 409 });
+    // Another key under the registered credential id: the person goes in, the passkey is refused, the person comes out.
+    const sameCredential = await register(createFakePasskey(), { db: racing(), input: { credentialId: mine.credential.id } });
+    expect(sameCredential.result).toMatchObject({ ok: false, status: 409 });
+    expect(sameCredential.session.userId).toBeUndefined();
+    expect(await countUsers()).toBe(before);
+  });
+
+  it("lets any other database error through instead of calling it a taken passkey, and leaves no person behind", async () => {
+    const outage = new Error("connection reset");
+    const before = await countUsers();
+    await expect(register(createFakePasskey(), { db: racing({ table: users, error: outage }) })).rejects.toThrow("connection reset");
+    await expect(register(createFakePasskey(), { db: racing({ table: credentials, error: outage }) })).rejects.toThrow("connection reset");
+    expect(await countUsers()).toBe(before);
   });
 });
 
@@ -191,5 +238,36 @@ describe("logIn", () => {
     const { passkey } = await register();
     const assertion = await signPasskeyChallenge({ challenge: issueChallenge(fakeSession(), NOW), rpId: RP_ID, getFn: passkey.getFn });
     expect(await logIn({ db, session: fakeSession(), assertion, rpId: RP_ID, origin: ORIGIN, now: NOW })).toMatchObject({ ok: false, status: 400 });
+  });
+
+  it("keeps out another passkey that claims to be a member's", async () => {
+    const { passkey } = await register();
+    const session = fakeSession();
+    const signed = await signPasskeyChallenge({ challenge: issueChallenge(session, NOW), rpId: RP_ID, getFn: createFakePasskey().getFn });
+    const assertion = { ...signed, credentialId: passkey.credential.id };
+    expect(await logIn({ db, session, assertion, rpId: RP_ID, origin: ORIGIN, now: NOW })).toMatchObject({ ok: false, status: 401 });
+    expect(session.userId).toBeUndefined();
+  });
+
+  it("keeps out an answer made for another site", async () => {
+    const attempt = async (passkey: ReturnType<typeof createFakePasskey>, signedFor: string, serverRpId: string) => {
+      const session = fakeSession();
+      const assertion = await signPasskeyChallenge({ challenge: issueChallenge(session, NOW), rpId: signedFor, getFn: passkey.getFn });
+      const result = await logIn({ db, session, assertion, rpId: serverRpId, origin: ORIGIN, now: NOW });
+      return { result, session };
+    };
+    // The right passkey, but the server expects another site than the one it signed for.
+    const member = (await register()).passkey;
+    const wrongServer = await attempt(member, RP_ID, "tesoreria.example");
+    expect(wrongServer.result).toMatchObject({ ok: false, status: 401 });
+    expect(wrongServer.session.userId).toBeUndefined();
+    // A registered passkey whose authenticator signed for another site: only the rpId hash differs.
+    const foreign = createFakePasskey({ rpId: "evil.example" });
+    expect((await register(foreign)).result.ok).toBe(true);
+    const wrongAuthenticator = await attempt(foreign, "evil.example", RP_ID);
+    expect(wrongAuthenticator.result).toMatchObject({ ok: false, status: 401 });
+    expect(wrongAuthenticator.session.userId).toBeUndefined();
+    // Control: the same passkey is let in on the site it signed for.
+    expect((await attempt(foreign, "evil.example", "evil.example")).result.ok).toBe(true);
   });
 });
