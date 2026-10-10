@@ -2,6 +2,7 @@ import path from "node:path";
 import { neon } from "@neondatabase/serverless";
 import { drizzle as drizzleNeon } from "drizzle-orm/neon-http";
 import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
+import { env } from "../env";
 import * as schema from "./schema";
 
 export type Db = PgDatabase<PgQueryResultHKT, typeof schema>;
@@ -28,8 +29,11 @@ export async function openDb(url: string): Promise<Db> {
 
 const shared = globalThis as { tesoreriaDb?: Promise<Db> };
 
-/** One database per process: route handlers and pages may load this module more than once in development. */
+/**
+ * One database per process: route handlers and pages may load this module more than once in development.
+ * It is DATABASE_URL (required on mainnet, see env.ts), or in memory on the fork.
+ */
 export function getDb(): Promise<Db> {
-  shared.tesoreriaDb ??= openDb(process.env.DATABASE_URL ?? "memory");
+  shared.tesoreriaDb ??= openDb(env().DATABASE_URL ?? "memory");
   return shared.tesoreriaDb;
 }
