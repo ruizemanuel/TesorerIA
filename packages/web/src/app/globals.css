@@ -1,0 +1,108 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bg: #f3f5fb;
+  --color-surface: #ffffff;
+  --color-ink: #1b1f3b;
+  --color-muted: #5b6080;
+  --color-line: #e4e7f2;
+  --color-primary: #2638b8;
+  --color-tint: #e6e9f8;
+  --color-highlight: #fff27a;
+  --color-owe: #c62d2d;
+  --color-owe-tint: #fbe9e9;
+  --color-num: #7a84c2;
+  --font-sans: var(--font-encode-sans), system-ui, sans-serif;
+}
+
+body {
+  background: var(--color-bg);
+  color: var(--color-ink);
+  font-size: 15px;
+  line-height: 1.45;
+}
+
+/* Every amount: tabular, lining figures (spec, 9.1). */
+.money {
+  font-variant-numeric: lining-nums tabular-nums;
+  white-space: nowrap;
+}
+
+/* Narrow, heavy figures: the balance and the list's numbers. */
+.narrow {
+  font-stretch: 80%;
+}
+
+/* The resaltador marks your own name in the week's list, and nothing else. */
+.marked {
+  background: linear-gradient(transparent 30%, var(--color-highlight) 30%, var(--color-highlight) 90%, transparent 90%);
+  padding: 0 3px;
+}
+
+input,
+select,
+textarea {
+  font-size: 16px; /* under 16 px, iOS zooms into the field */
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+/* The panel: a sheet that rises from the bottom on a phone, a 420 px column on the right from 1024 px (spec, 9.2). */
+.panel {
+  margin: 0;
+  margin-top: auto;
+  width: 100%;
+  max-width: none;
+  height: 100dvh;
+  max-height: none;
+  border: 0;
+  padding: 0;
+  background: var(--color-bg);
+  color: var(--color-ink);
+}
+.panel[open] {
+  animation: panel-up 200ms ease-out;
+}
+.panel::backdrop {
+  background: rgb(27 31 59 / 0.4);
+}
+@media (min-width: 1024px) {
+  .panel {
+    margin-left: auto;
+    width: 420px;
+  }
+  .panel[open] {
+    animation-name: panel-left;
+  }
+}
+@keyframes panel-up {
+  from {
+    transform: translateY(100%);
+  }
+}
+@keyframes panel-left {
+  from {
+    transform: translateX(100%);
+  }
+}
+
+/* The one moment (spec, 9.2): your check appears when your contribution lands. */
+.check-in {
+  animation: check-in 300ms ease-out;
+}
+@keyframes check-in {
+  from {
+    transform: scale(0.4);
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .panel[open],
+  .check-in {
+    animation: none;
+  }
+}

@@ -7,6 +7,10 @@ node_modules/
 dist/
 coverage/
 .turbo/
+next-env.d.ts
+.pglite/
+test-results/
+playwright-report/
 
 # Foundry
 cache/
