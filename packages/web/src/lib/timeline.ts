@@ -152,7 +152,7 @@ export function buildTimeline({
           at: base.at,
           actor: byAgent ? { kind: "agent" } : { kind: "member", name: who(proposer) },
           text: `${byAgent ? "Propuse" : `${who(proposer)} propuso`} ${what}.${tail}`,
-          detail: byAgent ? `Lo que no puedo devolver solo lo tienen que votar: hacen falta ${votesRequired} votos.` : undefined,
+          detail: byAgent ? `Lo que no puedo devolver por mi cuenta lo tienen que votar: hacen falta ${votesRequired} votos.` : undefined,
           action: voteAction,
         });
         break;
