@@ -50,7 +50,7 @@ export function DeployForm({ fundId, memberCount, chosenVotes }: { fundId: strin
       <label className="grid gap-1">
         <span className="font-semibold">Votos necesarios para lo que no es el gasto acordado</span>
         <select
-          className="min-h-12 rounded-[14px] border border-line bg-surface px-3"
+          className="min-h-12 rounded-[14px] border border-field-line bg-surface px-3"
           value={votes}
           onChange={(event) => setVotes(Number(event.target.value))}
         >

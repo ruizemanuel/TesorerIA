@@ -22,7 +22,7 @@ export function ButtonLink({ variant = "primary", className = "", ...props }: Co
 }
 
 /** A form field: 48 px tall, the same radius as the buttons. The 16 px text size comes from globals.css. */
-export const FIELD = "min-h-12 w-full rounded-[14px] border border-line bg-surface px-3";
+export const FIELD = "min-h-12 w-full rounded-[14px] border border-field-line bg-surface px-3";
 
 /** The wordmark: Encode Sans 800 at 80 % width, in `primary`, with no other color (spec, 9.1). */
 export function Logo({ className = "" }: { className?: string }) {

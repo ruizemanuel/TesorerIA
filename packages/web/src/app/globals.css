@@ -6,6 +6,8 @@
   --color-ink: #1b1f3b;
   --color-muted: #5b6080;
   --color-line: #e4e7f2;
+  /* Form controls' boundaries: 3.29:1 on surface, 3.02:1 on bg (WCAG 1.4.11 asks for 3:1). Dividers and cards keep `line`. */
+  --color-field-line: #868cae;
   --color-primary: #2638b8;
   --color-tint: #e6e9f8;
   --color-highlight: #fff27a;
