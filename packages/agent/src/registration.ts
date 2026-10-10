@@ -18,7 +18,7 @@ export const identityRegistryAbi = parseAbi([
 export const AGENT_URI = "https://raw.githubusercontent.com/ruizemanuel/TesorerIA/main/packages/agent/registration.json";
 
 /** The agent's ERC-8004 id on Celo, once registered. */
-export const AGENT_ID: bigint | null = null;
+export const AGENT_ID: bigint | null = 9887n;
 
 function amount(value: bigint, decimals: number): string {
   return Number(formatUnits(value, decimals)).toLocaleString("en-US");
