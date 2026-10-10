@@ -26,7 +26,7 @@ const CANCELLED = "Cancelaste la confirmación. Probá de nuevo.";
 const GENERIC = "No se pudo completar. Probá de nuevo en un rato.";
 
 /** Whether the person dismissed the passkey prompt: the browser's error, or the one a library wrapped it in. */
-function wasCancelled(error: unknown): boolean {
+export function wasCancelled(error: unknown): boolean {
   for (let depth = 0; depth < 5 && typeof error === "object" && error !== null; depth++) {
     const { name, cause } = error as { name?: unknown; cause?: unknown };
     if (name === "NotAllowedError" || name === "AbortError") return true;

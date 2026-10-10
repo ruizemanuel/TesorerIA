@@ -1,22 +1,29 @@
 import Link from "next/link";
+import type { Address } from "viem";
 import { formatWhen } from "../lib/format";
 import type { TimelineItem } from "../lib/timeline";
 import { Avatar } from "./avatar";
 import { ButtonLink } from "./ui";
+import { VoteButton } from "./vote-button";
 
 /** The movements, newest first (spec, 9.2): avatar, one sentence, the time, and at most one action. */
 export function TimelineList({
   items,
+  fund,
   fundName,
   now,
   readOnly = false,
+  closed = false,
   basePath = "",
   viewerName = "",
 }: {
   items: readonly TimelineItem[];
+  fund: Address;
   fundName: string;
   now: Date;
   readOnly?: boolean;
+  /** The fund has been closed: its proposals can no longer be voted. */
+  closed?: boolean;
   /** Where the comprobante and Aportar open: "" for this page, or the inicio's path from Movimientos. */
   basePath?: string;
   /** Whose initials your own operations on their way wear: the timeline names their actor "Vos". */
@@ -55,6 +62,9 @@ export function TimelineList({
                 >
                   Ver comprobante
                 </Link>
+              )}
+              {item.action?.kind === "vote" && !readOnly && !closed && item.action.canVote && (
+                <VoteButton fund={fund} proposalId={item.action.proposalId.toString()} completes={item.action.completes} />
               )}
               {item.action?.kind === "vote" && !readOnly && item.action.voted && (
                 <p className="mt-1 text-[13px] font-semibold text-muted">Votaste</p>

@@ -25,7 +25,15 @@ export default async function MovementsPage({ params }: { params: Promise<{ addr
       <main className="mx-auto max-w-[560px] p-4 lg:max-w-[1120px] lg:p-7">
         <Card>
           <CardTitle>Movimientos</CardTitle>
-          <TimelineList items={screen.timeline} fundName={view.name} now={new Date()} basePath={`/f/${view.address}`} viewerName={user.name} />
+          <TimelineList
+            items={screen.timeline}
+            fund={view.address}
+            fundName={view.name}
+            now={new Date()}
+            closed={view.closed}
+            basePath={`/f/${view.address}`}
+            viewerName={user.name}
+          />
         </Card>
       </main>
       <TabBar address={view.address} active="movimientos" />

@@ -38,7 +38,15 @@ export function FundScreenView({
             <WeekList view={view} justPaid={previousBalance !== undefined} />
             <Card className="lg:hidden">
               <CardTitle>Lo último del agente</CardTitle>
-              <TimelineList items={timeline.slice(0, 3)} fundName={view.name} now={now} readOnly={publicView} viewerName={userName} />
+              <TimelineList
+                items={timeline.slice(0, 3)}
+                fund={view.address}
+                fundName={view.name}
+                now={now}
+                readOnly={publicView}
+                closed={view.closed}
+                viewerName={userName}
+              />
               {!publicView && timeline.length > 0 && (
                 <Link
                   href={`/f/${view.address}/movimientos`}
@@ -53,7 +61,15 @@ export function FundScreenView({
         </div>
         <Card className="hidden lg:block">
           <CardTitle>Movimientos</CardTitle>
-          <TimelineList items={timeline} fundName={view.name} now={now} readOnly={publicView} viewerName={userName} />
+          <TimelineList
+            items={timeline}
+            fund={view.address}
+            fundName={view.name}
+            now={now}
+            readOnly={publicView}
+            closed={view.closed}
+            viewerName={userName}
+          />
         </Card>
       </main>
       {!publicView && <TabBar address={view.address} active="inicio" />}
