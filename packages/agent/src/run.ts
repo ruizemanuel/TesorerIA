@@ -45,7 +45,8 @@ export type AgentContext = {
   send: boolean;
   /**
    * Called as soon as a transaction is sent, before its receipt, so the caller can keep the hash even if the
-   * wait fails or the process dies. If it throws, the decision still carries the hash.
+   * wait fails or the process dies. If it throws, the decision still carries the hash, and its reason says the
+   * hash was not recorded.
    */
   onSent?: (sent: { fund: Address; action: AgentAction; tx: Hash }) => Promise<void>;
 };
@@ -89,18 +90,22 @@ async function act(
   } catch (error) {
     return blocked(`Could not send the transaction: ${shortMessage(error)}`);
   }
+  // The decision below still carries the hash; a hook that fails leaves its trace in the reason.
+  let unrecorded = "";
   try {
     await ctx.onSent?.({ fund: fund.address, action, tx: hash });
-  } catch {} // the decision below still carries the hash
+  } catch (error) {
+    unrecorded = ` (hash not recorded: ${shortMessage(error)})`;
+  }
   try {
     const status = await ctx.chain.receipt(hash);
-    return { fund: fund.address, kind: action.kind, reason, action, tx: hash, status };
+    return { fund: fund.address, kind: action.kind, reason: `${reason}${unrecorded}`, action, tx: hash, status };
   } catch (error) {
     // The transaction went out: keep its hash so the timeline doesn't call it blocked.
     return {
       fund: fund.address,
       kind: action.kind,
-      reason: `${reason} (sent; receipt unknown: ${shortMessage(error)})`,
+      reason: `${reason}${unrecorded} (sent; receipt unknown: ${shortMessage(error)})`,
       action,
       tx: hash,
     };

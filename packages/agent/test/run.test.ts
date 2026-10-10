@@ -146,6 +146,25 @@ describe("runHeartbeat", () => {
     expect(still).toMatchObject({ kind: "convert", tx: HASH });
   });
 
+  it("says in the reason when the hash couldn't be recorded, and still reads the receipt", async () => {
+    const { signer, sent } = fakeSigner();
+    const chain = fakeChain([fundSnapshot({ usdtBalance: 300n * USDT_UNIT })]);
+    const ctx: AgentContext = {
+      ...context(chain, signer),
+      onSent: async () => {
+        throw new Error("database down");
+      },
+    };
+    const [decision] = await runHeartbeat(ctx);
+    expect(decision).toMatchObject({
+      kind: "convert",
+      tx: HASH,
+      status: "success",
+      reason: expect.stringContaining("(hash not recorded: database down)"),
+    });
+    expect(sent).toHaveLength(1);
+  });
+
   it("logs why it waits when Chainlink is stale, and sends nothing", async () => {
     const { signer, sent } = fakeSigner();
     const stale = { ...REFERENCES, usdArs: { ...REFERENCES.usdArs, updatedAt: NOW - 30n * 3_600n } };
