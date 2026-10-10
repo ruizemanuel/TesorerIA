@@ -3,6 +3,7 @@ import { connection } from "next/server";
 import type { ReactNode } from "react";
 import { isAddress } from "viem";
 import { ContributePanel } from "../../../components/contribute-panel";
+import { ExpensePanel } from "../../../components/expense-panel";
 import { FundScreenView } from "../../../components/fund-screen";
 import { LogoutButton } from "../../../components/logout-button";
 import { Panel } from "../../../components/panel";
@@ -37,6 +38,12 @@ export default async function FundPage({ params, searchParams }: { params: Promi
           weeklyFee={screen.view.weeklyFee}
           contributionOnItsWay={screen.contributionOnItsWay}
         />
+      </Panel>
+    );
+  } else if (search.p === "gasto") {
+    panel = (
+      <Panel title="Cargar un gasto" closeHref={here}>
+        <ExpensePanel fund={screen.view.address} agreedExpense={screen.view.agreedExpense} />
       </Panel>
     );
   } else if (search.p === "comprobante") {
