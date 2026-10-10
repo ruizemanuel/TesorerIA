@@ -1,4 +1,4 @@
-import { Base64, Bytes, Hash, Hex, PublicKey, Signature, WebAuthnP256 } from "ox";
+import { Base64, Bytes, Hash, Hex, P256, PublicKey, Signature, WebAuthnP256 } from "ox";
 
 /** What the browser sends after signing the server's challenge with a passkey: the login ceremony. */
 export type PasskeyAssertion = {
@@ -6,7 +6,7 @@ export type PasskeyAssertion = {
   credentialId: string;
   authenticatorData: Hex.Hex;
   clientDataJSON: string;
-  /** r ‖ s, 64 bytes, with the low s that ox's `sign` returns. */
+  /** r ‖ s, 64 bytes, with the low s (the same normalization ox applies). */
   signature: Hex.Hex;
 };
 
@@ -27,12 +27,16 @@ export async function signPasskeyChallenge({
   rpId?: string;
   getFn?: GetFn;
 }): Promise<PasskeyAssertion> {
-  const { metadata, signature, raw } = await WebAuthnP256.sign({ challenge, credentialId, rpId, getFn });
+  const { metadata, raw } = await WebAuthnP256.sign({ challenge, credentialId, rpId, getFn });
+  // Not ox's own `signature`: it reads the DER at fixed offsets, assuming r is 32 bytes, so the 1 in 256
+  // signatures whose r starts with a zero byte come back wrong (ox 0.11.3). The DER is parsed properly here.
+  const der = new Uint8Array((raw.response as unknown as { signature: ArrayBuffer }).signature);
+  const { r, s } = P256.noble.Signature.fromDER(der).normalizeS();
   return {
     credentialId: raw.id,
     authenticatorData: metadata.authenticatorData,
     clientDataJSON: metadata.clientDataJSON,
-    signature: Hex.concat(Hex.fromNumber(signature.r, { size: 32 }), Hex.fromNumber(signature.s, { size: 32 })),
+    signature: Hex.concat(Hex.fromNumber(r, { size: 32 }), Hex.fromNumber(s, { size: 32 })),
   };
 }
 

@@ -6,32 +6,39 @@ import { sendTaggedCalls } from "../src/send";
 const USER_OP: Hash = pad("0x01", { size: 32 });
 const TX: Hash = pad("0x02", { size: 32 });
 
-/** A bundler that writes down each step, and whose operations always succeed. */
-function fakeBundler(steps: string[]) {
+/** A bundler that writes down each step; its operations succeed unless `waitFails` says the wait throws. */
+function fakeBundler(steps: string[], waitFails?: Error) {
   return {
     sendUserOperation: async () => (steps.push("send"), USER_OP),
-    waitForUserOperationReceipt: async () => (steps.push("wait"), { success: true, receipt: { transactionHash: TX } }),
+    waitForUserOperationReceipt: async () => {
+      steps.push("wait");
+      if (waitFails) throw waitFails;
+      return { success: true, receipt: { transactionHash: TX } };
+    },
   } as unknown as BundlerClient;
 }
+
+const account = {} as SmartAccount;
 
 describe("sendTaggedCalls", () => {
   it("hands over the UserOperation's hash before waiting for its receipt", async () => {
     const steps: string[] = [];
     const result = await sendTaggedCalls({
       bundlerClient: fakeBundler(steps),
-      account: {} as SmartAccount,
+      account,
       calls: [],
       onSent: (hash) => void steps.push(`sent ${hash}`),
     });
     expect(steps).toEqual(["send", `sent ${USER_OP}`, "wait"]);
     expect(result).toEqual({ userOpHash: USER_OP, transactionHash: TX, success: true, reason: undefined });
+    expect(result).not.toHaveProperty("unrecorded");
   });
 
-  it("still waits when the hook throws: the operation is already out", async () => {
+  it("still waits when the hook throws, and says in the result that the hash was not recorded", async () => {
     const steps: string[] = [];
     const result = await sendTaggedCalls({
       bundlerClient: fakeBundler(steps),
-      account: {} as SmartAccount,
+      account,
       calls: [],
       onSent: () => {
         throw new Error("offline");
@@ -39,5 +46,45 @@ describe("sendTaggedCalls", () => {
     });
     expect(steps).toEqual(["send", "wait"]);
     expect(result.success).toBe(true);
+    expect(result.unrecorded).toBe("offline");
+  });
+
+  it("says the same when the hook is async and rejects", async () => {
+    const steps: string[] = [];
+    const result = await sendTaggedCalls({
+      bundlerClient: fakeBundler(steps),
+      account,
+      calls: [],
+      onSent: async () => {
+        throw new Error("database is down");
+      },
+    });
+    expect(steps).toEqual(["send", "wait"]);
+    expect(result.unrecorded).toBe("database is down");
+  });
+
+  it("lets the wait's own error through when the hook worked", async () => {
+    const timeout = new Error("timed out");
+    await expect(
+      sendTaggedCalls({ bundlerClient: fakeBundler([], timeout), account, calls: [], onSent: () => {} }),
+    ).rejects.toBe(timeout);
+  });
+
+  it("names the hash, the lost record and the wait's error when both the hook and the wait fail", async () => {
+    const timeout = new Error("timed out");
+    const failure = await sendTaggedCalls({
+      bundlerClient: fakeBundler([], timeout),
+      account,
+      calls: [],
+      onSent: async () => {
+        throw new Error("database is down");
+      },
+    }).catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(Error);
+    const { message, cause } = failure as Error;
+    expect(message).toContain(USER_OP);
+    expect(message).toContain("timed out");
+    expect(message).toContain("not recorded: database is down");
+    expect(cause).toBe(timeout);
   });
 });
