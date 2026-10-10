@@ -1,4 +1,5 @@
-import { type Address, type Hash, type Hex, getAddress, pad } from "viem";
+import { type Address, type Chain, type Hash, type Hex, getAddress, pad } from "viem";
+import { celo } from "viem/chains";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // The wallet package is covered by its own tests: here only what sendCalls decides around it.
@@ -6,7 +7,7 @@ type Owner = { sign(parameters: { hash: Hex }): Promise<unknown> };
 type Sent = { onSent(userOpHash: Hash): Promise<void> };
 const wallet = vi.hoisted(() => ({
   createMemberAccount: vi.fn<(parameters: { owner: Owner }) => Promise<{ address: Address }>>(),
-  createPimlicoBundlerClient: vi.fn(() => ({ bundler: true })),
+  createPimlicoBundlerClient: vi.fn((_parameters: { transport: (options: { chain: Chain }) => { config: { timeout: number } } }) => ({ bundler: true })),
   sendTaggedCalls: vi.fn<(parameters: Sent) => Promise<unknown>>(),
 }));
 vi.mock("@tesoreria/wallet", () => wallet);
@@ -143,5 +144,12 @@ describe("sendCalls", () => {
     const draftId = crypto.randomUUID();
     await sendCalls(me, CALLS, { kind: "create-fund", draftId });
     expect(posted()[0]).toEqual(["/api/operations", { kind: "create-fund", draftId, userOpHash: OP }]);
+  });
+
+  it("waits for /api/bundler longer than it waits for Pimlico (30 s), so a slow send is never taken for an unsent one", async () => {
+    wallet.sendTaggedCalls.mockResolvedValue(RECEIPT);
+    await sendCalls(me, CALLS, INFO);
+    const { transport } = wallet.createPimlicoBundlerClient.mock.calls[0]![0];
+    expect(transport({ chain: celo }).config.timeout).toBeGreaterThan(30_000);
   });
 });

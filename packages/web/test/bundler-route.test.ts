@@ -41,10 +41,22 @@ beforeAll(async () => {
   stranger = { id: outsider.id, name: outsider.name, account: getAddress(outsider.account) };
   ({ POST } = await import("../src/app/api/bundler/route"));
 });
+const FAST = 5_000_000_000n; // Pimlico's "fast" maxFeePerGas in these tests: 5 gwei
+const priceAnswer = () => {
+  const fee = { maxFeePerGas: numberToHex(FAST), maxPriorityFeePerGas: numberToHex(1_000_000_000n) };
+  return Response.json({ jsonrpc: "2.0", id: 1, result: { slow: fee, standard: fee, fast: fee } });
+};
+/** The methods Pimlico was asked, in order. */
+const asked = () => pimlico.mock.calls.map(([, init]) => (JSON.parse(init.body as string) as { method: string }).method);
+
 beforeEach(() => {
   state.user = member;
   vi.stubGlobal("fetch", pimlico);
-  pimlico.mockImplementation(async () => Response.json({ jsonrpc: "2.0", id: 5, result: CELO }));
+  pimlico.mockImplementation(async (_url, init) =>
+    (JSON.parse(init.body as string) as { method: string }).method === "pimlico_getUserOperationGasPrice"
+      ? priceAnswer()
+      : Response.json({ jsonrpc: "2.0", id: 5, result: CELO }),
+  );
 });
 afterEach(() => {
   vi.clearAllMocks();
@@ -95,6 +107,51 @@ describe("POST /api/bundler", () => {
       id: 5,
       method: "pm_getPaymasterStubData",
       params: [op(member.account), entryPoint07Address, CELO, { sponsorshipPolicyId: POLICY }],
+    });
+  });
+
+  describe("when the paymaster is about to sign", () => {
+    const sponsored = (change: Record<string, unknown> = {}) => ({
+      ...op(member.account),
+      maxFeePerGas: numberToHex(2n * FAST),
+      maxPriorityFeePerGas: numberToHex(1_000_000_000n),
+      callGasLimit: numberToHex(3_000_000n),
+      verificationGasLimit: numberToHex(900_000n),
+      preVerificationGas: numberToHex(100_000n),
+      ...change,
+    });
+    const sign = (userOp: unknown) => call(rpc("pm_getPaymasterData", [userOp, entryPoint07Address, CELO, { sponsorshipPolicyId: "sp_mine" }]));
+
+    it("reads Pimlico's price with the key, and signs an operation that is within twice of it", async () => {
+      expect((await sign(sponsored())).status).toBe(200);
+      expect(asked()).toEqual(["pimlico_getUserOperationGasPrice", "pm_getPaymasterData"]);
+      expect(pimlico.mock.calls.every(([url]) => url === `https://api.pimlico.io/v2/42220/rpc?apikey=${KEY}`)).toBe(true);
+      expect(JSON.parse(pimlico.mock.calls[1]![1].body as string).params[3]).toEqual({ sponsorshipPolicyId: POLICY });
+    });
+
+    it("answers 400 to an operation that overpays or asks for too much gas, and signs nothing", async () => {
+      for (const change of [{ maxFeePerGas: numberToHex(2n * FAST + 1n) }, { callGasLimit: numberToHex(10_000_000n) }, { callGasLimit: "lots" }]) {
+        const response = await sign(sponsored(change));
+        expect(response.status, JSON.stringify(change)).toBe(400);
+      }
+      expect(asked().filter((method) => method === "pm_getPaymasterData")).toEqual([]);
+    });
+
+    it("answers 502 and signs nothing when the price can't be read", async () => {
+      const unreadable = [
+        async () => Response.json({ error: { message: "down" } }, { status: 500 }),
+        async () => Response.json({ jsonrpc: "2.0", id: 1, result: {} }),
+        async () => {
+          throw new TypeError(`fetch failed: https://api.pimlico.io/v2/42220/rpc?apikey=${KEY}`);
+        },
+      ];
+      for (const answer of unreadable) {
+        pimlico.mockImplementation(answer);
+        const response = await sign(sponsored());
+        expect(response.status).toBe(502);
+        expect(await response.text()).not.toContain(KEY);
+      }
+      expect(pimlico).toHaveBeenCalledTimes(unreadable.length); // only ever the price
     });
   });
 

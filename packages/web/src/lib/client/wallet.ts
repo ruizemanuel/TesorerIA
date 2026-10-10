@@ -24,6 +24,9 @@ export function loadMe(): Promise<Me> {
   return get<Me>("/api/me");
 }
 
+/** Above the 30 s /api/bundler waits for Pimlico: if the browser gave up first, an operation Pimlico accepted would look unsent and invite a second one. */
+const BUNDLER_TIMEOUT_MS = 45_000;
+
 const ON_ITS_WAY = "Tu operación está en camino. En unos minutos la vas a ver reflejada: no la mandes de nuevo.";
 
 /**
@@ -57,7 +60,7 @@ export async function sendCalls(
   }
   const bundlerClient = createPimlicoBundlerClient({
     client,
-    transport: http(new URL("/api/bundler", window.location.origin).toString()),
+    transport: http(new URL("/api/bundler", window.location.origin).toString(), { timeout: BUNDLER_TIMEOUT_MS }),
     sponsorshipPolicyId: "set by the server", // /api/bundler replaces it
   });
 
