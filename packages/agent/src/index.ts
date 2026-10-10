@@ -3,7 +3,7 @@ export * from "./chain";
 export { type ConversionDecision, type ConversionPlan, decideConversion, planConversion } from "./convert";
 export { type ChainReader, type FactoryArtifact, checkPool, factoryDeployData } from "./deploy";
 export { shortMessage } from "./errors";
-export { type FundEvent, type LogReader, type RawLog, blockscoutLogReader, readFundEvents, rpcLogReader } from "./events";
+export { type FundEvent, type LogReader, RPC_LOG_RANGE, type RawLog, blockscoutLogReader, readFundEvents, rpcLogReader } from "./events";
 export { type Expense, type ExpenseDecision, decideExpense } from "./expense";
 export { type CeloReader, type FundSnapshot, listFunds, readFund } from "./fund";
 export {

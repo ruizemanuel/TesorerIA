@@ -14,11 +14,12 @@ import {
 } from "viem";
 import { entryPoint07Abi, entryPoint07Address } from "viem/account-abstraction";
 import { z } from "zod";
+import type { UserOperationFinder } from "./chain";
 import { type DraftSettings, draftProblem } from "./checks";
 import { type Db, inTransaction } from "./db/client";
 import { funds, memberships, operations, users } from "./db/schema";
 import { DEFAULT_BALANCE_CAP, memberFundAbi } from "./fund-abi";
-import { PENDING_FOR_MS } from "./operations";
+import { PENDING_FOR_MS, finishOperation } from "./operations";
 
 export const MIN_MEMBERS = 3;
 export const MAX_MEMBERS = 10;
@@ -367,14 +368,16 @@ export async function confirmDeploy(
 export type DeployStep = { address: Address } | { pending: Hash } | { call: { to: Address; data: Hex }; nonce?: bigint };
 
 /**
- * Whether a createFund that never came back may be released: sent more than PENDING_FOR_MS ago, and the chain,
- * read now (never a flag from before), still has the nonce it was sent with. While it does, the operation hasn't
- * landed (so it has no receipt either), and a resend pinned to that nonce can't land as well as it. A spent
- * nonce means it, or something else with it, landed: then it's never released, only confirmed if its receipt
- * turns up. The bundler's word isn't enough: it only looks at recent blocks, never at what it once had.
+ * Where a createFund that never came back stands, by the chain's nonce read now (never a flag from before):
+ * - "recent": sent less than PENDING_FOR_MS ago, so the bundler still knows it: the browser asks it first;
+ * - "unspent": the chain still has the nonce it was sent with, so it hasn't landed (and has no receipt), and a resend
+ *   pinned to that nonce can't land as well as it: it may be released;
+ * - "spent": it, or something else with its nonce, landed: never released, only found (`findLanded`);
+ * - "unknown": the node didn't answer: as if it were still on its way.
+ * The bundler's word isn't enough to release one: it only looks at recent blocks, never at what it once had.
  */
-async function releasable(client: ChainReader, account: Address, nonce: bigint, sentAt: Date): Promise<boolean> {
-  if (Date.now() - sentAt.getTime() < PENDING_FOR_MS) return false;
+async function nonceState(client: ChainReader, account: Address, nonce: bigint, sentAt: Date): Promise<"recent" | "unspent" | "spent" | "unknown"> {
+  if (Date.now() - sentAt.getTime() < PENDING_FOR_MS) return "recent";
   try {
     const current = await client.readContract({
       address: entryPoint07Address,
@@ -382,10 +385,37 @@ async function releasable(client: ChainReader, account: Address, nonce: bigint, 
       functionName: "getNonce",
       args: [account, 0n],
     });
-    return current === nonce;
+    return current === nonce ? "unspent" : "spent";
   } catch {
-    return false; // the node didn't answer: as if it were still on its way
+    return "unknown";
   }
+}
+
+/**
+ * The transaction of a createFund for this draft that landed with `nonce` though nobody recorded its receipt (the
+ * creator left during the wait), found on the chain itself: by then the bundler, which only looks about 2,000
+ * blocks back, would answer "not found" forever. Every operation pinned to that nonce is looked for, since the
+ * one that never came back may land instead of its resend. The one found is recorded; null if none is there yet,
+ * or the chain can't be read.
+ */
+async function findLanded(
+  db: Db,
+  { fundId, userId, nonce, findOperation }: { fundId: string; userId: string; nonce: bigint; findOperation: UserOperationFinder },
+): Promise<Hash | null> {
+  const pinned = await db
+    .select({ userOpHash: operations.userOpHash, createdAt: operations.createdAt })
+    .from(operations)
+    .where(and(eq(operations.draftId, fundId), eq(operations.userId, userId), eq(operations.kind, "create-fund"), eq(operations.nonce, nonce)));
+  const since = new Date(Math.min(...pinned.map((row) => row.createdAt.getTime())));
+  let landed: Awaited<ReturnType<UserOperationFinder>>;
+  try {
+    landed = await findOperation({ userOpHashes: pinned.map((row) => row.userOpHash as Hash), since });
+  } catch {
+    return null;
+  }
+  if (landed === null) return null;
+  await finishOperation(db, userId, landed);
+  return landed.transactionHash;
 }
 
 /**
@@ -393,12 +423,14 @@ async function releasable(client: ChainReader, account: Address, nonce: bigint, 
  * sent for this draft, a new one is built only once that one is known to have created nothing.
  * - `address`: it's live, or the sent one's transaction has our fund;
  * - `pending`: the sent one has no receipt here yet, so the browser asks the bundler for it first;
- * - `call` with `nonce`: the sent one never came back and the chain shows it never landed (`releasable`): the
+ * - `call` with `nonce`: the sent one never came back and the chain shows it never landed (`nonceState`): the
  *   same call again, pinned to its nonce;
  * - `call`: nothing was sent, or what was sent failed (its nonce is spent), and the draft opened again first.
  *   `votesRequired` only counts here: a sent one keeps its own;
  * - 409: the sent one created a fund for the creator with other settings (a real fund, so never another), or the
  *   draft can't open again because another createFund for it is on its way.
+ * A sent one whose receipt never came back but whose nonce the chain spent is looked for on the chain
+ * (`findOperation`), and then goes on as if its receipt had come.
  */
 export async function deployStep(
   db: Db,
@@ -408,8 +440,17 @@ export async function deployStep(
     votesRequired,
     agent,
     client,
+    findOperation,
     factory = FUND_FACTORY,
-  }: { fundId: string; userId: string; votesRequired: number; agent: Address; client: ChainReader; factory?: Address },
+  }: {
+    fundId: string;
+    userId: string;
+    votesRequired: number;
+    agent: Address;
+    client: ChainReader;
+    findOperation: UserOperationFinder;
+    factory?: Address;
+  },
 ): Promise<FundsResult<DeployStep>> {
   const draft = await draftById(db, fundId);
   if (draft === null) return fail(404, NOT_FOUND);
@@ -427,23 +468,24 @@ export async function deployStep(
     .orderBy(desc(operations.createdAt))
     .limit(1);
   if (sent !== undefined) {
-    if (sent.transactionHash === null) {
+    let transactionHash = sent.transactionHash as Hash | null;
+    if (transactionHash === null) {
       const { nonce } = sent;
       const creator = draft.members.find((m) => m.userId === draft.creatorId)?.account;
-      if (nonce === null || creator === undefined || !(await releasable(client, creator, nonce, sent.createdAt))) {
-        return { ok: true, pending: sent.userOpHash as Hash };
+      const state = nonce === null || creator === undefined ? "unknown" : await nonceState(client, creator, nonce, sent.createdAt);
+      if (state === "unspent") {
+        // The same call again, with the votes it was frozen with, pinned to its nonce: whichever of the two lands
+        // is the same fund, and the other can't land at all.
+        const again = await deployCall(db, { fundId, userId, votesRequired: draft.votesRequired ?? votesRequired, agent });
+        return again.ok ? { ...again, nonce: nonce! } : again;
       }
-      // The same call again, with the votes it was frozen with, pinned to its nonce: whichever of the two lands
-      // is the same fund, and the other can't land at all.
-      const again = await deployCall(db, { fundId, userId, votesRequired: draft.votesRequired ?? votesRequired, agent });
-      return again.ok ? { ...again, nonce } : again;
-    } else {
-      const transactionHash = sent.transactionHash as Hash;
-      const found = await findDeployed(draft, draft.votesRequired, { transactionHash, client, agent, factory });
-      if (found === "unconfirmed") return fail(409, UNCONFIRMED);
-      if (found === "mismatch") return fail(409, MISMATCH);
-      if (found !== "none") return markLive(db, fundId, found);
+      if (state === "spent") transactionHash = await findLanded(db, { fundId, userId, nonce: nonce!, findOperation });
+      if (transactionHash === null) return { ok: true, pending: sent.userOpHash as Hash };
     }
+    const found = await findDeployed(draft, draft.votesRequired, { transactionHash, client, agent, factory });
+    if (found === "unconfirmed") return fail(409, UNCONFIRMED);
+    if (found === "mismatch") return fail(409, MISMATCH);
+    if (found !== "none") return markLive(db, fundId, found);
     // It failed, and its nonce is spent: open the draft again, so the new call takes the votes chosen now. If it
     // can't open (another createFund for it is on its way or went through), nothing new is built.
     if (!(await reopen(db, fundId)) && draft.status === "deploying") return fail(409, BEING_CREATED);

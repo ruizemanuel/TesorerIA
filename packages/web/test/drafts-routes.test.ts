@@ -15,8 +15,8 @@ vi.mock("../src/lib/db/client", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../src/lib/db/client")>()),
   getDb: async () => state.db,
 }));
-// Celo, where every account's EntryPoint nonce is 5.
-vi.mock("../src/lib/chain", () => ({ celoClient: () => ({ readContract: async () => 5n }) }));
+// Celo, where every account's EntryPoint nonce is 5, and no operation has landed.
+vi.mock("../src/lib/chain", () => ({ celoClient: () => ({ readContract: async () => 5n }), userOperationFinder: () => async () => null }));
 
 type Handler = (request: Request, context: { params: Promise<Record<string, string>> }) => Promise<Response>;
 

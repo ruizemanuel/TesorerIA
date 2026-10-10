@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { agentAddress } from "../../../../../lib/agent-address";
-import { celoClient } from "../../../../../lib/chain";
+import { celoClient, userOperationFinder } from "../../../../../lib/chain";
 import { currentUser } from "../../../../../lib/current-user";
 import { getDb } from "../../../../../lib/db/client";
 import { cancelDeploy, deployStep } from "../../../../../lib/funds";
@@ -18,6 +18,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     votesRequired: body.value.votesRequired,
     agent: agentAddress(),
     client: celoClient(),
+    findOperation: userOperationFinder(celoClient()),
   });
   if (!result.ok) return jsonError(result.status, result.error);
   // A pinned nonce goes as a decimal string: JSON has no bigint.

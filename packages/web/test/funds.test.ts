@@ -3,6 +3,7 @@ import { type Address, type Hash, type Hex, decodeFunctionData, encodeAbiParamet
 import { generatePrivateKey, privateKeyToAddress } from "viem/accounts";
 import { describe, expect, it, vi } from "vitest";
 import { agentAddress } from "../src/lib/agent-address";
+import type { UserOperationFinder } from "../src/lib/chain";
 import type { Db } from "../src/lib/db/client";
 import { funds, memberships, operations } from "../src/lib/db/schema";
 import { MAX_PESOS } from "../src/lib/format";
@@ -297,8 +298,10 @@ describe("deployStep", () => {
     const { people, fundId } = await group(db, 4); // four, so 2 and 3 votes are both valid
     const ana = people[0]!.id;
     const members = people.map((p) => getAddress(p.account));
+    /** The chain's log search for UserOperationEvents: by default, it finds nothing. */
+    const findOperation = vi.fn<UserOperationFinder>(async () => null);
     const step = (client: ReturnType<typeof fakeClient>, votesRequired = 2) =>
-      deployStep(db, { fundId, userId: ana, votesRequired, agent: AGENT, client: client as never, factory: FUND_FACTORY });
+      deployStep(db, { fundId, userId: ana, votesRequired, agent: AGENT, client: client as never, findOperation, factory: FUND_FACTORY });
     /** Ana's createFund for the draft went out with nonce 5, and its receipt says `success` (none yet if undefined). */
     const sent = async (success?: boolean) => {
       await recordOperation(db, ana, { userOpHash: OP, kind: "create-fund", draftId: fundId, nonce: 5n });
@@ -312,7 +315,7 @@ describe("deployStep", () => {
       client.readContract.mockResolvedValue(nonce);
       return client;
     };
-    return { ana, fundId, members, creator: members[0]!, step, sent, longAgo, chainAt };
+    return { ana, fundId, members, creator: members[0]!, step, sent, longAgo, chainAt, findOperation };
   }
 
   /** The votes a createFund call asks for. */
@@ -405,6 +408,74 @@ describe("deployStep", () => {
     expect(chain.readContract).toHaveBeenCalledWith(expect.objectContaining({ functionName: "getNonce", args: [creator, 0n] }));
     expect(await draftById(db, fundId)).toMatchObject({ status: "deploying", votesRequired: 2 });
     expect(await cancelDeploy(db, { fundId, userId: ana })).toEqual({ ok: true, reopened: false });
+  });
+
+  it("finds one that landed after the bundler forgot it on the chain itself, records it, and goes live with its fund", async () => {
+    const db = await testDb();
+    const { fundId, members, creator, step, sent, longAgo, findOperation } = await deploying(db);
+    await step(fakeClient([], []));
+    await sent();
+    await longAgo(); // the bundler only looks about 2,000 blocks back: it would answer "not found" forever
+    const [row] = await db.select().from(operations);
+    findOperation.mockResolvedValueOnce({ userOpHash: OP, transactionHash: TX, success: true });
+    const chain = fakeClient([{ address: FUND_FACTORY, fund: NEW_FUND, creator }], settingsFor(members));
+    chain.readContract.mockResolvedValue(6n); // its nonce is spent
+
+    expect(await step(chain)).toEqual({ ok: true, address: NEW_FUND });
+    expect(findOperation).toHaveBeenCalledWith({ userOpHashes: [OP], since: row!.createdAt });
+    expect(chain.getTransactionReceipt).toHaveBeenCalledWith({ hash: TX });
+    expect(await db.select({ transactionHash: operations.transactionHash, success: operations.success }).from(operations)).toEqual([
+      { transactionHash: TX, success: true },
+    ]);
+    expect(await draftById(db, fundId)).toMatchObject({ status: "live", address: NEW_FUND });
+    expect(await step(fakeClient([], []))).toEqual({ ok: true, address: NEW_FUND });
+    expect(findOperation).toHaveBeenCalledTimes(1);
+  });
+
+  it("opens the draft for a new one when the one found on the chain failed", async () => {
+    const db = await testDb();
+    const { fundId, step, sent, longAgo, chainAt, findOperation } = await deploying(db);
+    await step(fakeClient([], []));
+    await sent();
+    await longAgo();
+    findOperation.mockResolvedValueOnce({ userOpHash: OP, transactionHash: TX, success: false });
+    const fresh = await step(chainAt(6n), 3);
+    expect(votesIn(fresh)).toBe(3);
+    expect(fresh).not.toHaveProperty("nonce");
+    expect(await db.select({ success: operations.success }).from(operations)).toEqual([{ success: false }]);
+    expect(await draftById(db, fundId)).toMatchObject({ status: "deploying", votesRequired: 3 });
+  });
+
+  it("looks for every operation pinned to that nonce: the one that never came back may land instead of its resend", async () => {
+    const db = await testDb();
+    const { ana, fundId, members, creator, step, sent, longAgo, chainAt, findOperation } = await deploying(db);
+    await step(fakeClient([], []));
+    await sent();
+    await longAgo();
+    await step(chainAt(5n)); // released
+    await recordOperation(db, ana, { userOpHash: RESEND, kind: "create-fund", draftId: fundId, nonce: 5n });
+    await longAgo();
+    findOperation.mockResolvedValueOnce({ userOpHash: OP, transactionHash: TX, success: true });
+    const chain = fakeClient([{ address: FUND_FACTORY, fund: NEW_FUND, creator }], settingsFor(members));
+    chain.readContract.mockResolvedValue(6n);
+
+    expect(await step(chain)).toEqual({ ok: true, address: NEW_FUND });
+    const [query] = findOperation.mock.calls[0]!;
+    expect([...query.userOpHashes].sort()).toEqual([OP, RESEND].sort());
+    const rows = await db.select({ userOpHash: operations.userOpHash, transactionHash: operations.transactionHash }).from(operations);
+    expect(rows).toContainEqual({ userOpHash: OP, transactionHash: TX });
+  });
+
+  it("stays on its way while the chain shows nothing of it yet, or can't be read", async () => {
+    const db = await testDb();
+    const { fundId, step, sent, longAgo, chainAt, findOperation } = await deploying(db);
+    await step(fakeClient([], []));
+    await sent();
+    await longAgo();
+    expect(await step(chainAt(6n))).toEqual({ ok: true, pending: OP });
+    findOperation.mockRejectedValueOnce(new Error("eth_getLogs: too many requests"));
+    expect(await step(chainAt(6n))).toEqual({ ok: true, pending: OP });
+    expect(await draftById(db, fundId)).toMatchObject({ status: "deploying" });
   });
 
   it("releases one that never came back while the chain still has its nonce: the same call, pinned to that nonce", async () => {
