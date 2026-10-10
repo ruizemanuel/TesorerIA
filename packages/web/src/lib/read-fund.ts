@@ -8,6 +8,7 @@ import { getDb } from "./db/client";
 import { expenses, funds, memberships, users } from "./db/schema";
 import { memberFundAbi } from "./fund-abi";
 import { type FundView, buildFundView } from "./fund-view";
+import { ttlMemo } from "./memo";
 import { pendingOperations } from "./operations";
 import { type ProposalState, type TimelineItem, buildTimeline } from "./timeline";
 
@@ -119,6 +120,19 @@ export async function loadFundScreen(
   });
   const contributionOnItsWay = pending.some((operation) => operation.kind === "contribute");
   return { fundId: fund.id, view, timeline, viewerIsMember, publicView, contributionOnItsWay };
+}
+
+/**
+ * The public screen of the fund at `address` (spec, 9.2), read at most once every 45 seconds per fund: the portada
+ * and /publico are open to anyone, and every hit would otherwise read the chain. It's the same for every viewer,
+ * which is why only it is kept; a member's screens are always read fresh.
+ */
+const publicFundScreen = ttlMemo("public-fund-screen", 45_000, (address) =>
+  loadFundScreen(address as Address, null, { publicView: true }),
+);
+
+export function loadPublicFundScreen(address: Address): Promise<FundScreen | null> {
+  return publicFundScreen(getAddress(address));
 }
 
 /** Each proposal's state now: votes, executed, deadline, and whether `viewer` voted. */

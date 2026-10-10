@@ -4,7 +4,7 @@ import { isAddress } from "viem";
 import { FundScreenView } from "../../../../components/fund-screen";
 import { Panel } from "../../../../components/panel";
 import { Receipt } from "../../../../components/receipt";
-import { loadFundScreen } from "../../../../lib/read-fund";
+import { loadPublicFundScreen } from "../../../../lib/read-fund";
 
 /** The real group's fund, read-only, for anyone (spec, 9.2): no actions and no chat. */
 export default async function PublicFundPage({
@@ -18,7 +18,7 @@ export default async function PublicFundPage({
   const { address } = await params;
   const { p, id } = await searchParams;
   if (!isAddress(address, { strict: false })) notFound();
-  const screen = await loadFundScreen(address, null, { publicView: true });
+  const screen = await loadPublicFundScreen(address);
   if (screen === null) notFound();
   const item = p === "comprobante" ? screen.timeline.find((i) => i.id === id) : undefined;
   const panel = item ? (

@@ -7,7 +7,7 @@ import type { Db } from "../src/lib/db/client";
 import { expenses, funds, operations } from "../src/lib/db/schema";
 import { formatPesos } from "../src/lib/format";
 import { recordOperation } from "../src/lib/operations";
-import { HistoryGapError, loadFundScreen } from "../src/lib/read-fund";
+import { HistoryGapError, loadFundScreen, loadPublicFundScreen } from "../src/lib/read-fund";
 import { addLiveFund, addUser, randomAccount, testDb } from "./support/db";
 import { BLOCK, CLOCK, WARS, event, snapshot } from "./support/fixtures";
 
@@ -142,6 +142,26 @@ describe("loadFundScreen: the public view", () => {
     // Nothing in what the screen carries has a real name.
     const everything = JSON.stringify(screen, (_, value) => (typeof value === "bigint" ? value.toString() : value));
     for (const name of ["Ana", "Beto", "Caro"]) expect(everything).not.toContain(name);
+  });
+
+  it("is read once for many hits within 45 seconds, by address however it's written, and a member's screen never is", async () => {
+    const address = await liveFund({ publicView: true });
+    const hits = await Promise.all([loadPublicFundScreen(address), loadPublicFundScreen(address.toLowerCase() as Address)]);
+    expect(await loadPublicFundScreen(address)).toBe(hits[0]);
+    expect(hits[1]).toBe(hits[0]);
+    expect(hits[0]).toMatchObject({ publicView: true });
+    expect(agent.readFund).toHaveBeenCalledTimes(1);
+
+    await loadFundScreen(address, asViewer(ana));
+    await loadFundScreen(address, asViewer(ana));
+    expect(agent.readFund).toHaveBeenCalledTimes(3);
+  });
+
+  it("keeps no public screen of a fund that doesn't have one, so turning it on shows at once", async () => {
+    const address = await liveFund({ publicView: false });
+    expect(await loadPublicFundScreen(address)).toBeNull();
+    await db.update(funds).set({ publicView: true }).where(eq(funds.address, address));
+    expect(await loadPublicFundScreen(address)).toMatchObject({ publicView: true });
   });
 
   it("shows the names once the group says so, and still no one in particular is 'you'", async () => {

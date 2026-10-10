@@ -1,4 +1,4 @@
-import { FUND_FACTORY } from "@tesoreria/agent";
+import { FUND_FACTORY, shortMessage } from "@tesoreria/agent";
 import { redirect } from "next/navigation";
 import { connection } from "next/server";
 import { getAddress } from "viem";
@@ -8,7 +8,7 @@ import { currentUser } from "../lib/current-user";
 import { getDb } from "../lib/db/client";
 import { env } from "../lib/env";
 import { fundsOf } from "../lib/funds";
-import { loadFundScreen } from "../lib/read-fund";
+import { loadPublicFundScreen } from "../lib/read-fund";
 
 const STEPS = [
   "Armás el fondo y sumás a tus amigos con un link.",
@@ -16,11 +16,15 @@ const STEPS = [
   "El agente devuelve lo acordado, les avisa a los atrasados, y lo demás se vota.",
 ];
 
-/** The real group's fund for the portada, or null: a settings or chain problem never takes the portada down. */
+/**
+ * The real group's fund for the portada, or null: a settings or chain problem never takes the portada down, but it
+ * goes to the logs, so a portada without its live week doesn't go unnoticed.
+ */
 async function liveFund(address: string) {
   try {
-    return await loadFundScreen(getAddress(address), null, { publicView: true });
-  } catch {
+    return await loadPublicFundScreen(getAddress(address));
+  } catch (error) {
+    console.error(`The portada could not read the public fund: ${shortMessage(error)}`);
     return null;
   }
 }
