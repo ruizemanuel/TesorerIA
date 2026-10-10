@@ -8,16 +8,19 @@ import { loadMe, sendCalls, settleOperation } from "../lib/client/wallet";
 import type { DeployStep } from "../lib/funds";
 import { Button } from "./ui";
 
-/** The creator picks the votes and creates the fund in Celo, signing with their passkey (spec, 9). */
-export function DeployForm({ fundId, memberCount }: { fundId: string; memberCount: number }) {
+/**
+ * The creator picks the votes and creates the fund in Celo, signing with their passkey (spec, 9).
+ * `chosenVotes`: the ones of a creation already started, which stay as they are until it ends.
+ */
+export function DeployForm({ fundId, memberCount, chosenVotes }: { fundId: string; memberCount: number; chosenVotes: number | null }) {
   const router = useRouter();
-  const [votes, setVotes] = useState(Math.max(2, Math.ceil(memberCount / 2)));
+  const [votes, setVotes] = useState(chosenVotes ?? Math.max(2, Math.ceil(memberCount / 2)));
   const [step, setStep] = useState<"idle" | "signing" | "sending">("idle");
   const [error, setError] = useState("");
   const options = Array.from({ length: memberCount - 2 }, (_, i) => i + 2);
 
-  /** The fund's address once it's in Celo. A createFund that already went out is never sent again (spec, 6). */
-  async function deploy(): Promise<string> {
+  /** The fund if it's already in Celo, or the call to sign. A createFund that went out is never sent again (spec, 6). */
+  async function nextStep(): Promise<Exclude<DeployStep, { pending: unknown }>> {
     const ask = () => post<DeployStep>(`/api/drafts/${fundId}/deploy`, { votesRequired: votes });
     let next = await ask();
     while ("pending" in next) {
@@ -26,9 +29,13 @@ export function DeployForm({ fundId, memberCount }: { fundId: string; memberCoun
       await settleOperation(next.pending); // "en camino" while it isn't included
       next = await ask();
     }
-    if ("address" in next) return next.address;
+    return next;
+  }
+
+  /** Signs and sends the call; the fund's address once it's in Celo. */
+  async function create(call: Extract<DeployStep, { call: unknown }>["call"]): Promise<string> {
     const me = await loadMe();
-    const result = await sendCalls(me, [next.call], { kind: "create-fund", draftId: fundId }, () => setStep("sending"));
+    const result = await sendCalls(me, [call], { kind: "create-fund", draftId: fundId }, () => setStep("sending"));
     const { address } = await post<{ address: string }>(`/api/drafts/${fundId}/deployed`, { transactionHash: result.transactionHash });
     return address;
   }
@@ -54,12 +61,20 @@ export function DeployForm({ fundId, memberCount }: { fundId: string; memberCoun
         onClick={async () => {
           setError("");
           setStep("signing");
+          let built = false;
           try {
-            router.push(`/f/${await deploy()}`);
+            const next = await nextStep();
+            if ("address" in next) {
+              router.push(`/f/${next.address}`);
+            } else {
+              built = true;
+              router.push(`/f/${await create(next.call)}`);
+            }
           } catch (caught) {
-            // If nothing went out, or it failed, people can join again. The server checks which, and keeps the
-            // list frozen while one is on its way.
-            await del(`/api/drafts/${fundId}/deploy`).catch(() => {});
+            // Only a deploy this click built is called off, so people can join again: a refusal from the server,
+            // say while another tab is signing, leaves the draft as it is. The server also keeps the list frozen
+            // while a createFund is on its way.
+            if (built) await del(`/api/drafts/${fundId}/deploy`).catch(() => {});
             setError(userMessage(caught));
             setStep("idle");
           }

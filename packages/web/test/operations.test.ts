@@ -1,7 +1,7 @@
 import { type Hash, getAddress, pad } from "viem";
 import { describe, expect, it } from "vitest";
 import { funds, operations } from "../src/lib/db/schema";
-import { finishOperation, ownsDraft, pendingOperations, recordOperation } from "../src/lib/operations";
+import { PENDING_FOR_MS, dropOperation, finishOperation, ownsDraft, pendingOperations, recordOperation } from "../src/lib/operations";
 import { addUser, testDb } from "./support/db";
 
 const FUND = getAddress("0x00000000000000000000000000000000000f00d1");
@@ -54,5 +54,24 @@ describe("operations on their way", () => {
     await recordOperation(db, ana.id, { userOpHash: OP, kind: "create-fund", draftId: draft!.id });
     const [row] = await db.select().from(operations);
     expect(row).toMatchObject({ userOpHash: OP, kind: "create-fund", draftId: draft!.id, fund: null });
+  });
+});
+
+describe("dropOperation", () => {
+  it("takes an operation as dropped only once it's older than PENDING_FOR_MS without a receipt, and only from its sender", async () => {
+    const db = await testDb();
+    const ema = await addUser(db, "Ema");
+    const juan = await addUser(db, "Juan");
+    await recordOperation(db, ema.id, { userOpHash: OP, kind: "vote", fund: FUND });
+    const later = new Date(Date.now() + PENDING_FOR_MS + 60_000);
+    expect(await dropOperation(db, ema.id, OP)).toBe(false); // too recent: it may still land
+    expect(await dropOperation(db, juan.id, OP, later)).toBe(false); // not Juan's
+    expect(await dropOperation(db, ema.id, OP, later)).toBe(true);
+    expect(await dropOperation(db, ema.id, OP, later)).toBe(true); // asking twice gives the same answer
+    expect(await db.select().from(operations)).toMatchObject([{ userOpHash: OP, success: false, transactionHash: null }]);
+
+    await recordOperation(db, ema.id, { userOpHash: OP_LATER, kind: "vote", fund: FUND });
+    await finishOperation(db, ema.id, { userOpHash: OP_LATER, transactionHash: TX, success: true });
+    expect(await dropOperation(db, ema.id, OP_LATER, later)).toBe(false); // it has its receipt
   });
 });

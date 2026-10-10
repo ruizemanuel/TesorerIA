@@ -1,4 +1,4 @@
-import { and, desc, eq, gt, isNull } from "drizzle-orm";
+import { and, desc, eq, gt, isNull, lt, or } from "drizzle-orm";
 import type { Address, Hash } from "viem";
 import type { Db } from "./db/client";
 import { funds, operations } from "./db/schema";
@@ -13,8 +13,8 @@ export type OperationInput = {
   draftId?: string;
 };
 
-/** After this long without a receipt, an operation stops showing as "en camino". */
-const PENDING_FOR_MS = 15 * 60_000;
+/** After this long without a receipt, an operation stops showing as "en camino", and one the bundler forgot counts as dropped. */
+export const PENDING_FOR_MS = 15 * 60_000;
 
 /** Keeps a member's operation as soon as the bundler took it, before its receipt (spec, 6). */
 export async function recordOperation(db: Db, userId: string, input: OperationInput): Promise<void> {
@@ -51,6 +51,29 @@ export async function finishOperation(
     .update(operations)
     .set({ transactionHash, success })
     .where(and(eq(operations.userOpHash, userOpHash), eq(operations.userId, userId)));
+}
+
+/**
+ * Takes an operation as dropped: its sender says the bundler has no receipt for it and no longer knows it, and it
+ * is older than PENDING_FOR_MS here. It then counts as failed (`success` false, no transaction), so whatever it
+ * was can be sent again. That is safe because it never landed: a new operation from the same Safe takes the
+ * same nonce, so at most one of the two can ever land. Whether it was taken as dropped, now or before.
+ */
+export async function dropOperation(db: Db, userId: string, userOpHash: Hash, now = new Date()): Promise<boolean> {
+  const dropped = await db
+    .update(operations)
+    .set({ success: false })
+    .where(
+      and(
+        eq(operations.userOpHash, userOpHash),
+        eq(operations.userId, userId),
+        isNull(operations.transactionHash),
+        or(isNull(operations.success), eq(operations.success, false)),
+        lt(operations.createdAt, new Date(now.getTime() - PENDING_FOR_MS)),
+      ),
+    )
+    .returning({ userOpHash: operations.userOpHash });
+  return dropped.length > 0;
 }
 
 /** A member's operations in a fund still on their way, newest first. */

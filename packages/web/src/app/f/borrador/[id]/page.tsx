@@ -45,7 +45,7 @@ export default async function DraftPage({ params }: { params: Promise<{ id: stri
         />
       </Card>
       <Card className="grid gap-3">
-        {canDeploy && <DeployForm fundId={draft.id} memberCount={draft.members.length} />}
+        {canDeploy && <DeployForm fundId={draft.id} memberCount={draft.members.length} chosenVotes={draft.votesRequired} />}
         {isCreator && !canDeploy && <p className="text-muted">Cuando se sumen al menos 3 personas, vas a poder crear el fondo.</p>}
         {!isCreator && <p className="text-muted">Cuando estén todos, {draft.creatorName} crea el fondo y empieza a andar.</p>}
       </Card>

@@ -156,42 +156,67 @@ describe("sendCalls", () => {
 });
 
 describe("settleOperation", () => {
-  /** /api/bundler answering eth_getUserOperationReceipt with `result`; the requests it got. */
-  function bundler(result: unknown) {
-    const requests: { url: string; method: string; params: unknown }[] = [];
+  const RECEIPT_RPC = {
+    userOpHash: OP,
+    entryPoint: entryPoint07Address,
+    sender: ACCOUNT,
+    nonce: "0x1",
+    actualGasCost: "0x1",
+    actualGasUsed: "0x1",
+    success: false,
+    logs: [],
+    receipt: { transactionHash: TX, blockNumber: "0x1", logs: [], status: "0x1" },
+  };
+  const KNOWN_RPC = { userOperation: { sender: ACCOUNT, nonce: "0x1" }, entryPoint: entryPoint07Address, transactionHash: null, blockHash: null, blockNumber: null };
+
+  /** /api/bundler answering each method with a result, or with a JSON-RPC error; the methods it was asked. */
+  function bundler(answers: Record<string, { result: unknown } | { error: string }>) {
+    const asked: string[] = [];
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string, init: { body: string }) => {
         const { id, method, params } = JSON.parse(init.body);
-        requests.push({ url: String(url), method, params });
-        return new Response(JSON.stringify({ jsonrpc: "2.0", id, result }), { headers: { "content-type": "application/json" } });
+        expect([String(url), params]).toEqual(["http://localhost:3000/api/bundler", [OP]]);
+        asked.push(method);
+        const answer = answers[method]!;
+        const body = "result" in answer ? { result: answer.result } : { error: { code: -32601, message: answer.error } };
+        return new Response(JSON.stringify({ jsonrpc: "2.0", id, ...body }), { headers: { "content-type": "application/json" } });
       }),
     );
-    return requests;
+    return asked;
   }
-
-  it("records the receipt of an operation that went out earlier", async () => {
-    const requests = bundler({
-      userOpHash: OP,
-      entryPoint: entryPoint07Address,
-      sender: ACCOUNT,
-      nonce: "0x1",
-      actualGasCost: "0x1",
-      actualGasUsed: "0x1",
-      success: false,
-      logs: [],
-      receipt: { transactionHash: TX, blockNumber: "0x1", logs: [], status: "0x1" },
-    });
-    await settleOperation(OP);
-    expect(requests).toEqual([{ url: "http://localhost:3000/api/bundler", method: "eth_getUserOperationReceipt", params: [OP] }]);
-    expect(posted()).toEqual([["/api/operations/done", { userOpHash: OP, transactionHash: TX, success: false }]]);
-  });
-
-  it("says it's on its way, and records nothing, while the bundler has no receipt for it", async () => {
-    bundler(null);
+  const onItsWay = async () => {
     const error = await settleOperation(OP).catch((caught) => caught);
     expect(error).toBeInstanceOf(UserFacingError);
     expect(error.message).toMatch(/en camino/);
+  };
+
+  it("records the receipt of an operation that went out earlier", async () => {
+    const asked = bundler({ eth_getUserOperationReceipt: { result: RECEIPT_RPC } });
+    await settleOperation(OP);
+    expect(asked).toEqual(["eth_getUserOperationReceipt"]);
+    expect(posted()).toEqual([["/api/operations/done", { userOpHash: OP, transactionHash: TX, success: false }]]);
+  });
+
+  it("says it's on its way, and records nothing, while the bundler still has it", async () => {
+    bundler({ eth_getUserOperationReceipt: { result: null }, eth_getUserOperationByHash: { result: KNOWN_RPC } });
+    await onItsWay();
+    expect(api.post).not.toHaveBeenCalled();
+  });
+
+  it("reports one the bundler no longer knows as dropped, which the server takes only once it's old enough", async () => {
+    bundler({ eth_getUserOperationReceipt: { result: null }, eth_getUserOperationByHash: { result: null } });
+    api.post.mockResolvedValueOnce({ ok: true, dropped: true } as never);
+    await settleOperation(OP);
+    expect(posted()).toEqual([["/api/operations/done", { userOpHash: OP, dropped: true }]]);
+
+    api.post.mockResolvedValueOnce({ ok: true, dropped: false } as never); // too recent: it may still land
+    await onItsWay();
+  });
+
+  it("never takes a bundler that can't say (the fork's doesn't know the method) for a dropped one", async () => {
+    bundler({ eth_getUserOperationReceipt: { result: null }, eth_getUserOperationByHash: { error: "fork bundler: eth_getUserOperationByHash is not supported" } });
+    await onItsWay();
     expect(api.post).not.toHaveBeenCalled();
   });
 });

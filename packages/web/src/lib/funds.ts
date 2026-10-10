@@ -1,5 +1,5 @@
 import { FUND_FACTORY, fundAbi, fundFactoryAbi } from "@tesoreria/agent";
-import { type SQL, and, asc, desc, eq, isNull, ne, notExists, or, sql } from "drizzle-orm";
+import { type SQL, and, asc, desc, eq, isNull, notExists, or, sql } from "drizzle-orm";
 import { Base64, Bytes } from "ox";
 import {
   type Address,
@@ -31,6 +31,8 @@ const ONLY_CREATOR = "Solo quien armó el fondo puede crearlo.";
 const ALREADY_LIVE = "El fondo ya está creado.";
 const BEING_CREATED = "El fondo se está creando en este momento. Probá en un rato.";
 const UNCONFIRMED = "La operación todavía no se confirmó. Probá en un rato.";
+const FULL = "El fondo ya tiene 10 personas, que es el máximo.";
+const MISMATCH = "Ya se creó un fondo desde tu cuenta, pero con otros datos. No lo crees de nuevo: tendrías dos.";
 
 export type DraftSummary = {
   id: string;
@@ -138,24 +140,29 @@ export async function joinFund(
   }
   if (draft.status === "live") return fail(409, "El fondo ya está en marcha: pedile a alguien del grupo que proponga sumarte.");
   if (draft.status === "deploying") return fail(409, BEING_CREATED);
-  if (draft.members.length >= MAX_MEMBERS) return fail(409, "El fondo ya tiene 10 personas, que es el máximo.");
-  // Only while it's still a draft, checked in the same statement: a deploy that started after the read above
-  // keeps the list it was built with.
+  if (draft.members.length >= MAX_MEMBERS) return fail(409, FULL);
+  // Checked again in the same statement as the insert, since the read above may be stale: only while it's still
+  // a draft (a deploy that started since keeps the list it was built with), and only while there's room (two
+  // people joining at nine would make eleven, which createFund always refuses).
+  const joining = db.$count(memberships, eq(memberships.fundId, draft.id));
   await db
     .insert(memberships)
     .select((qb) =>
       qb
         .select({ fundId: funds.id, userId: sql<string>`${userId}::uuid`.as("user_id"), joinedAt: sql<Date>`now()`.as("joined_at") })
         .from(funds)
-        .where(and(eq(funds.id, draft.id), eq(funds.status, "draft"))),
+        .where(and(eq(funds.id, draft.id), eq(funds.status, "draft"), sql`${joining} < ${MAX_MEMBERS}`)),
     )
     .onConflictDoNothing();
-  return (await isMember(db, draft.id, userId)) ? joined : fail(409, BEING_CREATED);
+  if (await isMember(db, draft.id, userId)) return joined;
+  const [now] = await db.select({ status: funds.status }).from(funds).where(eq(funds.id, draft.id));
+  return fail(409, now?.status === "draft" ? FULL : BEING_CREATED);
 }
 
 /**
  * The creator's createFund call (spec, 9: the creator deploys it, in a transaction signed by them). It freezes
- * the draft (`deploying`): nobody joins until the deploy goes through or is called off (`cancelDeploy`).
+ * the draft (`deploying`) with these votes: nobody joins and the votes don't change until the deploy goes
+ * through or is called off (`cancelDeploy`).
  */
 export async function deployCall(
   db: Db,
@@ -167,15 +174,25 @@ export async function deployCall(
   if (draft.status === "live") return fail(409, ALREADY_LIVE);
   const n = draft.members.length;
   if (n < MIN_MEMBERS) return fail(409, "Hacen falta al menos 3 personas para crear el fondo.");
+  if (n > MAX_MEMBERS) return fail(409, `Un fondo puede tener hasta ${MAX_MEMBERS} personas, y este tiene ${n}.`);
   if (!Number.isInteger(votesRequired) || votesRequired < 2 || votesRequired > n - 1) {
     return fail(400, `Con ${n} personas, los votos necesarios van de 2 a ${n - 1}.`);
+  }
+  // Once it's being created, the votes are the ones being signed: another tab can't change them underneath.
+  if (draft.status === "deploying" && draft.votesRequired !== votesRequired) {
+    return fail(409, `Ya empezaste a crear el fondo con ${draft.votesRequired} votos necesarios: elegí ${draft.votesRequired} para seguir.`);
   }
   const [frozen] = await db
     .update(funds)
     .set({ votesRequired, status: "deploying" })
-    .where(and(eq(funds.id, fundId), ne(funds.status, "live")))
+    .where(
+      and(
+        eq(funds.id, fundId),
+        or(eq(funds.status, "draft"), and(eq(funds.status, "deploying"), eq(funds.votesRequired, votesRequired))),
+      ),
+    )
     .returning({ id: funds.id });
-  if (frozen === undefined) return fail(409, ALREADY_LIVE);
+  if (frozen === undefined) return fail(409, BEING_CREATED); // it changed since the read above
   // Read after freezing: whoever got in before it is in the call, and nobody gets in after it.
   const members = await membersOf(db, fundId);
   const data = encodeFunctionData({
@@ -207,6 +224,11 @@ export async function cancelDeploy(
   const draft = await draftById(db, fundId);
   if (draft === null) return fail(404, NOT_FOUND);
   if (draft.creatorId !== userId) return fail(403, ONLY_CREATOR);
+  return { ok: true, reopened: await reopen(db, fundId) };
+}
+
+/** `deploying` back to `draft`, in one statement, unless a createFund for it is on its way or went through. */
+async function reopen(db: Db, fundId: string): Promise<boolean> {
   const onItsWayOrThrough = db
     .select({ userOpHash: operations.userOpHash })
     .from(operations)
@@ -222,7 +244,7 @@ export async function cancelDeploy(
     .set({ status: "draft", votesRequired: null })
     .where(and(eq(funds.id, fundId), eq(funds.status, "deploying"), notExists(onItsWayOrThrough)))
     .returning({ id: funds.id });
-  return { ok: true, reopened: reopened.length > 0 };
+  return reopened.length > 0;
 }
 
 type ChainReader = Pick<PublicClient, "getTransactionReceipt" | "multicall">;
@@ -231,15 +253,19 @@ type Deployed = { address: Address; block: bigint };
 /**
  * The fund the factory created in `transactionHash` for this draft: the FundCreated whose creator is the
  * creator's account, and only if that fund has exactly the draft's settings. Anyone can create funds in the
- * factory, so nothing else is taken for ours. "unconfirmed" while the transaction can't be read.
+ * factory, so nothing else is taken for ours. Otherwise, why not:
+ * - "none": the factory created nothing for the creator there, so that operation failed;
+ * - "mismatch": it created one for the creator, but with other settings. A real fund all the same, so it must
+ *   never be taken for a failure (another createFund would make a second one);
+ * - "unconfirmed": the transaction can't be read yet.
  */
 async function findDeployed(
   draft: DraftSummary,
-  votesRequired: number,
+  votesRequired: number | null,
   { transactionHash, client, agent, factory }: { transactionHash: Hash; client: ChainReader; agent: Address; factory: Address },
-): Promise<Deployed | null | "unconfirmed"> {
+): Promise<Deployed | "none" | "mismatch" | "unconfirmed"> {
   const creator = draft.members.find((m) => m.userId === draft.creatorId)?.account;
-  if (creator === undefined) return null;
+  if (creator === undefined) return "mismatch"; // can't tell whose it is: never take it for a failure
   try {
     const receipt = await client.getTransactionReceipt({ hash: transactionHash });
     const created = parseEventLogs({ abi: fundFactoryAbi, eventName: "FundCreated", logs: receipt.logs }).filter(
@@ -273,7 +299,7 @@ async function findDeployed(
         return { address: getAddress(fund), block: receipt.blockNumber };
       }
     }
-    return null;
+    return created.length === 0 ? "none" : "mismatch";
   } catch {
     return "unconfirmed"; // not mined yet, or the node didn't answer: try again later, never as "not ours"
   }
@@ -303,7 +329,8 @@ export async function confirmDeploy(
   if (draft.status !== "deploying" || draft.votesRequired === null) return fail(409, "Primero hay que crear el fondo.");
   const found = await findDeployed(draft, draft.votesRequired, { transactionHash, client, agent, factory });
   if (found === "unconfirmed") return fail(409, UNCONFIRMED);
-  if (found === null) return fail(409, "No encontramos el fondo en esa operación.");
+  if (found === "mismatch") return fail(409, MISMATCH);
+  if (found === "none") return fail(409, "No encontramos el fondo en esa operación.");
   return markLive(db, fundId, found);
 }
 
@@ -311,10 +338,12 @@ export type DeployStep = { address: Address } | { pending: Hash } | { call: { to
 
 /**
  * What the creator's "Crear el fondo" does next. A createFund is never sent twice (spec, 6): with one already
- * sent for this draft, a new one is built only once that one is known to have created no fund of ours.
+ * sent for this draft, a new one is built only once that one is known to have created nothing.
  * - `address`: it's live, or the sent one's transaction has our fund;
  * - `pending`: the sent one has no receipt here yet, so the browser asks the bundler for it first;
- * - `call`: nothing was sent, or what was sent failed. `votesRequired` only counts here: a sent one keeps its own.
+ * - `call`: nothing was sent, or what was sent created nothing (it failed, or the bundler dropped it), and the
+ *   draft opens again first. `votesRequired` only counts here: a sent one keeps its own;
+ * - 409: the sent one created a fund for the creator with other settings. A real fund, so never another.
  */
 export async function deployStep(
   db: Db,
@@ -332,20 +361,24 @@ export async function deployStep(
   if (draft.creatorId !== userId) return fail(403, ONLY_CREATOR);
   if (draft.status === "live" && draft.address !== null) return { ok: true, address: draft.address };
   const [sent] = await db
-    .select({ userOpHash: operations.userOpHash, transactionHash: operations.transactionHash })
+    .select({ userOpHash: operations.userOpHash, transactionHash: operations.transactionHash, success: operations.success })
     .from(operations)
     .where(and(eq(operations.draftId, fundId), eq(operations.userId, userId), eq(operations.kind, "create-fund")))
     .orderBy(desc(operations.createdAt))
     .limit(1);
   if (sent !== undefined) {
-    if (sent.transactionHash === null) return { ok: true, pending: sent.userOpHash as Hash };
-    if (draft.status === "deploying" && draft.votesRequired !== null) {
+    if (sent.transactionHash === null) {
+      // No receipt yet, unless it was dropped (`dropOperation`): that one is known to have failed.
+      if (sent.success !== false) return { ok: true, pending: sent.userOpHash as Hash };
+    } else {
       const transactionHash = sent.transactionHash as Hash;
       const found = await findDeployed(draft, draft.votesRequired, { transactionHash, client, agent, factory });
       if (found === "unconfirmed") return fail(409, UNCONFIRMED);
-      if (found !== null) return markLive(db, fundId, found);
+      if (found === "mismatch") return fail(409, MISMATCH);
+      if (found !== "none") return markLive(db, fundId, found);
     }
-    // It created no fund of ours (or it failed and the draft was opened again): another one can go.
+    // It created nothing: open the draft again, so the new call takes the votes chosen now.
+    await reopen(db, fundId);
   }
   return deployCall(db, { fundId, userId, votesRequired, agent });
 }

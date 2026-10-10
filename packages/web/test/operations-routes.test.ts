@@ -3,6 +3,7 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CurrentUser } from "../src/lib/current-user";
 import type { Db } from "../src/lib/db/client";
 import { funds, operations } from "../src/lib/db/schema";
+import { PENDING_FOR_MS } from "../src/lib/operations";
 import { addUser, testDb } from "./support/db";
 
 // The routes as the server runs them, with the session and the database standing in.
@@ -102,8 +103,20 @@ describe("POST /api/operations/done", () => {
     expect(await db.select().from(operations)).toMatchObject([{ transactionHash: TX, success: true }]);
   });
 
+  it("takes the caller's operation as dropped only once it's older than PENDING_FOR_MS", async () => {
+    await record(post("/api/operations", { userOpHash: OP, kind: "vote", fund: FUND }));
+    const dropped = async () => (await (await finish(post("/api/operations/done", { userOpHash: OP, dropped: true }))).json()) as unknown;
+    expect(await dropped()).toEqual({ ok: true, dropped: false });
+    await db.update(operations).set({ createdAt: new Date(Date.now() - PENDING_FOR_MS - 60_000) });
+    state.user = juan;
+    expect(await dropped()).toEqual({ ok: true, dropped: false });
+    state.user = ana;
+    expect(await dropped()).toEqual({ ok: true, dropped: true });
+    expect(await db.select().from(operations)).toMatchObject([{ transactionHash: null, success: false }]);
+  });
+
   it("answers 400 to a receipt that is not a pair of hashes and a verdict", async () => {
-    for (const body of [{ userOpHash: OP, transactionHash: "0x02", success: true }, { userOpHash: OP, transactionHash: TX, success: "yes" }, {}]) {
+    for (const body of [{ userOpHash: OP, transactionHash: "0x02", success: true }, { userOpHash: OP, transactionHash: TX, success: "yes" }, { userOpHash: OP, dropped: false }, {}]) {
       expect((await finish(post("/api/operations/done", body))).status, JSON.stringify(body)).toBe(400);
     }
   });

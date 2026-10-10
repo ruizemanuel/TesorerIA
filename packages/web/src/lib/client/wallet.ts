@@ -1,6 +1,11 @@
 import { type Call, type SendTaggedCallsResult, createMemberAccount, createPimlicoBundlerClient, sendTaggedCalls } from "@tesoreria/wallet";
 import { type Address, type Hash, type Hex, createPublicClient, http } from "viem";
-import { UserOperationReceiptNotFoundError, createBundlerClient, toWebAuthnAccount } from "viem/account-abstraction";
+import {
+  UserOperationNotFoundError,
+  UserOperationReceiptNotFoundError,
+  createBundlerClient,
+  toWebAuthnAccount,
+} from "viem/account-abstraction";
 import { celo } from "viem/chains";
 import { get, post } from "./api";
 import { UserFacingError } from "./errors";
@@ -100,17 +105,25 @@ export async function sendCalls(
 
 /**
  * Settles an operation that went out earlier but whose receipt the server never got (the page closed, the wait
- * ran out): asks the bundler for it and records it. While it isn't included it throws "en camino", so nothing
- * is sent again in the meantime (spec, 6).
+ * ran out): asks the bundler for it and records it. One the bundler no longer knows either is reported as
+ * dropped, which the server takes only once it's old enough (`dropOperation`). Anything else throws "en
+ * camino", so nothing is sent again in the meantime (spec, 6).
  */
 export async function settleOperation(userOpHash: Hash): Promise<void> {
   const bundlerClient = createBundlerClient({ transport: bundlerTransport() });
-  let receipt: Awaited<ReturnType<typeof bundlerClient.getUserOperationReceipt>>;
-  try {
-    receipt = await bundlerClient.getUserOperationReceipt({ hash: userOpHash });
-  } catch (error) {
-    if (error instanceof UserOperationReceiptNotFoundError) throw new UserFacingError(ON_ITS_WAY, { cause: error });
+  const receipt = await bundlerClient.getUserOperationReceipt({ hash: userOpHash }).catch((error: unknown) => {
+    if (error instanceof UserOperationReceiptNotFoundError) return null;
     throw error;
+  });
+  if (receipt !== null) {
+    await post("/api/operations/done", { userOpHash, transactionHash: receipt.receipt.transactionHash, success: receipt.success });
+    return;
   }
-  await post("/api/operations/done", { userOpHash, transactionHash: receipt.receipt.transactionHash, success: receipt.success });
+  // Only a clear "not found" means dropped. An error, or a bundler without the method (the fork's), says nothing.
+  const forgotten = await bundlerClient.getUserOperation({ hash: userOpHash }).then(
+    () => false,
+    (error: unknown) => error instanceof UserOperationNotFoundError,
+  );
+  if (forgotten && (await post<{ dropped: boolean }>("/api/operations/done", { userOpHash, dropped: true })).dropped) return;
+  throw new UserFacingError(ON_ITS_WAY);
 }
