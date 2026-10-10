@@ -18,5 +18,5 @@ jobs:
           HEARTBEAT_URL: ${{ vars.HEARTBEAT_URL }}
           HEARTBEAT_SECRET: ${{ secrets.HEARTBEAT_SECRET }}
         run: |
-          curl --fail-with-body --silent --show-error --max-time 300 \
+          curl --proto '=https' --fail-with-body --silent --show-error --max-time 300 \
             -X POST -H "Authorization: Bearer $HEARTBEAT_SECRET" "$HEARTBEAT_URL"
