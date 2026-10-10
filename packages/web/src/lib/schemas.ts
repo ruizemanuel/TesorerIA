@@ -1,4 +1,4 @@
-import type { Hex } from "viem";
+import { type Address, type Hex, getAddress, isAddress } from "viem";
 import { z } from "zod";
 
 /**
@@ -9,3 +9,6 @@ export const hexSchema = z.string().regex(/^0x[0-9a-fA-F]*$/) as z.ZodType<Hex>;
 
 /** Exactly 32 bytes in hex: a hash, a UserOperation hash, a private key. */
 export const hashSchema = z.string().regex(/^0x[0-9a-fA-F]{64}$/) as z.ZodType<Hex>;
+
+/** A 20-byte address, in any case. It comes out checksummed, the way the database keeps it. */
+export const addressSchema = hexSchema.refine((value) => isAddress(value, { strict: false })).transform((value): Address => getAddress(value));

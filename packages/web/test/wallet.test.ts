@@ -1,0 +1,147 @@
+import { type Address, type Hash, type Hex, getAddress, pad } from "viem";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+// The wallet package is covered by its own tests: here only what sendCalls decides around it.
+type Owner = { sign(parameters: { hash: Hex }): Promise<unknown> };
+type Sent = { onSent(userOpHash: Hash): Promise<void> };
+const wallet = vi.hoisted(() => ({
+  createMemberAccount: vi.fn<(parameters: { owner: Owner }) => Promise<{ address: Address }>>(),
+  createPimlicoBundlerClient: vi.fn(() => ({ bundler: true })),
+  sendTaggedCalls: vi.fn<(parameters: Sent) => Promise<unknown>>(),
+}));
+vi.mock("@tesoreria/wallet", () => wallet);
+
+const passkey = vi.hoisted(() => ({ sign: vi.fn(async (_parameters: { hash: Hex }) => ({ signature: "0xsigned" })) }));
+vi.mock("viem/account-abstraction", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("viem/account-abstraction")>()),
+  toWebAuthnAccount: vi.fn(() => ({ type: "webAuthn", sign: passkey.sign })),
+}));
+
+const api = vi.hoisted(() => ({ post: vi.fn(async (_path: string, _body?: unknown) => ({ ok: true })), get: vi.fn() }));
+vi.mock("../src/lib/client/api", () => api);
+
+import { UserFacingError } from "../src/lib/client/errors";
+import { type Me, sendCalls } from "../src/lib/client/wallet";
+
+const ACCOUNT = getAddress("0x2F8218c7cF6d822091EDe24Db9c46B0324c21A6F");
+const me: Me = { name: "Ema", account: ACCOUNT, credential: { id: "cred", publicKey: "0x1234" } };
+const FUND = getAddress("0x00000000000000000000000000000000000f00d1");
+const OP: Hash = pad("0x01", { size: 32 });
+const TX: Hash = pad("0x02", { size: 32 });
+const CALLS = [{ to: FUND, data: "0x" as const }];
+const INFO = { kind: "contribute", fund: FUND, amount: 10_000_000n, token: "usdt" } as const;
+const RECEIPT = { userOpHash: OP, transactionHash: TX, success: true, reason: undefined };
+
+/** The operations the page told the server about, in order. */
+const posted = () => api.post.mock.calls.map(([path, body]) => [path, body] as const);
+
+beforeEach(() => {
+  vi.stubGlobal("window", { location: { origin: "http://localhost:3000" } });
+  wallet.createMemberAccount.mockImplementation(async () => ({ address: ACCOUNT }));
+});
+afterEach(() => {
+  vi.clearAllMocks();
+  vi.unstubAllGlobals();
+});
+
+describe("sendCalls", () => {
+  it("records the operation before the receipt, then the receipt, and says when the passkey signed", async () => {
+    const events: string[] = [];
+    api.post.mockImplementation(async (path: string) => {
+      events.push(`post ${path}`);
+      return { ok: true };
+    });
+    wallet.sendTaggedCalls.mockImplementation(async ({ onSent }) => {
+      // What sendUserOperation does: the Safe asks its owner to sign, then the bundler takes the operation.
+      const { owner } = wallet.createMemberAccount.mock.calls[0]![0];
+      await owner.sign({ hash: "0xdead" });
+      events.push("sent");
+      await onSent(OP);
+      events.push("receipt");
+      return RECEIPT;
+    });
+
+    const result = await sendCalls(me, CALLS, INFO, () => events.push("signed"));
+
+    expect(result).toEqual(RECEIPT);
+    expect(events).toEqual(["signed", "sent", "post /api/operations", "receipt", "post /api/operations/done"]);
+    expect(posted()).toEqual([
+      ["/api/operations", { kind: "contribute", fund: FUND, amount: "10000000", token: "usdt", userOpHash: OP }],
+      ["/api/operations/done", { userOpHash: OP, transactionHash: TX, success: true }],
+    ]);
+    expect(passkey.sign).toHaveBeenCalledWith({ hash: "0xdead" });
+  });
+
+  it("refuses a passkey that isn't the account's, before anyone is asked to sign", async () => {
+    wallet.createMemberAccount.mockResolvedValue({ address: getAddress("0x6BE3c1eB63A4edbc6C23c281F93F81B14eF3a671") });
+    const error = await sendCalls(me, CALLS, INFO).catch((caught) => caught);
+    expect(error).toBeInstanceOf(UserFacingError);
+    expect(error.message).toBe("Tu passkey no coincide con tu cuenta. Entrá de nuevo.");
+    expect(wallet.sendTaggedCalls).not.toHaveBeenCalled();
+  });
+
+  it("lets an error from before the operation left pass through untouched", async () => {
+    const cancelled = Object.assign(new Error("The operation either timed out or was not allowed."), { name: "NotAllowedError" });
+    wallet.sendTaggedCalls.mockRejectedValue(cancelled);
+    await expect(sendCalls(me, CALLS, INFO)).rejects.toBe(cancelled);
+    expect(api.post).not.toHaveBeenCalled();
+  });
+
+  it("says a failed operation moved nothing, and still tells the server", async () => {
+    wallet.sendTaggedCalls.mockResolvedValue({ ...RECEIPT, success: false, reason: "reverted" });
+    const error = await sendCalls(me, CALLS, INFO).catch((caught) => caught);
+    expect(error).toBeInstanceOf(UserFacingError);
+    expect(error.message).toBe("La operación no se pudo completar. No se movió plata.");
+    expect(posted().at(-1)).toEqual(["/api/operations/done", { userOpHash: OP, transactionHash: TX, success: false }]);
+  });
+
+  it("keeps trying to record an operation that is out, and never asks to send it again", async () => {
+    // onSent fails (the server is down), then the receipt wait fails too: the error only names the hash.
+    api.post.mockRejectedValueOnce(new UserFacingError("Algo falló. Probá de nuevo.")).mockResolvedValue({ ok: true });
+    wallet.sendTaggedCalls.mockImplementation(async ({ onSent }) => {
+      await onSent(OP).catch(() => {});
+      throw new Error(`UserOperation ${OP} was sent but its receipt is unknown (timeout); its hash was not recorded`);
+    });
+
+    const error = await sendCalls(me, CALLS, INFO).catch((caught) => caught);
+
+    expect(error).toBeInstanceOf(UserFacingError);
+    expect(error.message).toMatch(/en camino/);
+    expect(error.message).not.toMatch(/prob[aá] de nuevo/i);
+    expect(posted()).toEqual([
+      ["/api/operations", expect.objectContaining({ userOpHash: OP })],
+      ["/api/operations", expect.objectContaining({ userOpHash: OP })],
+    ]);
+  });
+
+  it("tells a timeout after a recorded send that it is on its way too, without recording it twice over", async () => {
+    wallet.sendTaggedCalls.mockImplementation(async ({ onSent }) => {
+      await onSent(OP);
+      throw new Error("Timed out while waiting for User Operation receipt.");
+    });
+    const error = await sendCalls(me, CALLS, INFO).catch((caught) => caught);
+    expect(error).toBeInstanceOf(UserFacingError);
+    expect(error.message).toMatch(/en camino/);
+    expect(posted().every(([path]) => path === "/api/operations")).toBe(true); // idempotent: the server keeps one row
+  });
+
+  it("records, once the receipt is in, an operation whose record failed while it waited", async () => {
+    api.post.mockRejectedValueOnce(new UserFacingError("Algo falló. Probá de nuevo.")).mockResolvedValue({ ok: true });
+    wallet.sendTaggedCalls.mockImplementation(async ({ onSent }) => {
+      await onSent(OP).catch(() => {});
+      return { ...RECEIPT, unrecorded: "Algo falló." };
+    });
+    await sendCalls(me, CALLS, INFO);
+    expect(posted().map(([path]) => path)).toEqual(["/api/operations", "/api/operations", "/api/operations/done"]);
+  });
+
+  it("passes the draft a create-fund deploys on to the server", async () => {
+    wallet.sendTaggedCalls.mockImplementation(async ({ onSent }) => {
+      await onSent(OP);
+      return RECEIPT;
+    });
+    const draftId = crypto.randomUUID();
+    await sendCalls(me, CALLS, { kind: "create-fund", draftId });
+    expect(posted()[0]).toEqual(["/api/operations", { kind: "create-fund", draftId, userOpHash: OP }]);
+  });
+});
