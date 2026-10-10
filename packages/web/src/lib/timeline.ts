@@ -82,6 +82,7 @@ export function buildTimeline({
   const nowSeconds = BigInt(Math.floor(now.getTime() / 1000));
   const currentWeek = weekAt(now, startTime);
   const spent = new Map<bigint, bigint>();
+  const voteOnItsWay = pending.some((operation) => operation.kind === "vote");
   let cap = initialWeeklyCap;
 
   for (const event of events) {
@@ -139,7 +140,8 @@ export function buildTimeline({
               proposalId: id,
               votes: state.votes,
               required: votesRequired,
-              canVote: viewerIsMember && !state.voted,
+              // A pending operation doesn't say which proposal it votes, so any vote of the viewer's on its way holds them all.
+              canVote: viewerIsMember && !state.voted && !voteOnItsWay,
               voted: state.voted,
               completes: state.votes + 1 >= votesRequired,
             };

@@ -105,6 +105,23 @@ describe("buildTimeline", () => {
     expect(closing).toMatchObject({ actor: { kind: "member", name: "Beto" }, text: "Beto propuso cerrar el fondo y repartir el saldo. Lleva 1 de 2 votos." });
   });
 
+  it("doesn't offer to vote again while the viewer's own vote is on its way, but does for a contribution on its way", () => {
+    const proposal = event(
+      "ProposalCreated",
+      { id: 0n, action: 0, a: CARO, b: zeroAddress, amount: 30_000n * WARS, proposer: AGENT, note: "la pelota nueva" },
+      BLOCK - 100n,
+    );
+    const open = { votes: 1, executed: false, deadline: CLOCK.timestamp + 86_400n, voted: false };
+    const operation = (kind: "vote" | "contribute") => ({ userOpHash: `0x${kind}`, kind, amount: null, token: null, createdAt: NOW });
+    const items = (kind: "vote" | "contribute") =>
+      timeline({ events: [proposal], proposals: new Map([[0n, open]]), pending: [operation(kind)] });
+    const proposalOf = (list: ReturnType<typeof items>) => list.find((i) => i.action?.kind === "vote");
+
+    expect(items("vote").map((i) => i.text)).toContain("Tu voto está en camino.");
+    expect(proposalOf(items("vote"))?.action).toMatchObject({ canVote: false, voted: false });
+    expect(proposalOf(items("contribute"))?.action).toMatchObject({ canVote: true, voted: false });
+  });
+
   it("tells what the group did: a payment it voted, a member added, the fund closed", () => {
     const items = timeline({
       events: [
