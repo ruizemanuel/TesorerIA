@@ -2,7 +2,7 @@ import { shortMessage } from "@tesoreria/agent";
 import { and, eq } from "drizzle-orm";
 import { getAddress, isAddress } from "viem";
 import { z } from "zod";
-import { agentContext, txStatus } from "../../../../../lib/agent-context";
+import { agentContext, agentInFlight, txStatus } from "../../../../../lib/agent-context";
 import { runAgent } from "../../../../../lib/agent-runner";
 import { currentUser } from "../../../../../lib/current-user";
 import { getDb } from "../../../../../lib/db/client";
@@ -49,7 +49,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ add
 
   let busy = true;
   try {
-    busy = !(await runAgent(db, (onSent) => agentContext(db, onSent), { expenseId: saved.id, txStatus })).ran;
+    busy = !(await runAgent(db, (onSent) => agentContext(db, onSent), { expenseId: saved.id, txStatus, inFlight: agentInFlight })).ran;
   } catch (error) {
     // The expense is kept and queued, and the next run takes it. An error here would invite loading it again.
     console.error(`The agent could not run for expense ${saved.id}: ${shortMessage(error)}`);

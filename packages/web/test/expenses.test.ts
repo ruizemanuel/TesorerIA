@@ -1,10 +1,10 @@
 import { fundAbi } from "@tesoreria/agent";
 import { eq } from "drizzle-orm";
-import { type Hex, decodeFunctionData } from "viem";
+import { type Hash, type Hex, decodeFunctionData, pad } from "viem";
 import { describe, expect, it } from "vitest";
 import { AGENT_LOCK, AGENT_LOCK_TTL_MS, type MakeContext, runAgent } from "../src/lib/agent-runner";
 import type { Db } from "../src/lib/db/client";
-import { acquireLock } from "../src/lib/db/lock";
+import { acquireLock, releaseLock } from "../src/lib/db/lock";
 import { decisions, expenses } from "../src/lib/db/schema";
 import { submitExpense } from "../src/lib/expenses";
 import { MAX_PESOS } from "../src/lib/format";
@@ -13,6 +13,8 @@ import { addLiveFund, addUser, testDb } from "./support/db";
 import { ANA, BETO, BLOCK, CARO, FUND, WARS, event, snapshot } from "./support/fixtures";
 
 const always = (status: "success" | "reverted" | "pending") => async () => status;
+/** No agent transaction is waiting to be mined. */
+const idle = async () => false;
 
 async function setup() {
   const db = await testDb();
@@ -90,7 +92,7 @@ describe("runAgent", () => {
     const { db, ana, fund } = await setup();
     const { id } = await load(db, ana, fund.id);
     const { makeContext, sent } = fakeAgent({ snapshot: () => snapshot() });
-    const run = await runAgent(db, makeContext, { expenseId: id, txStatus: always("success") });
+    const run = await runAgent(db, makeContext, { expenseId: id, txStatus: always("success"), inFlight: idle });
     expect(run.ran).toBe(true);
     const row = await statusOf(db, id);
     expect(row).toMatchObject({ status: "reimbursed", tx: SENT_HASH, sentAction: "reimburse" });
@@ -98,7 +100,7 @@ describe("runAgent", () => {
     expect(functionName).toBe("reimburseAgreedExpense");
     expect(args).toEqual([ANA, 45_000n * WARS, row.ref]);
     expect(await db.select().from(decisions).where(eq(decisions.expenseId, id))).toHaveLength(1);
-    await runAgent(db, makeContext, { expenseId: id, txStatus: always("success") });
+    await runAgent(db, makeContext, { expenseId: id, txStatus: always("success"), inFlight: idle });
     expect(sent).toHaveLength(1);
   });
 
@@ -107,14 +109,14 @@ describe("runAgent", () => {
     const { id } = await load(db, ana, fund.id);
     const { makeContext, sent } = fakeAgent({ snapshot: () => snapshot() });
     await acquireLock(db, AGENT_LOCK, "someone else", 60_000);
-    expect(await runAgent(db, makeContext, { expenseId: id, txStatus: always("success") })).toEqual({ ran: false });
+    expect(await runAgent(db, makeContext, { expenseId: id, txStatus: always("success"), inFlight: idle })).toEqual({ ran: false });
     expect((await statusOf(db, id)).status).toBe("new");
     expect(sent).toEqual([]);
 
     const fresh = await setup();
     const both = await Promise.all([
-      runAgent(fresh.db, fakeAgent({ snapshot: () => snapshot() }).makeContext, { heartbeat: false, txStatus: always("success") }),
-      runAgent(fresh.db, fakeAgent({ snapshot: () => snapshot() }).makeContext, { heartbeat: false, txStatus: always("success") }),
+      runAgent(fresh.db, fakeAgent({ snapshot: () => snapshot() }).makeContext, { heartbeat: false, txStatus: always("success"), inFlight: idle }),
+      runAgent(fresh.db, fakeAgent({ snapshot: () => snapshot() }).makeContext, { heartbeat: false, txStatus: always("success"), inFlight: idle }),
     ]);
     expect(both.filter((r) => r.ran)).toHaveLength(1);
   });
@@ -124,14 +126,14 @@ describe("runAgent", () => {
     const other = await load(db, ana, fund.id, { clientKey: "k2", kind: "other", note: "la pelota nueva" });
     let warsBalance = 10_000n * WARS;
     const { makeContext } = fakeAgent({ snapshot: () => snapshot({ warsBalance }) });
-    await runAgent(db, makeContext, { expenseId: other.id, txStatus: always("success") });
+    await runAgent(db, makeContext, { expenseId: other.id, txStatus: always("success"), inFlight: idle });
     expect(await statusOf(db, other.id)).toMatchObject({ status: "proposed", sentAction: "propose-payment" });
 
     const short = await load(db, ana, fund.id, { clientKey: "k3" });
-    await runAgent(db, makeContext, { expenseId: short.id, txStatus: always("success") });
+    await runAgent(db, makeContext, { expenseId: short.id, txStatus: always("success"), inFlight: idle });
     expect((await statusOf(db, short.id)).status).toBe("waiting");
     warsBalance = 90_000n * WARS; // a contribution arrived
-    await runAgent(db, makeContext, { txStatus: always("success") });
+    await runAgent(db, makeContext, { txStatus: always("success"), inFlight: idle });
     expect((await statusOf(db, short.id)).status).toBe("reimbursed");
   });
 
@@ -139,11 +141,11 @@ describe("runAgent", () => {
     const { db, ana, fund } = await setup();
     const { id } = await load(db, ana, fund.id);
     const lost = fakeAgent({ snapshot: () => snapshot(), receiptError: new Error("timed out") });
-    await runAgent(db, lost.makeContext, { expenseId: id, txStatus: always("pending") });
+    await runAgent(db, lost.makeContext, { expenseId: id, txStatus: always("pending"), inFlight: idle });
     expect(await statusOf(db, id)).toMatchObject({ status: "sending", tx: SENT_HASH });
-    await runAgent(db, lost.makeContext, { txStatus: always("pending") });
+    await runAgent(db, lost.makeContext, { txStatus: always("pending"), inFlight: idle });
     expect((await statusOf(db, id)).status).toBe("sending");
-    await runAgent(db, lost.makeContext, { txStatus: always("success") });
+    await runAgent(db, lost.makeContext, { txStatus: always("success"), inFlight: idle });
     expect((await statusOf(db, id)).status).toBe("reimbursed");
     expect(lost.sent).toHaveLength(1);
   });
@@ -157,9 +159,9 @@ describe("runAgent", () => {
       lost.makeContext(async () => {
         throw new Error("connection reset");
       });
-    await runAgent(db, hookFails, { expenseId: id, txStatus: always("pending") });
+    await runAgent(db, hookFails, { expenseId: id, txStatus: always("pending"), inFlight: idle });
     expect(await statusOf(db, id)).toMatchObject({ status: "sending", tx: SENT_HASH, sentAction: "reimburse", reason: expect.stringContaining("hash not recorded") });
-    await runAgent(db, hookFails, { txStatus: always("success") });
+    await runAgent(db, hookFails, { txStatus: always("success"), inFlight: idle });
     expect((await statusOf(db, id)).status).toBe("reimbursed");
     expect(lost.sent).toHaveLength(1);
   });
@@ -168,7 +170,7 @@ describe("runAgent", () => {
     const { db, ana, fund } = await setup();
     const { id } = await load(db, ana, fund.id);
     const { makeContext } = fakeAgent({ snapshot: () => snapshot({ warsBalance: 10_000n * WARS }) });
-    const run = await runAgent(db, makeContext, { expenseId: id, txStatus: always("success") });
+    const run = await runAgent(db, makeContext, { expenseId: id, txStatus: always("success"), inFlight: idle });
     expect(run).toMatchObject({ ran: true, decisions: [{ kind: "wait" }] });
     expect((await statusOf(db, id)).status).toBe("waiting");
     expect(await db.select().from(decisions).where(eq(decisions.expenseId, id))).toHaveLength(1);
@@ -182,7 +184,7 @@ describe("runAgent", () => {
     const other = await load(db, ana, fund.id, { clientKey: "k3", kind: "other", note: "la pelota nueva" });
 
     const off = fakeAgent({ snapshot: () => snapshot(), send: false });
-    const dryRun = await runAgent(db, off.makeContext, { expenseId: agreed.id, txStatus: always("success") });
+    const dryRun = await runAgent(db, off.makeContext, { expenseId: agreed.id, txStatus: always("success"), inFlight: idle });
     expect(dryRun.ran && dryRun.decisions.map((d) => d.kind).sort()).toEqual(["propose-payment", "reimburse", "reimburse"]);
     expect(off.sent).toEqual([]);
     expect(await statusOf(db, agreed.id)).toMatchObject({ status: "new", tx: null, sentAction: null });
@@ -193,7 +195,7 @@ describe("runAgent", () => {
     for (const decision of kept) expect(decision).toMatchObject({ tx: null, reason: expect.stringContaining("dry run") });
 
     const on = fakeAgent({ snapshot: () => snapshot() });
-    await runAgent(db, on.makeContext, { txStatus: always("success") });
+    await runAgent(db, on.makeContext, { txStatus: always("success"), inFlight: idle });
     expect(await statusOf(db, agreed.id)).toMatchObject({ status: "reimbursed", tx: SENT_HASH });
     expect((await statusOf(db, earlier.id)).status).toBe("reimbursed");
     expect((await statusOf(db, other.id)).status).toBe("proposed");
@@ -203,19 +205,91 @@ describe("runAgent", () => {
   it("never pays twice after a run that died between sending and keeping the hash", async () => {
     const { db, ana, fund } = await setup();
     const { id } = await load(db, ana, fund.id);
-    // The run that died had claimed it and sent the reimbursement, which is on chain with the expense's ref.
+    // The run that died had claimed it and sent the reimbursement, which isn't mined yet.
     await db.update(expenses).set({ status: "sending" }).where(eq(expenses.id, id));
     const { ref } = await statusOf(db, id);
     const paid = event("Reimbursement", { member: ANA, amount: 45_000n * WARS, ref: ref as Hex, week: 2n }, BLOCK - 10n);
-    const { makeContext, sent } = fakeAgent({ snapshot: () => snapshot({ spentThisWeek: 45_000n * WARS }), events: () => [paid] });
+    let mined = false;
+    const { makeContext, sent } = fakeAgent({
+      snapshot: () => snapshot({ spentThisWeek: mined ? 45_000n * WARS : 0n }),
+      events: () => (mined ? [paid] : []),
+    });
+    const inFlight = async () => !mined;
 
     // While that run's lock could still be held, the expense is left alone.
-    await runAgent(db, makeContext, { txStatus: always("success") });
+    await runAgent(db, makeContext, { txStatus: always("success"), inFlight });
     expect(await statusOf(db, id)).toMatchObject({ status: "sending", tx: null });
 
+    // The lock ran out, but the agent still has a transaction waiting to be mined: still left alone.
     await db.update(expenses).set({ updatedAt: new Date(Date.now() - AGENT_LOCK_TTL_MS - 1_000) }).where(eq(expenses.id, id));
-    await runAgent(db, makeContext, { txStatus: always("success") });
+    await runAgent(db, makeContext, { txStatus: always("success"), inFlight });
+    expect(await statusOf(db, id)).toMatchObject({ status: "sending", tx: null });
+    expect(sent).toEqual([]);
+
+    // Mined, so nothing is in flight: back to the queue, where the agent finds the ref on chain and sends nothing.
+    mined = true;
+    await runAgent(db, makeContext, { txStatus: always("success"), inFlight });
     expect((await statusOf(db, id)).status).toBe("reimbursed");
     expect(sent).toEqual([]);
+  });
+
+  it("takes an expense loaded while the agent was busy on the next run, however many wait before it", async () => {
+    const { db, ana, fund } = await setup();
+    const { makeContext } = fakeAgent({ snapshot: () => snapshot({ warsBalance: 1_000n * WARS }) });
+    // Eleven earlier expenses, waiting for pesos the fund doesn't have: more than one run takes.
+    const stuck: string[] = [];
+    for (let i = 0n; i < 11n; i++) {
+      const { id } = await load(db, ana, fund.id, { clientKey: `old-${i}`, amount: (50_000n + i) * WARS });
+      await db.update(expenses).set({ status: "waiting" }).where(eq(expenses.id, id));
+      stuck.push(id);
+    }
+    await acquireLock(db, AGENT_LOCK, "someone else", 60_000);
+    const late = await load(db, ana, fund.id, { amount: 500n * WARS });
+    expect(await runAgent(db, makeContext, { expenseId: late.id, txStatus: always("success"), inFlight: idle })).toEqual({ ran: false });
+    await releaseLock(db, AGENT_LOCK, "someone else");
+
+    await runAgent(db, makeContext, { txStatus: always("success"), inFlight: idle });
+    expect((await statusOf(db, late.id)).status).toBe("reimbursed");
+    // The waiting ones take turns: by the next run, each has been looked at again.
+    await runAgent(db, makeContext, { txStatus: always("success"), inFlight: idle });
+    const looked = new Set((await db.select({ id: decisions.expenseId }).from(decisions)).map((d) => d.id));
+    expect(stuck.filter((id) => !looked.has(id))).toEqual([]);
+  });
+
+  it("blocks an expense whose transaction reverted, whether the receipt says so at once or on a later run", async () => {
+    const { db, ana, fund } = await setup();
+    const { id } = await load(db, ana, fund.id);
+    const reverting = fakeAgent({ snapshot: () => snapshot(), receipt: "reverted" });
+    const run = await runAgent(db, reverting.makeContext, { expenseId: id, txStatus: always("success"), inFlight: idle });
+    expect(run).toMatchObject({ ran: true, decisions: [{ kind: "reimburse", tx: SENT_HASH, status: "reverted" }] });
+    expect(await statusOf(db, id)).toMatchObject({ status: "blocked", tx: SENT_HASH, sentAction: "reimburse" });
+
+    const later = await load(db, ana, fund.id, { clientKey: "k2", amount: 10_000n * WARS });
+    const lost = fakeAgent({ snapshot: () => snapshot(), receiptError: new Error("timed out") });
+    await runAgent(db, lost.makeContext, { expenseId: later.id, txStatus: always("pending"), inFlight: idle });
+    expect((await statusOf(db, later.id)).status).toBe("sending");
+    await runAgent(db, lost.makeContext, { txStatus: always("reverted"), inFlight: idle });
+    expect(await statusOf(db, later.id)).toMatchObject({ status: "blocked", tx: SENT_HASH });
+  });
+
+  it("forgets an earlier attempt's hash when it takes the expense again", async () => {
+    const { db, ana, fund } = await setup();
+    const { id } = await load(db, ana, fund.id);
+    const reverted: Hash = pad("0x0bad", { size: 32 });
+    await db.update(expenses).set({ status: "blocked", tx: reverted, sentAction: "reimburse" }).where(eq(expenses.id, id));
+    const agent = fakeAgent({ snapshot: () => snapshot() });
+    // The row as the agent works on it: what a run that died right there would leave for settleSent.
+    let during: Awaited<ReturnType<typeof statusOf>> | undefined;
+    const watching: MakeContext = async (onSent) => {
+      const ctx = await agent.makeContext(onSent);
+      const gasBalance = async () => {
+        during = await statusOf(db, id);
+        return ctx.chain.gasBalance();
+      };
+      return { ...ctx, chain: { ...ctx.chain, gasBalance } };
+    };
+    await runAgent(db, watching, { expenseId: id, txStatus: always("success"), inFlight: idle });
+    expect(during).toMatchObject({ status: "sending", tx: null, sentAction: null });
+    expect(await statusOf(db, id)).toMatchObject({ status: "reimbursed", tx: SENT_HASH });
   });
 });

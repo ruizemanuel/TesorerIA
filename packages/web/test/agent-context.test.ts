@@ -1,7 +1,7 @@
 import { type ChainView, FUND_FACTORY_BLOCK, type FundEvent } from "@tesoreria/agent";
 import { eq } from "drizzle-orm";
 import { getAddress } from "viem";
-import { generatePrivateKey } from "viem/accounts";
+import { generatePrivateKey, privateKeyToAddress } from "viem/accounts";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import type { Db } from "../src/lib/db/client";
 import { funds } from "../src/lib/db/schema";
@@ -32,6 +32,24 @@ vi.mock("@tesoreria/agent", async (importOriginal) => {
   };
 });
 
+// The agent's nonce as the node counts it: mined ("latest"), and with what waits to be mined ("pending").
+const nonces = vi.hoisted(() => ({ latest: 7, pending: 7, down: false, asked: [] as string[] }));
+vi.mock("../src/lib/chain", async (importOriginal) => {
+  const original = await importOriginal<typeof import("../src/lib/chain")>();
+  return {
+    ...original,
+    celoClient: () => ({
+      ...original.celoClient(),
+      getTransactionCount: async ({ address, blockTag }: { address: string; blockTag: "latest" | "pending" }) => {
+        if (nonces.down) throw new Error("the node is down");
+        nonces.asked.push(address);
+        return nonces[blockTag];
+      },
+    }),
+  };
+});
+
+const AGENT_KEY = generatePrivateKey();
 const LATER = getAddress("0x00000000000000000000000000000000000f00d2");
 /** A fund someone else created with the factory, naming our agent. */
 const FOREIGN = getAddress("0x00000000000000000000000000000000000f00d3");
@@ -49,7 +67,7 @@ beforeAll(async () => {
   vi.stubEnv("RP_ID", "localhost");
   vi.stubEnv("ORIGIN", "http://localhost:3000");
   vi.stubEnv("SESSION_SECRET", "a-session-secret-for-tests-only-0123456789");
-  vi.stubEnv("AGENT_PRIVATE_KEY", generatePrivateKey());
+  vi.stubEnv("AGENT_PRIVATE_KEY", AGENT_KEY);
   db = await testDb();
   const ana = await addUser(db, "Ana", ANA);
   await addLiveFund(db, { creatorId: ana.id, address: FUND, members: [ana.id] });
@@ -86,5 +104,19 @@ describe("agentContext", () => {
     expect((await (await load())(db)).send).toBe(false);
     expect((await (await load("off"))(db)).send).toBe(false);
     expect((await (await load("on"))(db)).send).toBe(true);
+  });
+});
+
+describe("agentInFlight", () => {
+  it("tells whether one of the agent's transactions waits to be mined, and assumes one does when it can't tell", async () => {
+    vi.resetModules();
+    const { agentInFlight } = await import("../src/lib/agent-context");
+    expect(await agentInFlight()).toBe(false);
+    expect(nonces.asked).toEqual([privateKeyToAddress(AGENT_KEY), privateKeyToAddress(AGENT_KEY)]);
+    nonces.pending = 8; // sent, not mined
+    expect(await agentInFlight()).toBe(true);
+    nonces.pending = 7;
+    nonces.down = true;
+    expect(await agentInFlight()).toBe(true);
   });
 });

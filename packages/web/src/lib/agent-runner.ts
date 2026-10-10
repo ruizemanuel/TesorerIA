@@ -1,5 +1,5 @@
 import { type AgentContext, type Decision, handleExpense, runHeartbeat } from "@tesoreria/agent";
-import { and, asc, eq, inArray, ne } from "drizzle-orm";
+import { and, asc, eq, inArray, ne, sql } from "drizzle-orm";
 import { type Address, type Hash, type Hex, getAddress } from "viem";
 import type { Db } from "./db/client";
 import { withLock } from "./db/lock";
@@ -14,6 +14,8 @@ export const AGENT_LOCK_TTL_MS = 310_000;
 
 export type MakeContext = (onSent?: AgentContext["onSent"]) => Promise<AgentContext>;
 export type TxStatus = (hash: Hash) => Promise<"success" | "reverted" | "pending">;
+/** Whether the agent has a transaction sent and not yet mined (true when that can't be told). */
+export type InFlight = () => Promise<boolean>;
 export type AgentRun = { ran: false } | { ran: true; decisions: Decision[] };
 
 /**
@@ -58,16 +60,18 @@ async function saveDecisions(db: Db, list: readonly Decision[], expenseId?: stri
 /**
  * Settles the expenses a run left in "sending". With a hash, its receipt decides; one that never shows up stays
  * "sending", since nothing is ever sent again on a guess. Without a hash, the run died before sending, or
- * between sending and keeping the hash: it goes back to the queue only once the lock that run held has expired,
- * so a transaction that did go out is mined by then and handleExpense finds its ref.
+ * between sending and keeping the hash. It goes back to the queue only once the lock that run held has expired
+ * and none of the agent's transactions is waiting to be mined: a transaction that did go out is mined by then,
+ * and handleExpense finds its ref. (The run may have sent near its end, well after the claim it is timed from.)
  */
-async function settleSent(db: Db, txStatus: TxStatus): Promise<void> {
+async function settleSent(db: Db, txStatus: TxStatus, inFlight: InFlight): Promise<void> {
   const rows = await db.select().from(expenses).where(eq(expenses.status, "sending"));
+  let idle: boolean | undefined; // asked once, and only if a row needs it
   for (const row of rows) {
     if (row.tx === null) {
-      if (Date.now() - row.updatedAt.getTime() > AGENT_LOCK_TTL_MS) {
-        await db.update(expenses).set({ status: "new", updatedAt: new Date() }).where(eq(expenses.id, row.id));
-      }
+      if (Date.now() - row.updatedAt.getTime() <= AGENT_LOCK_TTL_MS) continue;
+      idle ??= !(await inFlight());
+      if (idle) await db.update(expenses).set({ status: "new", updatedAt: new Date() }).where(eq(expenses.id, row.id));
       continue;
     }
     const status = await txStatus(row.tx as Hash);
@@ -87,10 +91,11 @@ async function processExpense(db: Db, makeContext: MakeContext, id: string, queu
   });
   if (ctx.send) {
     // Claimed only in the status it was read in, in one statement (production's driver has no transactions).
+    // An earlier attempt's hash goes: if this run dies, settleSent must see no hash and wait, not read that one.
     // A dry run sends nothing, so it has nothing in flight to mark.
     const [claimed] = await db
       .update(expenses)
-      .set({ status: "sending", updatedAt: new Date() })
+      .set({ status: "sending", tx: null, sentAction: null, updatedAt: new Date() })
       .where(and(eq(expenses.id, id), eq(expenses.status, expense.status)))
       .returning({ id: expenses.id });
     if (claimed === undefined) return null;
@@ -121,17 +126,18 @@ async function processExpense(db: Db, makeContext: MakeContext, id: string, queu
 /**
  * Runs the agent once, under the lock (Review Focus 4): settles what earlier runs sent, handles `expenseId`
  * first, converts on a heartbeat, and then retries the queue (new and waiting; blocked too on a heartbeat),
- * without taking `expenseId` a second time.
+ * without taking `expenseId` a second time. The queue takes new expenses first and then the ones tried longest
+ * ago: rows that wait for pesos or stay blocked take turns, and never keep a newer expense out.
  */
 export async function runAgent(
   db: Db,
   makeContext: MakeContext,
-  { expenseId, heartbeat = false, txStatus }: { expenseId?: string; heartbeat?: boolean; txStatus: TxStatus },
+  { expenseId, heartbeat = false, txStatus, inFlight }: { expenseId?: string; heartbeat?: boolean; txStatus: TxStatus; inFlight: InFlight },
 ): Promise<AgentRun> {
   const queued: ExpenseStatus[] = heartbeat ? ["new", "waiting", "blocked"] : ["new", "waiting"];
   const result = await withLock(db, AGENT_LOCK, AGENT_LOCK_TTL_MS, async () => {
     const done: Decision[] = [];
-    await settleSent(db, txStatus);
+    await settleSent(db, txStatus, inFlight);
     if (expenseId !== undefined) {
       const decision = await processExpense(db, makeContext, expenseId, ["new", "waiting", "blocked"]);
       if (decision) done.push(decision);
@@ -145,7 +151,8 @@ export async function runAgent(
       .select({ id: expenses.id })
       .from(expenses)
       .where(and(inArray(expenses.status, queued), expenseId === undefined ? undefined : ne(expenses.id, expenseId)))
-      .orderBy(asc(expenses.createdAt))
+      // Every attempt sets updatedAt, so the oldest one is the one tried longest ago.
+      .orderBy(sql`case when ${expenses.status} = 'new' then 0 else 1 end`, asc(expenses.updatedAt))
       .limit(10);
     for (const { id } of waiting) {
       const decision = await processExpense(db, makeContext, id, queued);

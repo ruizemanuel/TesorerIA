@@ -61,6 +61,24 @@ export async function agentContext(db: Db, onSent?: AgentContext["onSent"]): Pro
   return { chain, signer, now: () => BigInt(Math.floor(Date.now() / 1000)), send: env().AGENT_SEND === "on", onSent };
 }
 
+/**
+ * Whether the agent has a transaction sent and not yet mined: its nonce counting what waits to be mined
+ * ("pending") is ahead of the mined one ("latest"). When the node can't tell, it counts as in flight.
+ */
+export async function agentInFlight(): Promise<boolean> {
+  try {
+    const { address } = agentSigner();
+    const client = celoClient();
+    const [pending, latest] = await Promise.all([
+      client.getTransactionCount({ address, blockTag: "pending" }),
+      client.getTransactionCount({ address, blockTag: "latest" }),
+    ]);
+    return pending !== latest;
+  } catch {
+    return true;
+  }
+}
+
 /** A transaction's receipt without waiting: "pending" while there is none. */
 export async function txStatus(hash: Hash): Promise<"success" | "reverted" | "pending"> {
   try {

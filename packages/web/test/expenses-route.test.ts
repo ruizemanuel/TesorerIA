@@ -19,6 +19,7 @@ vi.mock("../src/lib/db/client", async (importOriginal) => ({
 vi.mock("../src/lib/agent-context", () => ({
   agentContext: (_db: unknown, onSent: Parameters<MakeContext>[0]) => (state.makeContext as MakeContext)(onSent),
   txStatus: async () => "success",
+  agentInFlight: async () => false,
 }));
 
 const { POST } = await import("../src/app/api/funds/[address]/expenses/route");

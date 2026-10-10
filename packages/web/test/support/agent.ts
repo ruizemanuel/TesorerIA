@@ -7,17 +7,19 @@ export const SENT_HASH: Hash = pad("0x7a", { size: 32 });
 
 /**
  * An agent context over a fixed fund, keeping what it would send. `snapshot()` is read on each call, so a test
- * can change the fund between runs; `receiptError` makes every receipt wait fail; `send: false` is a dry run, as
- * with the kill switch off.
+ * can change the fund between runs; `receipt` is how every sent transaction ends, and `receiptError` makes every
+ * receipt wait fail instead; `send: false` is a dry run, as with the kill switch off.
  */
 export function fakeAgent({
   snapshot,
   events = () => [],
+  receipt = "success",
   receiptError,
   send = true,
 }: {
   snapshot: () => FundSnapshot;
   events?: () => FundEvent[];
+  receipt?: "success" | "reverted";
   receiptError?: Error;
   send?: boolean;
 }) {
@@ -35,7 +37,7 @@ export function fakeAgent({
     },
     receipt: async () => {
       if (receiptError) throw receiptError;
-      return "success";
+      return receipt;
     },
   };
   const signer: AgentSigner = {
