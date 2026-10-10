@@ -4,6 +4,8 @@ import { NBSP, USDT_UNIT, WARS_UNIT, formatPesos, formatUsdt, formatWhen, groupA
 describe("formatPesos", () => {
   it("writes pesos the Argentine way, with a space that doesn't break after the sign", () => {
     expect(formatPesos(87_500n * WARS_UNIT)).toBe(`$${NBSP}87.500`);
+    // Written out, not built from NBSP: a plain space here would break spec 9.1 and still match the constant.
+    expect(formatPesos(87_500n * WARS_UNIT)).toBe("$\u00A087.500");
     expect(formatPesos(0n)).toBe(`$${NBSP}0`);
     expect(formatPesos(1_234_567n * WARS_UNIT)).toBe(`$${NBSP}1.234.567`);
   });
@@ -19,6 +21,7 @@ describe("formatPesos", () => {
 describe("formatUsdt", () => {
   it("writes USDT with up to two decimals", () => {
     expect(formatUsdt(10n * USDT_UNIT)).toBe(`10${NBSP}USDT`);
+    expect(formatUsdt(10n * USDT_UNIT)).toBe("10\u00A0USDT");
     expect(formatUsdt(10_500_000n)).toBe(`10,5${NBSP}USDT`);
     expect(formatUsdt(50_000n)).toBe(`0,05${NBSP}USDT`);
     expect(formatUsdt(1_000n * USDT_UNIT)).toBe(`1.000${NBSP}USDT`);
@@ -37,7 +40,8 @@ describe("parsePesos", () => {
     expect(parsePesos("1.000,5")).toBe(1_000n * WARS_UNIT + 50n * 10n ** 16n);
     // A dot is always thousands here: "10.5" or "1.0000" would be read wrong either way, so they're refused.
     // So is a comma with three digits after it ("1,000" is a thousand in the US and a one in Argentina).
-    for (const bad of ["10,000.50", "1.0000", "10.5", "10.00", "1000.000", "1,000", "10,555", "abc", "", "0", "0,00", "-5", "1e3"]) {
+    // And a group of thousands never starts with a zero: "0.500" is neither 500 nor a half, so it's refused.
+    for (const bad of ["10,000.50", "1.0000", "10.5", "10.00", "1000.000", "1,000", "0.500", "0.001", "00.500", "01.000", "10,555", "abc", "", "0", "0,00", "-5", "1e3"]) {
       expect(parsePesos(bad), bad).toBeNull();
     }
   });

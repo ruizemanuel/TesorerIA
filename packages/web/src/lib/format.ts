@@ -1,5 +1,5 @@
 /** A space that never breaks a line: "$ 87.500" stays in one piece (spec, 9.1). */
-export const NBSP = " ";
+export const NBSP = "\u00A0";
 export const WARS_UNIT = 10n ** 18n;
 export const USDT_UNIT = 10n ** 6n;
 const CENT = 10n ** 16n;
@@ -29,12 +29,12 @@ export function formatUsdt(units: bigint): string {
 /**
  * An amount typed in pesos, as wARS units, or null. The Argentine way: dots for thousands (in groups of three)
  * and a comma for up to two decimals. A dot that isn't a thousands separator ("10.5") is refused instead of
- * guessed, and so is anything that isn't more than zero.
+ * guessed, and so is a group that starts with a zero ("0.500" is not 500), and anything that isn't more than zero.
  */
 export function parsePesos(input: string): bigint | null {
   // `\s` takes the no-break space too, so "$ 45.000" copied out of the app's own screens reads back.
   const text = input.replace(/\s/g, "").replace(/^\$/, "");
-  const match = /^(\d{1,3}(?:\.\d{3})+|\d+)(?:,(\d{1,2}))?$/.exec(text);
+  const match = /^([1-9]\d{0,2}(?:\.\d{3})+|\d+)(?:,(\d{1,2}))?$/.exec(text);
   if (match === null) return null;
   const whole = (match[1] ?? "").replaceAll(".", "");
   const decimals = (match[2] ?? "").padEnd(2, "0");
