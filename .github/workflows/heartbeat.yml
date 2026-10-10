@@ -1,0 +1,22 @@
+name: Agent heartbeat
+
+on:
+  schedule:
+    # Every 15 minutes, off the top of the hour, when GitHub delays scheduled runs the most.
+    - cron: "7,22,37,52 * * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  heartbeat:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - name: Run the agent once
+        env:
+          HEARTBEAT_URL: ${{ vars.HEARTBEAT_URL }}
+          HEARTBEAT_SECRET: ${{ secrets.HEARTBEAT_SECRET }}
+        run: |
+          curl --fail-with-body --silent --show-error --max-time 300 \
+            -X POST -H "Authorization: Bearer $HEARTBEAT_SECRET" "$HEARTBEAT_URL"
