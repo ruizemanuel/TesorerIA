@@ -27,9 +27,14 @@ export type FundSnapshot = {
 /** The reads the agent needs from a Celo client. */
 export type CeloReader = Pick<PublicClient, "getBlockNumber" | "multicall" | "readContract">;
 
-/** Reads a fund's state, every value at the same block. */
+/**
+ * Reads a fund's state, every value at the same block: the latest one. viem keeps a block number for a few
+ * seconds and doesn't refresh it when a receipt comes back at once, so the kept one could be older than a
+ * transaction this process just saw land, and the snapshot and its history would miss it (a reimbursement
+ * with it: see decideExpense).
+ */
 export async function readFund(client: CeloReader, fund: Address): Promise<FundSnapshot> {
-  const blockNumber = await client.getBlockNumber();
+  const blockNumber = await client.getBlockNumber({ cacheTime: 0 });
   const at = { allowFailure: false, blockNumber } as const;
   const [agent, closed, members, votesRequired, weeklyCap, startTime, week, totalContributed, warsBalance, usdtBalance] =
     await client.multicall({
