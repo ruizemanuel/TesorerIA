@@ -31,10 +31,16 @@ const schema = z
         .regex(/^0x[0-9a-fA-F]{40}$/)
         .optional(),
     ),
+    /** Set by Vercel on its builds and deployments: there, the fork (an anvil on this machine) is never right. */
+    VERCEL: blank(z.string().optional()),
   })
   .refine((settings) => settings.CHAIN_MODE !== "mainnet" || settings.DATABASE_URL !== undefined, {
     path: ["DATABASE_URL"],
     message: "Required when CHAIN_MODE is mainnet",
+  })
+  .refine((settings) => settings.CHAIN_MODE !== "fork" || settings.VERCEL === undefined, {
+    path: ["CHAIN_MODE"],
+    message: "fork is for local runs only, never on a Vercel deployment",
   });
 
 export type Env = z.infer<typeof schema>;

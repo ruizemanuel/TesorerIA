@@ -54,6 +54,15 @@ describe("parseEnv", () => {
     expect(problem({ ...base, DATABASE_URL: undefined, CHAIN_MODE: "fork" })).toBe("");
   });
 
+  it("refuses the fork on a Vercel deployment, where it would point the web at a node that isn't there", () => {
+    const message = problem({ ...base, CHAIN_MODE: "fork", VERCEL: "1" });
+    expect(message).toContain("CHAIN_MODE");
+    expect(message).toContain("deployment");
+    expect(problem({ ...base, CHAIN_MODE: "mainnet", VERCEL: "1" })).toBe("");
+    expect(problem({ ...base, CHAIN_MODE: "fork", VERCEL: "" })).toBe("");
+    expect(problem({ ...base, CHAIN_MODE: "fork" })).toBe("");
+  });
+
   it("keeps the agent's kill switch off unless it is exactly 'on'", () => {
     expect(parseEnv({ ...base, AGENT_SEND: "on" }).AGENT_SEND).toBe("on");
     expect(parseEnv({ ...base, AGENT_SEND: "off" }).AGENT_SEND).toBe("off");
