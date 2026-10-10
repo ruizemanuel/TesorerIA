@@ -55,7 +55,7 @@ describe("the requests viem really sends for a sponsored operation", () => {
     // /api/bundler without the HTTP: each request is checked as the route checks it, and answered as Pimlico would.
     const gate = custom({
       async request({ method, params }: { method: string; params?: unknown }) {
-        const check = await authorizeBundlerRequest(db, user, { jsonrpc: "2.0", id: 1, method, params }, POLICY, async () => FAST);
+        const check = await authorizeBundlerRequest(db, user, { jsonrpc: "2.0", id: 1, method, params }, POLICY, async () => FAST, AGENT_ADDRESS);
         if (!check.ok) throw new Error(`${method}: ${check.status} ${check.error}`);
         forwarded.push({ method, params: check.request.params });
         const creating = JSON.stringify(params).toLowerCase().includes(FUND_FACTORY.slice(2).toLowerCase());

@@ -1,10 +1,12 @@
-import { type Address, encodeFunctionData, erc20Abi, getAddress, numberToHex } from "viem";
+import { AGENT_ADDRESS, FUND_FACTORY, fundFactoryAbi } from "@tesoreria/agent";
+import { type Address, type Hex, decodeFunctionData, encodeFunctionData, erc20Abi, getAddress, numberToHex } from "viem";
 import { entryPoint07Address } from "viem/account-abstraction";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CurrentUser } from "../src/lib/current-user";
 import type { Db } from "../src/lib/db/client";
 import { contributeCalls } from "../src/lib/contribute";
-import { addLiveFund, addUser, randomAccount, testDb } from "./support/db";
+import { cancelDeploy, createDraft, deployCall, joinFund } from "../src/lib/funds";
+import { WARS, addLiveFund, addUser, randomAccount, testDb } from "./support/db";
 import { safeCallData } from "./support/safe";
 
 // The route as the server runs it, with the session and the database standing in, and Pimlico's answer faked.
@@ -40,6 +42,7 @@ beforeAll(async () => {
   vi.stubEnv("DATABASE_URL", "memory");
   vi.stubEnv("PIMLICO_API_KEY", KEY);
   vi.stubEnv("PIMLICO_SPONSORSHIP_POLICY_ID", POLICY);
+  vi.stubEnv("AGENT_PRIVATE_KEY", ""); // so the server's agent is AGENT_ADDRESS, the one the createFunds below name
   const db: Db = await testDb();
   state.db = db;
   const ana = await addUser(db, "Ana");
@@ -178,6 +181,70 @@ describe("POST /api/bundler", () => {
         expect(await response.text()).not.toContain(KEY);
       }
       expect(pimlico).toHaveBeenCalledTimes(unreadable.length); // only ever the price
+    });
+  });
+
+  describe("a createFund", () => {
+    let creator: CurrentUser;
+    /** The calldata deployCall built for each of the creator's two frozen drafts, and for one opened again since. */
+    let futbol: Hex;
+    let asado: Hex;
+    let reopened: Hex;
+
+    /** A draft `creatorId` made, with three more people, frozen by deployCall with 2 votes and the server's agent. */
+    async function frozen(db: Db, creatorId: string, name: string) {
+      const created = await createDraft(db, creatorId, { name, agreedExpense: "la cancha", weeklyFee: 10_000n * WARS, weeklyCap: 60_000n * WARS });
+      if (!created.ok) throw new Error(created.error);
+      for (const person of ["Beto", "Caro", "Dani"]) await joinFund(db, (await addUser(db, person)).id, created.inviteCode);
+      const deploy = await deployCall(db, { fundId: created.id, userId: creatorId, votesRequired: 2, agent: AGENT_ADDRESS });
+      if (!deploy.ok) throw new Error(deploy.error);
+      return { fundId: created.id, data: deploy.call.data };
+    }
+
+    beforeAll(async () => {
+      const db = state.db as Db;
+      const user = await addUser(db, "Creator");
+      creator = { id: user.id, name: user.name, account: getAddress(user.account) };
+      futbol = (await frozen(db, user.id, "Fútbol")).data;
+      asado = (await frozen(db, user.id, "Asado")).data;
+      const open = await frozen(db, user.id, "Cumple");
+      await cancelDeploy(db, { fundId: open.fundId, userId: user.id });
+      reopened = open.data;
+    });
+
+    /** The settings a createFund's data carries. */
+    const createFundParams = (data: Hex) => {
+      const decoded = decodeFunctionData({ abi: fundFactoryAbi, data });
+      if (decoded.functionName !== "createFund") throw new Error(`Not a createFund: ${decoded.functionName}`);
+      return decoded.args[0];
+    };
+    /** `data`'s createFund with one of its settings changed. */
+    const changed = (data: Hex, change: Partial<ReturnType<typeof createFundParams>>): Hex =>
+      encodeFunctionData({ abi: fundFactoryAbi, functionName: "createFund", args: [{ ...createFundParams(data), ...change }] });
+    const stub = (data: Hex) =>
+      call(rpc("pm_getPaymasterStubData", [op(creator.account, safeCallData([{ to: FUND_FACTORY, data }])), entryPoint07Address, CELO, {}]));
+
+    it("sends on the exact call deployCall built for each draft its creator is creating", async () => {
+      state.user = creator;
+      for (const data of [futbol, asado]) expect((await stub(data)).status).toBe(200);
+      expect(asked()).toEqual(["pm_getPaymasterStubData", "pm_getPaymasterStubData"]);
+    });
+
+    it("answers 403 to that call with another member, votes or agent, or for a draft open again, and asks Pimlico nothing", async () => {
+      state.user = creator;
+      const { members } = createFundParams(futbol);
+      const cases: Record<string, Hex> = {
+        "another member": changed(futbol, { members: [...members.slice(0, -1), randomAccount()] }),
+        "another votesRequired": changed(futbol, { votesRequired: 3 }),
+        "another agent": changed(futbol, { agent: randomAccount() }),
+        "a draft open again": reopened,
+      };
+      for (const [why, data] of Object.entries(cases)) {
+        const response = await stub(data);
+        expect(response.status, why).toBe(403);
+        expect(await response.json(), why).toMatchObject({ error: { message: expect.stringContaining("createFund") } });
+      }
+      expect(pimlico).not.toHaveBeenCalled();
     });
   });
 

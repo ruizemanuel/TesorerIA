@@ -1,6 +1,6 @@
 import { FUND_FACTORY, USDT, WARS, fundFactoryAbi } from "@tesoreria/agent";
 import { ATTRIBUTION_SUFFIX, type Call } from "@tesoreria/wallet";
-import { type Address, type Hex, concat, encodeFunctionData, erc20Abi, getAddress, numberToHex, parseAbi } from "viem";
+import { type Address, type Hex, concat, decodeFunctionData, encodeFunctionData, erc20Abi, getAddress, numberToHex, parseAbi } from "viem";
 import { entryPoint07Address } from "viem/account-abstraction";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -19,9 +19,10 @@ import { contributeCalls } from "../src/lib/contribute";
 import type { Db } from "../src/lib/db/client";
 import { funds, memberships } from "../src/lib/db/schema";
 import { memberFundAbi } from "../src/lib/fund-abi";
+import { cancelDeploy, createDraft, deployCall, joinFund } from "../src/lib/funds";
 import { voteCalls } from "../src/lib/vote";
 import { AGENT } from "./support/fixtures";
-import { addLiveFund, addUser, randomAccount, testDb } from "./support/db";
+import { WARS as WARS_UNIT, addLiveFund, addUser, randomAccount, testDb } from "./support/db";
 import { MULTI_SEND, MULTI_SEND_CALL_ONLY, execute, multiSend, multiSendAbi, packed, safeCallData } from "./support/safe";
 
 const ME = getAddress("0x2F8218c7cF6d822091EDe24Db9c46B0324c21A6F");
@@ -44,6 +45,32 @@ const createFundCall = (members: Address[] = [ME, OTHER, randomAccount()]): Call
 });
 const contribute = (fund: Address, token: "wars" | "usdt" = "wars") => contributeCalls({ fund, token, amount: 10n ** 18n });
 const op = (sender: string, callData: string = safeCallData(contribute(FUND))) => ({ sender, nonce: "0x0", callData });
+
+/** The settings a createFund's data carries. */
+function createFundParams(data: Hex) {
+  const decoded = decodeFunctionData({ abi: fundFactoryAbi, data });
+  if (decoded.functionName !== "createFund") throw new Error(`Not a createFund: ${decoded.functionName}`);
+  return decoded.args[0];
+}
+
+/** `call`'s createFund with some of its settings changed. */
+function changed(call: Call, change: Partial<ReturnType<typeof createFundParams>>): Call {
+  const params = { ...createFundParams(call.data!), ...change };
+  return { to: FUND_FACTORY, data: encodeFunctionData({ abi: fundFactoryAbi, functionName: "createFund", args: [params] }) };
+}
+
+/**
+ * A draft `creatorId` made, with three more people (so 2 and 3 votes both make a valid fund), frozen by deployCall
+ * with 2 votes and AGENT: the createFund it handed the creator to sign.
+ */
+async function frozenDraft(db: Db, creatorId: string, name: string) {
+  const created = await createDraft(db, creatorId, { name, agreedExpense: "la cancha", weeklyFee: 10_000n * WARS_UNIT, weeklyCap: 60_000n * WARS_UNIT });
+  if (!created.ok) throw new Error(created.error);
+  for (const person of ["Beto", "Caro", "Dani"]) await joinFund(db, (await addUser(db, person)).id, created.inviteCode);
+  const deploy = await deployCall(db, { fundId: created.id, userId: creatorId, votesRequired: 2, agent: AGENT });
+  if (!deploy.ok) throw new Error(deploy.error);
+  return { fundId: created.id, call: deploy.call as Call };
+}
 
 describe("checkBundlerRequest", () => {
   it("lets a logged-in member send and sponsor their own operations, with the server's policy", () => {
@@ -125,8 +152,9 @@ describe("operationCalls", () => {
 });
 
 describe("checkCalls", () => {
-  const member = { liveFunds: [FUND], creatingFund: false };
-  const creator = { liveFunds: [], creatingFund: true };
+  const creating = createFundCall();
+  const member = { liveFunds: [FUND], createFundCalls: [] };
+  const creator = { liveFunds: [], createFundCalls: [creating.data!] };
   const fundCall = (to: Address, data: Hex, value = 0n): OperationCall => ({ to, value, data });
 
   it("lets a live fund's member approve it and contribute, in wARS or USDT, and vote and execute there", () => {
@@ -153,11 +181,33 @@ describe("checkCalls", () => {
   });
 
   it("lets only the creator of a fund being created send createFund, alone, and says it's one", () => {
-    expect(checkCalls(asRead([createFundCall()]), creator)).toEqual({ ok: true, createsFund: true });
-    expect(checkCalls(asRead([createFundCall()]), { liveFunds: [FUND], creatingFund: true })).toEqual({ ok: true, createsFund: true });
-    expect(checkCalls(asRead([createFundCall(), ...contribute(FUND)]), { liveFunds: [FUND], creatingFund: true })).toMatchObject({ ok: false, status: 403 });
-    expect(checkCalls(asRead([{ ...createFundCall(), to: OTHER }]), creator)).toMatchObject({ ok: false, status: 403 });
+    expect(checkCalls(asRead([creating]), creator)).toEqual({ ok: true, createsFund: true });
+    expect(checkCalls(asRead([creating]), { ...creator, liveFunds: [FUND] })).toEqual({ ok: true, createsFund: true });
+    expect(checkCalls(asRead([creating, ...contribute(FUND)]), { ...creator, liveFunds: [FUND] })).toMatchObject({ ok: false, status: 403 });
+    expect(checkCalls(asRead([creating, creating]), creator)).toMatchObject({ ok: false, status: 403 });
+    expect(checkCalls(asRead([{ ...creating, to: OTHER }]), creator)).toMatchObject({ ok: false, status: 403 });
     expect(checkCalls(asRead(contribute(FUND)), creator)).toMatchObject({ ok: false, status: 403 });
+  });
+
+  it("sponsors on the factory only the createFunds it's given, byte for byte in any case", () => {
+    const another = createFundCall();
+    const both = { liveFunds: [], createFundCalls: [creating.data!, another.data!] };
+    for (const call of [creating, another]) expect(checkCalls(asRead([call]), both)).toEqual({ ok: true, createsFund: true });
+    const shouted = creating.data!.replace(/[a-f]/g, (letter) => letter.toUpperCase()) as Hex;
+    expect(checkCalls([{ to: FUND_FACTORY, value: 0n, data: shouted }], creator)).toEqual({ ok: true, createsFund: true });
+
+    const cases: Record<string, Call> = {
+      "another createFund": another,
+      "another member": changed(creating, { members: [ME, OTHER, randomAccount()] }),
+      "another votesRequired": changed(creating, { votesRequired: 3 }),
+      "another agent": changed(creating, { agent: OTHER }),
+      "a byte more": { to: FUND_FACTORY, data: concat([creating.data!, "0x00"]) },
+      "another of the factory's functions": { to: FUND_FACTORY, data: encodeFunctionData({ abi: fundFactoryAbi, functionName: "fundCount" }) },
+    };
+    for (const [why, call] of Object.entries(cases)) {
+      expect(checkCalls(asRead([call]), creator), why).toMatchObject({ ok: false, status: 403, error: expect.stringContaining("createFund") });
+    }
+    expect(checkCalls(asRead([creating]), member)).toMatchObject({ ok: false, status: 403 });
   });
 });
 
@@ -245,54 +295,50 @@ describe("authorizeBundlerRequest", () => {
     const juan = await addUser(db, "Juan");
     const ana = await addUser(db, "Ana");
     await addLiveFund(db, { creatorId: juan.id, address: FUND, members: [juan.id] });
-    const fund = (name: string, creatorId: string, status: "draft" | "deploying") =>
-      db
-        .insert(funds)
-        .values({ name, agreedExpense: "x", weeklyFee: 1n, weeklyCap: 1n, balanceCap: 1n, creatorId, inviteCode: `${name}-code`, status })
-        .returning()
-        .then(([row]) => row!);
-    const draft = await fund("Draft", stranger.id, "draft");
-    await db.insert(memberships).values({ fundId: draft.id, userId: founder.id });
-    const creating = await fund("Creating", ana.id, "deploying");
-    await db.insert(memberships).values({ fundId: creating.id, userId: ana.id });
-    return { db, stranger, founder, juan, ana };
+    const [draft] = await db
+      .insert(funds)
+      .values({ name: "Draft", agreedExpense: "x", weeklyFee: 1n, weeklyCap: 1n, balanceCap: 1n, creatorId: stranger.id, inviteCode: "draft-code" })
+      .returning();
+    await db.insert(memberships).values({ fundId: draft!.id, userId: founder.id });
+    const { call: anaCreate } = await frozenDraft(db, ana.id, "Creating");
+    return { db, stranger, founder, juan, ana, anaCreate };
   }
   const request = (method: string, userOp: object) => rpc(method, method.startsWith("pm_") ? [userOp, entryPoint07Address, CELO, {}] : [userOp, entryPoint07Address]);
 
   it("sponsors only members of a live fund and the creator of a fund being created; the rest only read", async () => {
-    const { db, stranger, founder, juan, ana } = await people();
+    const { db, stranger, founder, juan, ana, anaCreate } = await people();
     for (const method of SPONSORED) {
       const juanOp = request(method, sponsored(juan.account));
-      const anaOp = request(method, sponsored(ana.account, {}, MAX_OPERATION_GAS, safeCallData([createFundCall()])));
-      expect(await authorizeBundlerRequest(db, asUser(juan), juanOp, POLICY, price), method).toMatchObject({ ok: true });
-      expect(await authorizeBundlerRequest(db, asUser(ana), anaOp, POLICY, price), method).toMatchObject({ ok: true });
+      const anaOp = request(method, sponsored(ana.account, {}, MAX_OPERATION_GAS, safeCallData([anaCreate])));
+      expect(await authorizeBundlerRequest(db, asUser(juan), juanOp, POLICY, price, AGENT), method).toMatchObject({ ok: true });
+      expect(await authorizeBundlerRequest(db, asUser(ana), anaOp, POLICY, price, AGENT), method).toMatchObject({ ok: true });
       for (const person of [stranger, founder]) {
-        const refused = await authorizeBundlerRequest(db, asUser(person), request(method, sponsored(person.account)), POLICY, price);
+        const refused = await authorizeBundlerRequest(db, asUser(person), request(method, sponsored(person.account)), POLICY, price, AGENT);
         expect(refused, `${method}: ${person.name}`).toMatchObject({ ok: false, status: 403 });
       }
     }
     // Reading the chain or a receipt costs the paymaster nothing: anyone in a fund, draft or live, may.
     for (const person of [founder, juan, ana]) {
-      expect(await authorizeBundlerRequest(db, asUser(person), rpc("eth_getUserOperationReceipt", ["0x01"]), POLICY, price), person.name).toMatchObject({ ok: true });
+      expect(await authorizeBundlerRequest(db, asUser(person), rpc("eth_getUserOperationReceipt", ["0x01"]), POLICY, price, AGENT), person.name).toMatchObject({ ok: true });
     }
-    expect(await authorizeBundlerRequest(db, asUser(stranger), rpc("eth_chainId"), POLICY, price)).toMatchObject({ ok: false, status: 403 });
-    expect(await authorizeBundlerRequest(db, null, rpc("eth_chainId"), POLICY, price)).toMatchObject({ ok: false, status: 401 });
+    expect(await authorizeBundlerRequest(db, asUser(stranger), rpc("eth_chainId"), POLICY, price, AGENT)).toMatchObject({ ok: false, status: 403 });
+    expect(await authorizeBundlerRequest(db, null, rpc("eth_chainId"), POLICY, price, AGENT)).toMatchObject({ ok: false, status: 401 });
   });
 
   it("refuses calls off the list before reading any price, whoever asks", async () => {
-    const { db, juan, ana } = await people();
+    const { db, juan, ana, anaCreate } = await people();
     const reads = vi.fn(price);
     const cases: [{ id: string; account: string; name: string }, Hex][] = [
-      [juan, safeCallData([createFundCall()])], // not creating a fund
+      [juan, safeCallData([anaCreate])], // not creating a fund: Ana's exact call is still Ana's
       [ana, safeCallData(contribute(FUND))], // not in a live fund
-      [ana, safeCallData([createFundCall(), ...contribute(FUND)])], // createFund, but not alone
+      [ana, safeCallData([anaCreate, ...contribute(FUND)])], // createFund, but not alone
       [juan, safeCallData(contribute(OTHER))], // someone else's fund
       [juan, safeCallData([{ to: USDT, data: encodeFunctionData({ abi: erc20Abi, functionName: "transfer", args: [OTHER, 1n] }) }])],
       [juan, concat([execute(OTHER, 0n, multiSend(contribute(FUND)), 1), ATTRIBUTION_SUFFIX])], // a delegatecall elsewhere
     ];
     for (const [person, callData] of cases) {
       for (const method of SPONSORED) {
-        const refused = await authorizeBundlerRequest(db, asUser(person), request(method, sponsored(person.account, {}, MAX_OPERATION_GAS, callData)), POLICY, reads);
+        const refused = await authorizeBundlerRequest(db, asUser(person), request(method, sponsored(person.account, {}, MAX_OPERATION_GAS, callData)), POLICY, reads, AGENT);
         expect(refused, `${person.name}, ${method}: ${callData.slice(0, 74)}`).toMatchObject({ ok: false, status: 403 });
       }
     }
@@ -300,10 +346,10 @@ describe("authorizeBundlerRequest", () => {
   });
 
   it("gives the creator's createFund a ceiling of 10M gas, and every other operation one of 2M", async () => {
-    const { db, juan, ana } = await people();
+    const { db, juan, ana, anaCreate } = await people();
     const sign = (person: typeof ana, total: bigint, callData: Hex) =>
-      authorizeBundlerRequest(db, asUser(person), request("pm_getPaymasterData", sponsored(person.account, {}, total, callData)), POLICY, price);
-    const create = safeCallData([createFundCall()]);
+      authorizeBundlerRequest(db, asUser(person), request("pm_getPaymasterData", sponsored(person.account, {}, total, callData)), POLICY, price, AGENT);
+    const create = safeCallData([anaCreate]);
     expect(await sign(ana, MAX_CREATE_FUND_GAS, create)).toMatchObject({ ok: true });
     expect(await sign(ana, MAX_CREATE_FUND_GAS + 1n, create)).toMatchObject({ ok: false, status: 400, error: "Gas limits too high" });
     for (const callData of [safeCallData(contribute(FUND)), safeCallData(contribute(FUND, "usdt")), safeCallData(voteCalls({ fund: FUND, proposalId: 0n, completes: true }))]) {
@@ -319,19 +365,19 @@ describe("authorizeBundlerRequest", () => {
     const reads = vi.fn(price);
     const sponsor = (change: Record<string, unknown> = {}) => request("pm_getPaymasterData", sponsored(juan.account, change));
 
-    const ok = await authorizeBundlerRequest(db, asUser(juan), sponsor(), POLICY, reads);
+    const ok = await authorizeBundlerRequest(db, asUser(juan), sponsor(), POLICY, reads, AGENT);
     expect(ok).toMatchObject({ ok: true, request: { params: [sponsored(juan.account), entryPoint07Address, CELO, { sponsorshipPolicyId: POLICY }] } });
     expect(reads).toHaveBeenCalledTimes(1);
     const high = { maxFeePerGas: hex(MAX_FEE_MULTIPLE * FAST + 1n) };
-    expect(await authorizeBundlerRequest(db, asUser(juan), sponsor(high), POLICY, reads)).toMatchObject({ ok: false, status: 400 });
+    expect(await authorizeBundlerRequest(db, asUser(juan), sponsor(high), POLICY, reads, AGENT)).toMatchObject({ ok: false, status: 400 });
 
     reads.mockClear();
     const answers = await Promise.all([
-      authorizeBundlerRequest(db, null, sponsor(), POLICY, reads), // logged out
-      authorizeBundlerRequest(db, asUser(juan), request("pm_getPaymasterData", sponsored(OTHER)), POLICY, reads), // someone else's operation
-      authorizeBundlerRequest(db, asUser(juan), rpc("eth_chainId"), POLICY, reads), // nothing is sponsored
+      authorizeBundlerRequest(db, null, sponsor(), POLICY, reads, AGENT), // logged out
+      authorizeBundlerRequest(db, asUser(juan), request("pm_getPaymasterData", sponsored(OTHER)), POLICY, reads, AGENT), // someone else's operation
+      authorizeBundlerRequest(db, asUser(juan), rpc("eth_chainId"), POLICY, reads, AGENT), // nothing is sponsored
       // The send itself isn't what the paymaster signs: its fees are fixed by then (and checked when it signed).
-      authorizeBundlerRequest(db, asUser(juan), request("eth_sendUserOperation", sponsored(juan.account, high)), POLICY, reads),
+      authorizeBundlerRequest(db, asUser(juan), request("eth_sendUserOperation", sponsored(juan.account, high)), POLICY, reads, AGENT),
     ]);
     expect(answers.map((answer) => answer.ok)).toEqual([false, false, true, true]);
     expect(reads).not.toHaveBeenCalled();
@@ -342,21 +388,77 @@ describe("authorizeBundlerRequest", () => {
     const broken = vi.fn(async (): Promise<bigint> => {
       throw new Error("Pimlico is down");
     });
-    expect(await authorizeBundlerRequest(db, asUser(juan), request("pm_getPaymasterData", sponsored(juan.account)), POLICY, broken)).toMatchObject({
+    expect(await authorizeBundlerRequest(db, asUser(juan), request("pm_getPaymasterData", sponsored(juan.account)), POLICY, broken, AGENT)).toMatchObject({
       ok: false,
       status: 502,
     });
   });
 
   it("doesn't look at fees or gas without a price, as on the fork, which has no paymaster, but still at who and what", async () => {
-    const { db, juan, founder } = await people();
+    const { db, juan, founder, anaCreate } = await people();
     const heavy = { maxFeePerGas: hex(1000n * FAST), callGasLimit: hex(8_000_000n), verificationGasLimit: hex(2_000_000n) };
-    expect(await authorizeBundlerRequest(db, asUser(juan), request("pm_getPaymasterData", sponsored(juan.account, heavy)), POLICY, null)).toMatchObject({ ok: true });
-    const createFund = sponsored(juan.account, heavy, MAX_OPERATION_GAS, safeCallData([createFundCall()]));
-    expect(await authorizeBundlerRequest(db, asUser(juan), request("pm_getPaymasterData", createFund), POLICY, null)).toMatchObject({ ok: false, status: 403 });
-    expect(await authorizeBundlerRequest(db, asUser(founder), request("pm_getPaymasterData", sponsored(founder.account)), POLICY, null)).toMatchObject({
+    expect(await authorizeBundlerRequest(db, asUser(juan), request("pm_getPaymasterData", sponsored(juan.account, heavy)), POLICY, null, AGENT)).toMatchObject({ ok: true });
+    const createFund = sponsored(juan.account, heavy, MAX_OPERATION_GAS, safeCallData([anaCreate]));
+    expect(await authorizeBundlerRequest(db, asUser(juan), request("pm_getPaymasterData", createFund), POLICY, null, AGENT)).toMatchObject({ ok: false, status: 403 });
+    expect(await authorizeBundlerRequest(db, asUser(founder), request("pm_getPaymasterData", sponsored(founder.account)), POLICY, null, AGENT)).toMatchObject({
       ok: false,
       status: 403,
+    });
+  });
+
+  describe("the only createFund it sponsors: the one deployCall built for the creator's frozen draft", () => {
+    /** Each sponsored method's answer to `person` sending `calls`, with `agent` as the server's agent. */
+    const answers = (db: Db, person: { id: string; account: string }, calls: Call[], agent: Address = AGENT) =>
+      Promise.all(
+        SPONSORED.map((method) =>
+          authorizeBundlerRequest(db, asUser(person), request(method, sponsored(person.account, {}, MAX_CREATE_FUND_GAS, safeCallData(calls))), POLICY, price, agent),
+        ),
+      );
+    const allowed = { ok: true };
+    const refused = { ok: false, status: 403, error: expect.stringContaining("createFund") };
+
+    it("sponsors the creator's exact call, and not that call with any one argument changed", async () => {
+      const db = await testDb();
+      const ana = await addUser(db, "Ana");
+      const { call } = await frozenDraft(db, ana.id, "Fútbol");
+      for (const answer of await answers(db, ana, [call])) expect(answer).toMatchObject(allowed);
+
+      const { members, weeklyCap } = createFundParams(call.data!);
+      const cases: Record<string, Parameters<typeof changed>[1]> = {
+        "another member": { members: [...members.slice(0, -1), randomAccount()] },
+        "a member more": { members: [...members, randomAccount()] },
+        "the members in another order": { members: [...members].reverse() },
+        "another votesRequired": { votesRequired: 3 },
+        "another agent": { agent: OTHER },
+        "another name": { name: "Asado" },
+        "another weekly cap": { weeklyCap: weeklyCap + 1n },
+      };
+      for (const [why, change] of Object.entries(cases)) {
+        for (const answer of await answers(db, ana, [changed(call, change)])) expect(answer, why).toMatchObject(refused);
+      }
+      // The exact call, but the server names another agent: not the fund the server would run.
+      for (const answer of await answers(db, ana, [call], OTHER)) expect(answer).toMatchObject(refused);
+    });
+
+    it("refuses the call of a draft that is open again (`draft`), not being created", async () => {
+      const db = await testDb();
+      const ana = await addUser(db, "Ana");
+      await addLiveFund(db, { creatorId: ana.id, address: FUND, members: [ana.id] }); // sponsored for her live fund, so the call itself is what's refused
+      const { fundId, call } = await frozenDraft(db, ana.id, "Fútbol");
+      expect(await cancelDeploy(db, { fundId, userId: ana.id })).toEqual({ ok: true, reopened: true });
+      for (const answer of await answers(db, ana, [call])) expect(answer).toMatchObject(refused);
+    });
+
+    it("sponsors each of two drafts being created with its own exact call, one at a time", async () => {
+      const db = await testDb();
+      const ana = await addUser(db, "Ana");
+      const futbol = await frozenDraft(db, ana.id, "Fútbol");
+      const asado = await frozenDraft(db, ana.id, "Asado");
+      for (const { call } of [futbol, asado]) {
+        for (const answer of await answers(db, ana, [call])) expect(answer).toMatchObject(allowed);
+      }
+      for (const answer of await answers(db, ana, [changed(futbol.call, { name: "Asado" })])) expect(answer).toMatchObject(refused);
+      for (const answer of await answers(db, ana, [futbol.call, asado.call])) expect(answer).toMatchObject({ ok: false, status: 403 });
     });
   });
 });

@@ -1,5 +1,6 @@
 import { shortMessage } from "@tesoreria/agent";
 import { createForkBundler } from "@tesoreria/wallet/fork";
+import { agentAddress } from "../../../lib/agent-address";
 import { type BundlerRequest, authorizeBundlerRequest, checkBundlerAnswer } from "../../../lib/bundler-proxy";
 import { currentUser } from "../../../lib/current-user";
 import { getDb } from "../../../lib/db/client";
@@ -57,6 +58,7 @@ export async function POST(request: Request) {
     body,
     PIMLICO_SPONSORSHIP_POLICY_ID ?? "fork",
     CHAIN_MODE === "fork" ? null : fastMaxFeePerGas, // the fork has no paymaster to protect
+    agentAddress(), // the agent deployCall names: a createFund that names another isn't sponsored
   );
   if (!check.ok) return rpcError((body as { id?: unknown } | undefined)?.id, check.status, check.error);
   let answer: Answer;

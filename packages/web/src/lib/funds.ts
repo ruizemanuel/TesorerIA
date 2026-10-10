@@ -218,8 +218,22 @@ export async function deployCall(
     membersQuery(tx, fundId),
   ]);
   if (frozen === undefined) return fail(409, BEING_CREATED); // it changed since the read above
-  const members = asMembers(rows);
-  const data = encodeFunctionData({
+  const data = createFundData(draft, asMembers(rows), votesRequired, agent);
+  return { ok: true, call: { to: FUND_FACTORY, data } };
+}
+
+/**
+ * FundFactory.createFund's calldata for a draft, with `members` in `membersQuery`'s order (joined at, then user
+ * id). The only encoding of it: deployCall hands it to the creator to sign, and the bundler gateway sponsors no
+ * other createFund (`frozenCreateFunds`), so the two can't drift.
+ */
+function createFundData(
+  draft: Pick<DraftSummary, "name" | "agreedExpense" | "weeklyCap">,
+  members: DraftSummary["members"],
+  votesRequired: number,
+  agent: Address,
+): Hex {
+  return encodeFunctionData({
     abi: fundFactoryAbi,
     functionName: "createFund",
     args: [
@@ -234,7 +248,19 @@ export async function deployCall(
       },
     ],
   });
-  return { ok: true, call: { to: FUND_FACTORY, data } };
+}
+
+/**
+ * The createFund calldata of each draft `creatorId` made that is being created (`deploying`), naming `agent`:
+ * exactly what deployCall built when it froze it, since nobody joins and the votes don't change until it's live
+ * or open again. The only createFunds the bundler gateway sponsors (spec, 6).
+ */
+export async function frozenCreateFunds(db: Db, creatorId: string, agent: Address): Promise<Hex[]> {
+  const frozen = await db
+    .select({ id: funds.id, name: funds.name, agreedExpense: funds.agreedExpense, weeklyCap: funds.weeklyCap, votesRequired: funds.votesRequired })
+    .from(funds)
+    .where(and(eq(funds.creatorId, creatorId), eq(funds.status, "deploying"), isNotNull(funds.votesRequired)));
+  return Promise.all(frozen.map(async (draft) => createFundData(draft, await membersOf(db, draft.id), draft.votesRequired!, agent)));
 }
 
 /**

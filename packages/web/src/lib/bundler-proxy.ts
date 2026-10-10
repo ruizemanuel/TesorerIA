@@ -1,4 +1,4 @@
-import { FUND_FACTORY, USDT, WARS, fundFactoryAbi } from "@tesoreria/agent";
+import { FUND_FACTORY, USDT, WARS } from "@tesoreria/agent";
 import { ATTRIBUTION_SUFFIX } from "@tesoreria/wallet";
 import { and, eq, isNotNull } from "drizzle-orm";
 import {
@@ -23,6 +23,7 @@ import { entryPoint07Address } from "viem/account-abstraction";
 import type { Db } from "./db/client";
 import { funds, memberships } from "./db/schema";
 import { memberFundAbi } from "./fund-abi";
+import { frozenCreateFunds } from "./funds";
 
 /** The JSON-RPC methods a member's browser needs to send a sponsored UserOperation, and nothing else. */
 export const BUNDLER_METHODS = new Set([
@@ -155,8 +156,11 @@ export function operationCalls(callData: string): OperationCall[] | null {
 export type Sponsorship = {
   /** The live funds the person is a member of. */
   liveFunds: Address[];
-  /** Whether they created a draft that is being created right now (`deploying`): its createFund is theirs to send. */
-  creatingFund: boolean;
+  /**
+   * The createFund calldata of each draft they created that is being created right now (`deploying`), exactly as
+   * deployCall built it (`frozenCreateFunds`): the only createFunds theirs to send.
+   */
+  createFundCalls: Hex[];
 };
 
 /** What a live fund's member calls on it (spec, 9): contribute, and vote and execute. */
@@ -175,21 +179,23 @@ function memberCall({ to, data }: OperationCall, isLive: (address: Address) => b
 
 /**
  * The calls the paymaster pays for, and nothing else (spec, 6: no open sponsored bundler), all with no value:
- * - FundFactory.createFund, alone, from the creator of a fund being created;
+ * - FundFactory.createFund, alone, from the creator of a fund being created, and only with the exact calldata
+ *   deployCall built for that frozen draft (`createFundCalls`): its members in order, its votes, the server's agent;
  * - approve(fund, x) on wARS or USDT, and contributeWars, contributeUsdt, vote and execute on the fund, for a
  *   live fund the person is a member of.
  * `createsFund` says which: it gets the larger gas ceiling.
  */
 export function checkCalls(
   calls: OperationCall[],
-  { liveFunds, creatingFund }: Sponsorship,
+  { liveFunds, createFundCalls }: Sponsorship,
 ): { ok: true; createsFund: boolean } | { ok: false; status: 403; error: string } {
   const refuse = (error: string) => ({ ok: false, status: 403, error }) as const;
   if (calls.some((call) => call.value !== 0n)) return refuse("Sponsored calls can't send CELO");
   const [only] = calls;
   if (calls.length === 1 && only !== undefined && isAddressEqual(only.to, FUND_FACTORY)) {
-    if (decodeExactly(fundFactoryAbi, only.data)?.functionName !== "createFund") return refuse("Only createFund is sponsored on the factory");
-    return creatingFund ? { ok: true, createsFund: true } : refuse("Only the creator of a fund being created can create it");
+    const data = only.data.toLowerCase();
+    if (createFundCalls.some((frozen) => frozen.toLowerCase() === data)) return { ok: true, createsFund: true };
+    return refuse("Only the createFund of a draft you are creating, exactly as it was frozen, is sponsored on the factory");
   }
   const isLive = (address: Address) => liveFunds.some((fund) => isAddressEqual(fund, address));
   const refused = calls.find((call) => !memberCall(call, isLive));
@@ -248,19 +254,14 @@ export function checkSponsoredGas(
   return { ok: true };
 }
 
-/** The live funds `userId` is a member of, and whether a draft they created is being created. */
-async function sponsorshipOf(db: Db, userId: string): Promise<Sponsorship> {
+/** The live funds `userId` is a member of, and the createFund of each draft they created that is being created, naming `agent`. */
+async function sponsorshipOf(db: Db, userId: string, agent: Address): Promise<Sponsorship> {
   const live = await db
     .select({ address: funds.address })
     .from(memberships)
     .innerJoin(funds, eq(funds.id, memberships.fundId))
     .where(and(eq(memberships.userId, userId), eq(funds.status, "live"), isNotNull(funds.address)));
-  const [creating] = await db
-    .select({ id: funds.id })
-    .from(funds)
-    .where(and(eq(funds.creatorId, userId), eq(funds.status, "deploying")))
-    .limit(1);
-  return { liveFunds: live.map((row) => getAddress(row.address!)), creatingFund: creating !== undefined };
+  return { liveFunds: live.map((row) => getAddress(row.address!)), createFundCalls: await frozenCreateFunds(db, userId, agent) };
 }
 
 /**
@@ -269,7 +270,8 @@ async function sponsorshipOf(db: Db, userId: string): Promise<Sponsorship> {
  * - what carries the sponsorship (estimating, stubbing, signing or sending an operation) is only for a member of a
  *   live fund, or the creator of a draft being created (deployCall freezes it to `deploying` before the browser
  *   asks for anything), and only for the calls `checkCalls` allows: a stranger who makes an account and a draft
- *   gets nothing paid.
+ *   gets nothing paid, and a creator only the createFund deployCall built for their frozen draft, naming `agent`
+ *   (the server's, `agentAddress`).
  *
  * `fastMaxFeePerGas` reads Pimlico's current price, only when it's needed: a sponsoring request (pm_getPaymasterData)
  * also has to pass `checkSponsoredGas`, with 10M gas for a createFund and 2M for anything else, and if the price can't
@@ -281,6 +283,7 @@ export async function authorizeBundlerRequest(
   body: unknown,
   sponsorshipPolicyId: string,
   fastMaxFeePerGas: (() => Promise<bigint>) | null,
+  agent: Address,
 ): Promise<BundlerCheck> {
   const check = checkBundlerRequest(body, user?.account ?? null, sponsorshipPolicyId);
   if (!check.ok || user === null) return check; // without a user the check never passes
@@ -289,8 +292,8 @@ export async function authorizeBundlerRequest(
     const [membership] = await db.select({ fundId: memberships.fundId }).from(memberships).where(eq(memberships.userId, user.id)).limit(1);
     return membership === undefined ? { ok: false, status: 403, error: "Only members of a fund use the bundler" } : check;
   }
-  const sponsorship = await sponsorshipOf(db, user.id);
-  if (sponsorship.liveFunds.length === 0 && !sponsorship.creatingFund) {
+  const sponsorship = await sponsorshipOf(db, user.id, agent);
+  if (sponsorship.liveFunds.length === 0 && sponsorship.createFundCalls.length === 0) {
     return { ok: false, status: 403, error: "Only members of a live fund, and the creator of a fund being created, are sponsored" };
   }
   const calls = operationCalls((params[0] as { callData: string }).callData); // a string: checkBundlerRequest saw its tag
