@@ -1,3 +1,4 @@
+import { ATTRIBUTION_SUFFIX } from "@tesoreria/wallet";
 import { eq } from "drizzle-orm";
 import { type Address, isAddress, isAddressEqual, numberToHex } from "viem";
 import { entryPoint07Address } from "viem/account-abstraction";
@@ -19,15 +20,24 @@ export const BUNDLER_METHODS = new Set([
 
 /** The methods that carry a UserOperation: [userOp, entryPoint, …]. */
 const WITH_USER_OP = new Set(["eth_estimateUserOperationGas", "eth_sendUserOperation", "pm_getPaymasterStubData", "pm_getPaymasterData"]);
+/** The methods whose operation must end with TesorerIA's attribution tag (ERC-8021): what's sent, and what's signed. */
+const TAGGED = new Set(["eth_sendUserOperation", "pm_getPaymasterData"]);
 const CELO = numberToHex(42220);
+
+/** Whether the operation's callData ends with TesorerIA's attribution suffix, which every operation the web makes carries. */
+function isTagged(userOp: unknown): boolean {
+  const callData = typeof userOp === "object" && userOp !== null ? (userOp as { callData?: unknown }).callData : undefined;
+  return typeof callData === "string" && callData.toLowerCase().endsWith(ATTRIBUTION_SUFFIX.slice(2).toLowerCase());
+}
 
 export type BundlerRequest = { jsonrpc: "2.0"; id: number | string | null; method: string; params: unknown[] };
 export type BundlerCheck = { ok: true; request: BundlerRequest } | { ok: false; status: 400 | 401 | 403 | 502; error: string };
 
 /**
  * What /api/bundler forwards, rebuilt from scratch (spec, 6): only the flow's methods, only operations from
- * `account` (the logged-in member's Safe), only EntryPoint v0.7 on Celo, and the paymaster's context replaced
- * by the server's sponsorship policy. Anything else never reaches Pimlico.
+ * `account` (the logged-in member's Safe), only EntryPoint v0.7 on Celo, only operations that carry the attribution
+ * tag to be signed or sent, and the paymaster's context replaced by the server's sponsorship policy. Anything else
+ * never reaches Pimlico.
  */
 export function checkBundlerRequest(body: unknown, account: Address | null, sponsorshipPolicyId: string): BundlerCheck {
   if (account === null) return { ok: false, status: 401, error: "Log in first" };
@@ -50,6 +60,7 @@ export function checkBundlerRequest(body: unknown, account: Address | null, spon
   if (typeof entryPoint !== "string" || !isAddress(entryPoint, { strict: false }) || !isAddressEqual(entryPoint, entryPoint07Address)) {
     return { ok: false, status: 400, error: "EntryPoint v0.7 only" };
   }
+  if (TAGGED.has(method) && !isTagged(userOp)) return { ok: false, status: 400, error: "The operation must end with TesorerIA's attribution tag" };
   if (method.startsWith("pm_")) {
     // ERC-7677: [userOp, entryPoint, chainId, context]. The policy is always the server's.
     if (params[2] !== CELO) return { ok: false, status: 400, error: "Celo only" };

@@ -1,3 +1,4 @@
+import { ATTRIBUTION_SUFFIX } from "@tesoreria/wallet";
 import { getAddress, numberToHex } from "viem";
 import { entryPoint07Address } from "viem/account-abstraction";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -16,7 +17,7 @@ vi.mock("../src/lib/db/client", async (importOriginal) => ({
 }));
 
 const CELO = numberToHex(42220);
-const op = (sender: string) => ({ sender, nonce: "0x0", callData: "0x" });
+const op = (sender: string) => ({ sender, nonce: "0x0", callData: ATTRIBUTION_SUFFIX });
 const rpc = (method: string, params: unknown[] = []) => ({ jsonrpc: "2.0", id: 5, method, params });
 
 let POST: (request: Request) => Promise<Response>;

@@ -1,4 +1,4 @@
-import { createMemberAccount, createPimlicoBundlerClient } from "@tesoreria/wallet";
+import { ATTRIBUTION_SUFFIX, createMemberAccount, createPimlicoBundlerClient } from "@tesoreria/wallet";
 import { createFakePasskey } from "@tesoreria/wallet/testing";
 import { type Address, type Hash, createPublicClient, custom, encodeAbiParameters, getAddress, numberToHex, pad, toFunctionSelector } from "viem";
 import { toWebAuthnAccount } from "viem/account-abstraction";
@@ -82,6 +82,17 @@ describe("the requests viem really sends for a sponsored operation", () => {
     expect(forwarded.at(-1)?.method).toBe("eth_sendUserOperation");
     for (const { method, params } of forwarded.filter(({ method }) => method.startsWith("pm_"))) {
       expect(params[3], method).toEqual({ sponsorshipPolicyId: POLICY });
+    }
+    // viem tags the callData before it asks for anything, so the estimate and the stub carry the tag too.
+    const withOperation = forwarded.filter(({ params }) => typeof params[0] === "object" && params[0] !== null);
+    expect(withOperation.map(({ method }) => method)).toEqual([
+      "pm_getPaymasterStubData",
+      "eth_estimateUserOperationGas",
+      "pm_getPaymasterData",
+      "eth_sendUserOperation",
+    ]);
+    for (const { method, params } of withOperation) {
+      expect((params[0] as { callData: string }).callData.endsWith(ATTRIBUTION_SUFFIX.slice(2)), method).toBe(true);
     }
   });
 });

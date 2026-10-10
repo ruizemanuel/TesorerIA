@@ -1,4 +1,5 @@
-import { getAddress, numberToHex } from "viem";
+import { ATTRIBUTION_SUFFIX } from "@tesoreria/wallet";
+import { concat, getAddress, numberToHex } from "viem";
 import { entryPoint07Address } from "viem/account-abstraction";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -15,7 +16,7 @@ const ME = getAddress("0x2F8218c7cF6d822091EDe24Db9c46B0324c21A6F");
 const OTHER = getAddress("0x6BE3c1eB63A4edbc6C23c281F93F81B14eF3a671");
 const CELO = numberToHex(42220);
 const POLICY = "sp_server";
-const op = (sender: string) => ({ sender, nonce: "0x0", callData: "0x" });
+const op = (sender: string, callData: string = ATTRIBUTION_SUFFIX) => ({ sender, nonce: "0x0", callData });
 const rpc = (method: string, params: unknown[] = []) => ({ jsonrpc: "2.0", id: 1, method, params });
 
 describe("checkBundlerRequest", () => {
@@ -46,6 +47,23 @@ describe("checkBundlerRequest", () => {
     expect(checkBundlerRequest(otherChain, ME, POLICY)).toMatchObject({ ok: false, status: 400 });
     expect(checkBundlerRequest([rpc("eth_chainId")], ME, POLICY)).toMatchObject({ ok: false, status: 400 });
     expect(checkBundlerRequest("eth_chainId", ME, POLICY)).toMatchObject({ ok: false, status: 400 });
+  });
+
+  it("sends or sponsors only an operation that ends with TesorerIA's attribution tag", () => {
+    const CALL = "0xb61d27f6";
+    for (const method of ["eth_sendUserOperation", "pm_getPaymasterData"]) {
+      const params = (callData: unknown) => [{ ...op(ME), callData }, entryPoint07Address, CELO, {}];
+      expect(checkBundlerRequest(rpc(method, params(concat([CALL, ATTRIBUTION_SUFFIX]))), ME, POLICY).ok, method).toBe(true);
+      const shouted = concat([CALL, ATTRIBUTION_SUFFIX]).replace(/[a-f]/g, (letter) => letter.toUpperCase());
+      expect(checkBundlerRequest(rpc(method, params(shouted)), ME, POLICY).ok, `${method}, in upper case`).toBe(true);
+      for (const callData of ["0x", CALL, concat([ATTRIBUTION_SUFFIX, CALL]), undefined, 7]) {
+        expect(checkBundlerRequest(rpc(method, params(callData)), ME, POLICY), `${method}: ${String(callData)}`).toMatchObject({
+          ok: false,
+          status: 400,
+          error: "The operation must end with TesorerIA's attribution tag",
+        });
+      }
+    }
   });
 });
 
