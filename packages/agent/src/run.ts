@@ -1,5 +1,5 @@
 import { type Address, type Hash, formatUnits, isAddressEqual } from "viem";
-import { decideConversion, planConversion } from "./convert";
+import { MIN_CONVERSION_USDT, decideConversion, planConversion } from "./convert";
 import { shortMessage } from "./errors";
 import type { FundEvent } from "./events";
 import { type Expense, decideExpense } from "./expense";
@@ -43,6 +43,11 @@ export type AgentContext = {
   now: () => bigint;
   /** False for a dry run: everything but sending. */
   send: boolean;
+  /**
+   * Called as soon as a transaction is sent, before its receipt, so the caller can keep the hash even if the
+   * wait fails or the process dies. If it throws, the decision still carries the hash.
+   */
+  onSent?: (sent: { fund: Address; action: AgentAction; tx: Hash }) => Promise<void>;
 };
 
 function wholeWars(amount: bigint): string {
@@ -85,6 +90,9 @@ async function act(
     return blocked(`Could not send the transaction: ${shortMessage(error)}`);
   }
   try {
+    await ctx.onSent?.({ fund: fund.address, action, tx: hash });
+  } catch {} // the decision below still carries the hash
+  try {
     const status = await ctx.chain.receipt(hash);
     return { fund: fund.address, kind: action.kind, reason, action, tx: hash, status };
   } catch (error) {
@@ -99,12 +107,11 @@ async function act(
   }
 }
 
-/** A fund the agent runs, read with its history and the agent's activity over the last day. */
-async function load(ctx: AgentContext, address: Address) {
-  const fund = await ctx.chain.fund(address);
-  const events = await ctx.chain.events(address, fund.block);
+/** A fund's history up to its snapshot's block, and the agent's activity over the last day. */
+async function history(ctx: AgentContext, fund: FundSnapshot) {
+  const events = await ctx.chain.events(fund.address, fund.block);
   const today = dailyActivity(events, ctx.signer.address, fund.block - DAY_BLOCKS);
-  return { fund, events, today };
+  return { events, today };
 }
 
 /**
@@ -114,10 +121,19 @@ async function load(ctx: AgentContext, address: Address) {
 export async function runHeartbeat(ctx: AgentContext): Promise<Decision[]> {
   const decisions: Decision[] = [];
   let references: References | undefined;
-  for (const address of await ctx.chain.funds()) {
+  let funds: Address[];
+  try {
+    funds = await ctx.chain.funds();
+  } catch (error) {
+    return [{ kind: "blocked", reason: `Could not list the funds: ${shortMessage(error)}` }];
+  }
+  for (const address of funds) {
     try {
-      const { fund, today } = await load(ctx, address);
+      // The snapshot first: a closed fund, another agent's, or one with nothing to convert costs no history read.
+      const fund = await ctx.chain.fund(address);
       if (fund.closed || !isAddressEqual(fund.agent, ctx.signer.address)) continue;
+      if (fund.usdtBalance < MIN_CONVERSION_USDT) continue;
+      const { today } = await history(ctx, fund);
       const plan = planConversion(fund, today);
       if (plan.kind === "none") continue;
       if (plan.kind === "skip") {
@@ -149,10 +165,11 @@ export async function handleExpense(ctx: AgentContext, address: Address, expense
     if (!funds.some((f) => isAddressEqual(f, address))) {
       return { fund: address, kind: "reject", reason: "That fund wasn't created by TesorerIA's FundFactory" };
     }
-    const { fund, events, today } = await load(ctx, address);
+    const fund = await ctx.chain.fund(address);
     if (!isAddressEqual(fund.agent, ctx.signer.address)) {
       return { fund: address, kind: "reject", reason: "This agent doesn't run that fund" };
     }
+    const { events, today } = await history(ctx, fund);
     const decision = decideExpense({ expense, fund, events, today });
     switch (decision.kind) {
       case "reject":

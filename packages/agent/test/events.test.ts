@@ -140,15 +140,60 @@ describe("blockscoutLogReader", () => {
   it("throws on any other answer, so no decision rests on a partial history", async () => {
     for (const body of [{ status: "0", message: "Max rate limit reached", result: null }, { httpStatus: 429 }]) {
       const { fetchFn } = fakeFetch([head(10n), body]);
-      const read = blockscoutLogReader({ apiUrl: "https://example.org/api", rpc: noTail, fetchFn });
+      const read = blockscoutLogReader({ apiUrl: "https://example.org/api", rpc: noTail, fetchFn, retries: 0 });
       await expect(read({ address: FUND, fromBlock: 0n, toBlock: 10n })).rejects.toThrow("Blockscout answered");
     }
     // The same when it is the indexed head that can't be read.
     for (const body of [{ httpStatus: 503 }, { jsonrpc: "2.0", result: null, id: 1 }, { jsonrpc: "2.0", result: "soon", id: 1 }]) {
       const { fetchFn } = fakeFetch([body]);
-      const read = blockscoutLogReader({ apiUrl: "https://example.org/api", rpc: noTail, fetchFn });
+      const read = blockscoutLogReader({ apiUrl: "https://example.org/api", rpc: noTail, fetchFn, retries: 0 });
       await expect(read({ address: FUND, fromBlock: 0n, toBlock: 10n })).rejects.toThrow("Blockscout answered");
     }
+  });
+
+  it("retries a rate limit, a server error and a dropped request, then reads", async () => {
+    const answers: (Response | Error)[] = [
+      new Response("", { status: 429 }),
+      Response.json(head(10n)),
+      new Error("socket hang up"),
+      new Response("", { status: 502 }),
+      Response.json({ status: "0", message: "No logs found", result: [] }),
+    ];
+    const urls: string[] = [];
+    const fetchFn = (async (url: string) => {
+      urls.push(url);
+      const answer = answers.shift();
+      if (answer === undefined) throw new Error("unexpected request");
+      if (answer instanceof Error) throw answer;
+      return answer;
+    }) as typeof fetch;
+    const read = blockscoutLogReader({ apiUrl: "https://example.org/api", rpc: noTail, fetchFn, retryDelayMs: 0 });
+    expect(await read({ address: FUND, fromBlock: 0n, toBlock: 10n })).toEqual([]);
+    expect(urls).toHaveLength(5);
+  });
+
+  it("gives up after its retries, also on a request that hangs past the timeout", async () => {
+    const hang = ((_url: string, init?: RequestInit) =>
+      new Promise((_resolve, reject) => init?.signal?.addEventListener("abort", () => reject(init.signal?.reason)))) as typeof fetch;
+    const read = blockscoutLogReader({
+      apiUrl: "https://example.org/api",
+      rpc: noTail,
+      fetchFn: hang,
+      retries: 1,
+      retryDelayMs: 0,
+      timeoutMs: 20,
+    });
+    await expect(read({ address: FUND, fromBlock: 0n, toBlock: 10n })).rejects.toThrow("Blockscout didn't answer");
+  });
+
+  it("sends the API key with every request", async () => {
+    const { fetchFn, urls } = fakeFetch([head(10n), { status: "0", message: "No logs found", result: [] }]);
+    const read = blockscoutLogReader({ apiUrl: "https://example.org/api", rpc: noTail, fetchFn, apiKey: "k&y" });
+    await read({ address: FUND, fromBlock: 0n, toBlock: 10n });
+    expect(urls).toEqual([
+      `${HEAD_URL}&apikey=k%26y`,
+      `https://example.org/api?module=logs&action=getLogs&address=${FUND}&fromBlock=0&toBlock=10&apikey=k%26y`,
+    ]);
   });
 
   it("throws when Blockscout's index is further behind than the node's 5,000 blocks cover", async () => {

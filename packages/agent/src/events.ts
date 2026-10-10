@@ -8,6 +8,7 @@ import {
   decodeEventLog,
 } from "viem";
 import { fundAbi } from "./abi";
+import { shortMessage } from "./errors";
 
 /** A log as the agent needs it: where it is, and what it says. */
 export type RawLog = {
@@ -70,15 +71,39 @@ export function blockscoutLogReader({
   apiUrl,
   rpc,
   fetchFn = fetch,
+  apiKey,
+  retries = 2,
+  retryDelayMs = 2_000,
+  timeoutMs = 15_000,
 }: {
   apiUrl: string;
   rpc: LogReader;
   fetchFn?: typeof fetch;
+  /** Blockscout's free API key: a higher rate limit than anonymous requests (a few requests got 429). */
+  apiKey?: string;
+  /** Extra attempts after a 429, a 5xx, a timeout or a network error, waiting retryDelayMs, then twice that. */
+  retries?: number;
+  retryDelayMs?: number;
+  /** Per request: a stalled socket would otherwise hang the heartbeat. */
+  timeoutMs?: number;
 }): LogReader {
+  const get = async (query: string): Promise<Response> => {
+    const url = `${apiUrl}?${query}${apiKey === undefined ? "" : `&apikey=${encodeURIComponent(apiKey)}`}`;
+    for (let attempt = 0; ; attempt++) {
+      try {
+        const response = await fetchFn(url, { signal: AbortSignal.timeout(timeoutMs) });
+        if (response.status !== 429 && response.status < 500) return response;
+        if (attempt >= retries) return response;
+      } catch (error) {
+        if (attempt >= retries) throw new Error(`Blockscout didn't answer: ${shortMessage(error)}`);
+      }
+      await new Promise((resolve) => setTimeout(resolve, retryDelayMs * 2 ** attempt));
+    }
+  };
   return async ({ address, fromBlock, toBlock }) => {
     const tailFrom = toBlock - RPC_LOG_RANGE + 1n > fromBlock ? toBlock - RPC_LOG_RANGE + 1n : fromBlock;
     // Blockscout and the node together must cover fromBlock..toBlock with no gap: check how far the index got.
-    const headResponse = await fetchFn(`${apiUrl}?module=block&action=eth_block_number`);
+    const headResponse = await get("module=block&action=eth_block_number");
     if (!headResponse.ok) throw new Error(`Blockscout answered HTTP ${headResponse.status} for its indexed block`);
     const headResult = ((await headResponse.json()) as { result?: unknown }).result;
     if (typeof headResult !== "string" || !/^0x[0-9a-f]+$/i.test(headResult)) {
@@ -96,8 +121,7 @@ export function blockscoutLogReader({
     const add = (log: RawLog) => byPosition.set(`${log.transactionHash}:${log.logIndex}`, log);
     let from = fromBlock;
     for (;;) {
-      const url = `${apiUrl}?module=logs&action=getLogs&address=${address}&fromBlock=${from}&toBlock=${toBlock}`;
-      const response = await fetchFn(url);
+      const response = await get(`module=logs&action=getLogs&address=${address}&fromBlock=${from}&toBlock=${toBlock}`);
       if (!response.ok) throw new Error(`Blockscout answered HTTP ${response.status}`);
       const body = (await response.json()) as { status: string; message: string; result: unknown };
       if (body.status !== "1") {

@@ -10,6 +10,8 @@ export const POOL_DEPTH_MULTIPLE = 10n;
 export const MAX_REFERENCE_DEVIATION_BPS = 200n;
 /** Chainlink's USD / ARS on Base updates about once a day: older than 26 hours, the agent waits. */
 export const MAX_REFERENCE_AGE = 26n * 3_600n;
+/** How far ahead of the agent's clock a Chainlink update may be dated, in seconds. */
+export const MAX_CLOCK_SKEW = 300n;
 /** `minWarsOut` sits this far under the quote, not at the contract's 2% floor (spec, 8.1). */
 export const SLIPPAGE_BPS = 50n;
 /** `Fund.convert` reverts if `minWarsOut` is under 98% of the fund's TWAP quote. */
@@ -58,6 +60,8 @@ export function decideConversion({
     ["USDT / USD", usdtUsd],
   ] as const) {
     if (feed.answer <= 0n) return { kind: "skip", reason: `Chainlink's ${name} has no valid price` };
+    // A date ahead of the clock would pass any age check: beyond the clock skew allowed, the price isn't trusted.
+    if (feed.updatedAt > now + MAX_CLOCK_SKEW) return { kind: "skip", reason: `Chainlink's ${name} is dated in the future` };
     const age = now - feed.updatedAt;
     if (age > MAX_REFERENCE_AGE) {
       return { kind: "skip", reason: `Chainlink's ${name} is ${(Number(age) / 3_600).toFixed(1)} hours old (26 at most)` };

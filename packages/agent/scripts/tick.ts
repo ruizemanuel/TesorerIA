@@ -54,7 +54,8 @@ async function main(): Promise<number> {
   }
   if (decisions.length === 0) console.log("Nothing to do.");
   if (!send) console.log("Dry run: nothing was sent. Run again with --send to act.");
-  return 0;
+  // A blocked decision is something the agent wanted to do and couldn't: the exit code says so.
+  return decisions.some((d) => d.kind === "blocked") ? 1 : 0;
 }
 
 process.exitCode = await main().catch((error: unknown) => {

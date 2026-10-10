@@ -107,8 +107,43 @@ describe("runHeartbeat", () => {
       fundSnapshot({ address: SECOND_FUND, usdtBalance: 300n * USDT_UNIT, closed: true }),
       fundSnapshot({ address: OUTSIDER, usdtBalance: 300n * USDT_UNIT, agent: OUTSIDER }),
     ];
-    expect(await runHeartbeat(context(fakeChain(funds), signer))).toEqual([]);
+    const historiesRead: Address[] = [];
+    const chain = fakeChain(funds);
+    const watched: ChainView = { ...chain, events: async (fund, toBlock) => (historiesRead.push(fund), chain.events(fund, toBlock)) };
+    expect(await runHeartbeat(context(watched, signer))).toEqual([]);
     expect(sent).toEqual([]);
+    // Anyone can create a fund that names this agent: those it leaves alone cost no history read.
+    expect(historiesRead).toEqual([]);
+  });
+
+  it("returns one blocked entry when the factory's funds can't be listed", async () => {
+    const { signer, sent } = fakeSigner();
+    const chain: ChainView = {
+      ...fakeChain([]),
+      funds: async () => {
+        throw new Error("RPC down");
+      },
+    };
+    expect(await runHeartbeat(context(chain, signer))).toEqual([{ kind: "blocked", reason: "Could not list the funds: RPC down" }]);
+    expect(sent).toEqual([]);
+  });
+
+  it("hands over each hash as soon as it is sent, before the receipt", async () => {
+    const { signer } = fakeSigner();
+    const handed: unknown[] = [];
+    const chain = fakeChain([fundSnapshot({ usdtBalance: 300n * USDT_UNIT })], { receiptError: new Error("timed out") });
+    const ctx: AgentContext = { ...context(chain, signer), onSent: async (sent) => void handed.push(sent) };
+    const [decision] = await runHeartbeat(ctx);
+    expect(handed).toEqual([{ fund: FUND, action: decision?.action, tx: HASH }]);
+    // A failing hook doesn't turn a sent transaction into a blocked one.
+    const failing: AgentContext = {
+      ...context(chain, signer),
+      onSent: async () => {
+        throw new Error("database down");
+      },
+    };
+    const [still] = await runHeartbeat(failing);
+    expect(still).toMatchObject({ kind: "convert", tx: HASH });
   });
 
   it("logs why it waits when Chainlink is stale, and sends nothing", async () => {

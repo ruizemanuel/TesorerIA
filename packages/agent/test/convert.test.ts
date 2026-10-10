@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MAX_REFERENCE_AGE, decideConversion, planConversion } from "../src/convert";
+import { MAX_CLOCK_SKEW, MAX_REFERENCE_AGE, decideConversion, planConversion } from "../src/convert";
 import { LIMITS } from "../src/limits";
 import type { ConversionQuote, References } from "../src/market";
 import { USDT_UNIT, WARS_UNIT, fundSnapshot } from "./support/fixtures";
@@ -67,6 +67,15 @@ describe("decideConversion", () => {
       kind: "skip",
       reason: "Chainlink's USDT / USD has no valid price",
     });
+  });
+
+  it("waits on a price dated ahead of its clock, beyond five minutes of skew", () => {
+    const at = (ahead: bigint) => {
+      const references = { ...REFERENCES, usdArs: { ...REFERENCES.usdArs, updatedAt: NOW + ahead } };
+      return decideConversion({ quote: QUOTE, references, now: NOW });
+    };
+    expect(at(MAX_CLOCK_SKEW).kind).toBe("convert");
+    expect(at(MAX_CLOCK_SKEW + 1n)).toEqual({ kind: "skip", reason: "Chainlink's USD / ARS is dated in the future" });
   });
 
   it("waits when the pool holds less than 10 times the wARS the conversion takes", () => {
