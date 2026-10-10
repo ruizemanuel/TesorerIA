@@ -1,5 +1,6 @@
 import { FUND_FACTORY, fundAbi, fundFactoryAbi } from "@tesoreria/agent";
-import { type SQL, and, asc, desc, eq, isNull, notExists, or, sql } from "drizzle-orm";
+import { type SQL, and, asc, desc, eq, isNotNull, isNull, notExists, or, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { Base64, Bytes } from "ox";
 import {
   type Address,
@@ -11,11 +12,13 @@ import {
   isAddressEqual,
   parseEventLogs,
 } from "viem";
+import { entryPoint07Abi, entryPoint07Address } from "viem/account-abstraction";
 import { z } from "zod";
 import type { Db } from "./db/client";
 import { funds, memberships, operations, users } from "./db/schema";
 import { MAX_PESOS, WARS_UNIT, formatPesos } from "./format";
 import { memberFundAbi } from "./fund-abi";
+import { PENDING_FOR_MS } from "./operations";
 
 /** The spec's default (4): about US$ 300. */
 export const DEFAULT_BALANCE_CAP = 450_000n * WARS_UNIT;
@@ -229,6 +232,13 @@ export async function cancelDeploy(
 
 /** `deploying` back to `draft`, in one statement, unless a createFund for it is on its way or went through. */
 async function reopen(db: Db, fundId: string): Promise<boolean> {
+  // One without a receipt is spent once another with its nonce went through (a resend pinned to it, see
+  // deployStep): the chain took that nonce, so it can never land.
+  const resend = alias(operations, "resend");
+  const spent = db
+    .select({ userOpHash: resend.userOpHash })
+    .from(resend)
+    .where(and(eq(resend.draftId, operations.draftId), eq(resend.nonce, operations.nonce), isNotNull(resend.transactionHash)));
   const onItsWayOrThrough = db
     .select({ userOpHash: operations.userOpHash })
     .from(operations)
@@ -236,7 +246,7 @@ async function reopen(db: Db, fundId: string): Promise<boolean> {
       and(
         eq(operations.draftId, fundId),
         eq(operations.kind, "create-fund"),
-        or(isNull(operations.success), eq(operations.success, true)),
+        or(eq(operations.success, true), and(isNull(operations.success), notExists(spent))),
       ),
     );
   const reopened = await db
@@ -247,7 +257,7 @@ async function reopen(db: Db, fundId: string): Promise<boolean> {
   return reopened.length > 0;
 }
 
-type ChainReader = Pick<PublicClient, "getTransactionReceipt" | "multicall">;
+type ChainReader = Pick<PublicClient, "getTransactionReceipt" | "multicall" | "readContract">;
 type Deployed = { address: Address; block: bigint };
 
 /**
@@ -334,16 +344,41 @@ export async function confirmDeploy(
   return markLive(db, fundId, found);
 }
 
-export type DeployStep = { address: Address } | { pending: Hash } | { call: { to: Address; data: Hex } };
+export type DeployStep = { address: Address } | { pending: Hash } | { call: { to: Address; data: Hex }; nonce?: bigint };
+
+/**
+ * Whether a createFund that never came back may be released: sent more than PENDING_FOR_MS ago, and the chain,
+ * read now (never a flag from before), still has the nonce it was sent with. While it does, the operation hasn't
+ * landed (so it has no receipt either), and a resend pinned to that nonce can't land as well as it. A spent
+ * nonce means it, or something else with it, landed: then it's never released, only confirmed if its receipt
+ * turns up. The bundler's word isn't enough: it only looks at recent blocks, never at what it once had.
+ */
+async function releasable(client: ChainReader, account: Address, nonce: bigint, sentAt: Date): Promise<boolean> {
+  if (Date.now() - sentAt.getTime() < PENDING_FOR_MS) return false;
+  try {
+    const current = await client.readContract({
+      address: entryPoint07Address,
+      abi: entryPoint07Abi,
+      functionName: "getNonce",
+      args: [account, 0n],
+    });
+    return current === nonce;
+  } catch {
+    return false; // the node didn't answer: as if it were still on its way
+  }
+}
 
 /**
  * What the creator's "Crear el fondo" does next. A createFund is never sent twice (spec, 6): with one already
  * sent for this draft, a new one is built only once that one is known to have created nothing.
  * - `address`: it's live, or the sent one's transaction has our fund;
  * - `pending`: the sent one has no receipt here yet, so the browser asks the bundler for it first;
- * - `call`: nothing was sent, or what was sent created nothing (it failed, or the bundler dropped it), and the
- *   draft opens again first. `votesRequired` only counts here: a sent one keeps its own;
- * - 409: the sent one created a fund for the creator with other settings. A real fund, so never another.
+ * - `call` with `nonce`: the sent one never came back and the chain shows it never landed (`releasable`): the
+ *   same call again, pinned to its nonce;
+ * - `call`: nothing was sent, or what was sent failed (its nonce is spent), and the draft opened again first.
+ *   `votesRequired` only counts here: a sent one keeps its own;
+ * - 409: the sent one created a fund for the creator with other settings (a real fund, so never another), or the
+ *   draft can't open again because another createFund for it is on its way.
  */
 export async function deployStep(
   db: Db,
@@ -361,15 +396,27 @@ export async function deployStep(
   if (draft.creatorId !== userId) return fail(403, ONLY_CREATOR);
   if (draft.status === "live" && draft.address !== null) return { ok: true, address: draft.address };
   const [sent] = await db
-    .select({ userOpHash: operations.userOpHash, transactionHash: operations.transactionHash, success: operations.success })
+    .select({
+      userOpHash: operations.userOpHash,
+      transactionHash: operations.transactionHash,
+      nonce: operations.nonce,
+      createdAt: operations.createdAt,
+    })
     .from(operations)
     .where(and(eq(operations.draftId, fundId), eq(operations.userId, userId), eq(operations.kind, "create-fund")))
     .orderBy(desc(operations.createdAt))
     .limit(1);
   if (sent !== undefined) {
     if (sent.transactionHash === null) {
-      // No receipt yet, unless it was dropped (`dropOperation`): that one is known to have failed.
-      if (sent.success !== false) return { ok: true, pending: sent.userOpHash as Hash };
+      const { nonce } = sent;
+      const creator = draft.members.find((m) => m.userId === draft.creatorId)?.account;
+      if (nonce === null || creator === undefined || !(await releasable(client, creator, nonce, sent.createdAt))) {
+        return { ok: true, pending: sent.userOpHash as Hash };
+      }
+      // The same call again, with the votes it was frozen with, pinned to its nonce: whichever of the two lands
+      // is the same fund, and the other can't land at all.
+      const again = await deployCall(db, { fundId, userId, votesRequired: draft.votesRequired ?? votesRequired, agent });
+      return again.ok ? { ...again, nonce } : again;
     } else {
       const transactionHash = sent.transactionHash as Hash;
       const found = await findDeployed(draft, draft.votesRequired, { transactionHash, client, agent, factory });
@@ -377,8 +424,9 @@ export async function deployStep(
       if (found === "mismatch") return fail(409, MISMATCH);
       if (found !== "none") return markLive(db, fundId, found);
     }
-    // It created nothing: open the draft again, so the new call takes the votes chosen now.
-    await reopen(db, fundId);
+    // It failed, and its nonce is spent: open the draft again, so the new call takes the votes chosen now. If it
+    // can't open (another createFund for it is on its way or went through), nothing new is built.
+    if (!(await reopen(db, fundId)) && draft.status === "deploying") return fail(409, BEING_CREATED);
   }
   return deployCall(db, { fundId, userId, votesRequired, agent });
 }

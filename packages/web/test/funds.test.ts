@@ -4,7 +4,7 @@ import { generatePrivateKey, privateKeyToAddress } from "viem/accounts";
 import { describe, expect, it, vi } from "vitest";
 import { agentAddress } from "../src/lib/agent-address";
 import type { Db } from "../src/lib/db/client";
-import { funds, memberships } from "../src/lib/db/schema";
+import { funds, memberships, operations } from "../src/lib/db/schema";
 import { MAX_PESOS } from "../src/lib/format";
 import {
   cancelDeploy,
@@ -17,12 +17,13 @@ import {
   fundsOf,
   joinFund,
 } from "../src/lib/funds";
-import { PENDING_FOR_MS, dropOperation, finishOperation, recordOperation } from "../src/lib/operations";
+import { PENDING_FOR_MS, finishOperation, recordOperation } from "../src/lib/operations";
 import { addLiveFund, addUser, testDb } from "./support/db";
 import { AGENT, FUND as NEW_FUND, WARS } from "./support/fixtures";
 
 const TX: Hash = pad("0x7a", { size: 32 });
 const OP: Hash = pad("0x0b", { size: 32 });
+const RESEND: Hash = pad("0x0c", { size: 32 });
 const DRAFT = { name: "Fútbol de los jueves", agreedExpense: "la cancha", weeklyFee: 10_000n * WARS, weeklyCap: 60_000n * WARS };
 
 async function group(db: Db, size = 3) {
@@ -34,7 +35,7 @@ async function group(db: Db, size = 3) {
   return { people, fundId: created.id, inviteCode: created.inviteCode };
 }
 
-/** A receipt with these FundCreated logs, and a chain where every fund has `settings`. */
+/** A receipt with these FundCreated logs, a chain where every fund has `settings`, and the EntryPoint's nonce for anyone. */
 function fakeClient(logs: { address: Address; fund: Address; creator: Address }[], settings: unknown[]) {
   return {
     getTransactionReceipt: vi.fn(async (_: { hash: Hash }) => ({
@@ -47,6 +48,7 @@ function fakeClient(logs: { address: Address; fund: Address; creator: Address }[
       })),
     })),
     multicall: vi.fn(async () => settings),
+    readContract: vi.fn(async (_: { functionName: string; args: unknown[] }) => 0n),
   };
 }
 
@@ -255,12 +257,20 @@ describe("deployStep", () => {
     const members = people.map((p) => getAddress(p.account));
     const step = (client: ReturnType<typeof fakeClient>, votesRequired = 2) =>
       deployStep(db, { fundId, userId: ana, votesRequired, agent: AGENT, client: client as never, factory: FUND_FACTORY });
-    /** Ana's createFund for the draft went out, and its receipt says `success` (none yet if undefined). */
+    /** Ana's createFund for the draft went out with nonce 5, and its receipt says `success` (none yet if undefined). */
     const sent = async (success?: boolean) => {
-      await recordOperation(db, ana, { userOpHash: OP, kind: "create-fund", draftId: fundId });
+      await recordOperation(db, ana, { userOpHash: OP, kind: "create-fund", draftId: fundId, nonce: 5n });
       if (success !== undefined) await finishOperation(db, ana, { userOpHash: OP, transactionHash: TX, success });
     };
-    return { ana, fundId, members, creator: members[0]!, step, sent };
+    /** What's recorded so far went out longer ago than PENDING_FOR_MS. */
+    const longAgo = () => db.update(operations).set({ createdAt: new Date(Date.now() - PENDING_FOR_MS - 60_000) });
+    /** A chain where the EntryPoint's nonce for Ana's account is `nonce`. */
+    const chainAt = (nonce: bigint) => {
+      const client = fakeClient([], []);
+      client.readContract.mockResolvedValue(nonce);
+      return client;
+    };
+    return { ana, fundId, members, creator: members[0]!, step, sent, longAgo, chainAt };
   }
 
   /** The votes a createFund call asks for. */
@@ -342,14 +352,78 @@ describe("deployStep", () => {
     expect(await step(fund, 3)).toEqual({ ok: true, address: NEW_FUND });
   });
 
-  it("counts an operation the bundler dropped as failed, opens the draft and builds a new one", async () => {
+  it("never releases one whose nonce the chain already spent: it landed, even if nobody recorded it", async () => {
     const db = await testDb();
-    const { ana, fundId, step, sent } = await deploying(db);
+    const { ana, fundId, creator, step, sent, longAgo, chainAt } = await deploying(db);
     await step(fakeClient([], []));
     await sent();
-    expect(await dropOperation(db, ana, OP, new Date(Date.now() + PENDING_FOR_MS + 60_000))).toBe(true);
-    expect(await cancelDeploy(db, { fundId, userId: ana })).toEqual({ ok: true, reopened: true }); // it holds nothing frozen
-    expect(votesIn(await step(fakeClient([], []), 3))).toBe(3);
+    await longAgo(); // and the bundler's window for its receipt is long gone
+    const chain = chainAt(6n);
+    expect(await step(chain, 3)).toEqual({ ok: true, pending: OP });
+    expect(chain.readContract).toHaveBeenCalledWith(expect.objectContaining({ functionName: "getNonce", args: [creator, 0n] }));
+    expect(await draftById(db, fundId)).toMatchObject({ status: "deploying", votesRequired: 2 });
+    expect(await cancelDeploy(db, { fundId, userId: ana })).toEqual({ ok: true, reopened: false });
+  });
+
+  it("releases one that never came back while the chain still has its nonce: the same call, pinned to that nonce", async () => {
+    const db = await testDb();
+    const { step, sent, longAgo, chainAt } = await deploying(db);
+    const first = await step(fakeClient([], []), 2);
+    await sent();
+    await longAgo();
+    expect(await step(chainAt(5n), 3)).toEqual({ ...first, nonce: 5n }); // the votes it was frozen with, not the ones asked now
+  });
+
+  it("checks the chain every time: a nonce that moved since the last check stops the release", async () => {
+    const db = await testDb();
+    const { step, sent, longAgo } = await deploying(db);
+    await step(fakeClient([], []));
+    await sent();
+    await longAgo();
+    const chain = fakeClient([], []);
+    chain.readContract.mockResolvedValueOnce(5n).mockResolvedValueOnce(6n);
+    expect(await step(chain)).toMatchObject({ ok: true, nonce: 5n });
+    expect(await step(chain)).toEqual({ ok: true, pending: OP });
+  });
+
+  it("never releases one too recent, or one sent before nonces were kept", async () => {
+    const db = await testDb();
+    const { step, sent, longAgo, chainAt } = await deploying(db);
+    await step(fakeClient([], []));
+    await sent();
+    const chain = chainAt(5n);
+    expect(await step(chain)).toEqual({ ok: true, pending: OP });
+    await db.update(operations).set({ nonce: null });
+    await longAgo();
+    expect(await step(chain)).toEqual({ ok: true, pending: OP });
+    expect(chain.readContract).not.toHaveBeenCalled();
+  });
+
+  it("takes one as spent once its pinned resend went through and failed, and opens the draft for a new one", async () => {
+    const db = await testDb();
+    const { ana, fundId, step, sent, longAgo, chainAt } = await deploying(db);
+    await step(fakeClient([], []));
+    await sent();
+    await longAgo();
+    await step(chainAt(5n)); // released
+    await recordOperation(db, ana, { userOpHash: RESEND, kind: "create-fund", draftId: fundId, nonce: 5n });
+    await finishOperation(db, ana, { userOpHash: RESEND, transactionHash: TX, success: false });
+    const fresh = await step(fakeClient([], []), 3);
+    expect(votesIn(fresh)).toBe(3);
+    expect(fresh).not.toHaveProperty("nonce");
+  });
+
+  it("builds nothing when the draft can't open again: another createFund for it is still on its way", async () => {
+    const db = await testDb();
+    const { ana, fundId, step } = await deploying(db);
+    await step(fakeClient([], []));
+    await recordOperation(db, ana, { userOpHash: OP, kind: "create-fund", draftId: fundId }); // no receipt, no nonce
+    await db.update(operations).set({ createdAt: new Date(Date.now() - 60_000) });
+    await recordOperation(db, ana, { userOpHash: RESEND, kind: "create-fund", draftId: fundId, nonce: 5n });
+    await finishOperation(db, ana, { userOpHash: RESEND, transactionHash: TX, success: false });
+    // With the votes it's frozen with, so only this check (not the votes one) can stop the build.
+    expect(await step(fakeClient([], []), 2)).toEqual({ ok: false, status: 409, error: "El fondo se está creando en este momento. Probá en un rato." });
+    expect(await draftById(db, fundId)).toMatchObject({ status: "deploying", votesRequired: 2 });
   });
 });
 

@@ -8,6 +8,13 @@
       "when": 1791644968872,
       "tag": "0000_busy_stone_men",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1791652830784,
+      "tag": "0001_short_ghost_rider",
+      "breakpoints": true
     }
   ]
 }

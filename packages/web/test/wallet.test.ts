@@ -5,9 +5,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // The wallet package is covered by its own tests: here only what sendCalls decides around it.
 type Owner = { sign(parameters: { hash: Hex }): Promise<unknown> };
-type Sent = { onSent(userOpHash: Hash): Promise<void> };
+type Sent = { onSent(userOpHash: Hash): Promise<void>; nonce?: bigint };
+type Account = { address: Address; getNonce?: (parameters?: { key?: bigint }) => Promise<bigint> };
 const wallet = vi.hoisted(() => ({
-  createMemberAccount: vi.fn<(parameters: { owner: Owner }) => Promise<{ address: Address }>>(),
+  createMemberAccount: vi.fn<(parameters: { owner: Owner }) => Promise<Account>>(),
   createPimlicoBundlerClient: vi.fn((_parameters: { transport: (options: { chain: Chain }) => { config: { timeout: number } } }) => ({ bundler: true })),
   sendTaggedCalls: vi.fn<(parameters: Sent) => Promise<unknown>>(),
 }));
@@ -33,13 +34,15 @@ const TX: Hash = pad("0x02", { size: 32 });
 const CALLS = [{ to: FUND, data: "0x" as const }];
 const INFO = { kind: "contribute", fund: FUND, amount: 10_000_000n, token: "usdt" } as const;
 const RECEIPT = { userOpHash: OP, transactionHash: TX, success: true, reason: undefined };
+/** The account's EntryPoint nonce, as the Safe reads it. */
+const NONCE = vi.fn(async (_parameters?: { key?: bigint }) => 7n);
 
 /** The operations the page told the server about, in order. */
 const posted = () => api.post.mock.calls.map(([path, body]) => [path, body] as const);
 
 beforeEach(() => {
   vi.stubGlobal("window", { location: { origin: "http://localhost:3000" } });
-  wallet.createMemberAccount.mockImplementation(async () => ({ address: ACCOUNT }));
+  wallet.createMemberAccount.mockImplementation(async () => ({ address: ACCOUNT, getNonce: NONCE }));
 });
 afterEach(() => {
   vi.clearAllMocks();
@@ -68,7 +71,7 @@ describe("sendCalls", () => {
     expect(result).toEqual(RECEIPT);
     expect(events).toEqual(["signed", "sent", "post /api/operations", "receipt", "post /api/operations/done"]);
     expect(posted()).toEqual([
-      ["/api/operations", { kind: "contribute", fund: FUND, amount: "10000000", token: "usdt", userOpHash: OP }],
+      ["/api/operations", { kind: "contribute", fund: FUND, amount: "10000000", token: "usdt", nonce: "7", userOpHash: OP }],
       ["/api/operations/done", { userOpHash: OP, transactionHash: TX, success: true }],
     ]);
     expect(passkey.sign).toHaveBeenCalledWith({ hash: "0xdead" });
@@ -144,7 +147,23 @@ describe("sendCalls", () => {
     });
     const draftId = crypto.randomUUID();
     await sendCalls(me, CALLS, { kind: "create-fund", draftId });
-    expect(posted()[0]).toEqual(["/api/operations", { kind: "create-fund", draftId, userOpHash: OP }]);
+    expect(posted()[0]).toEqual(["/api/operations", { kind: "create-fund", draftId, nonce: "7", userOpHash: OP }]);
+  });
+
+  it("sends with the account's nonce (key 0), or the one it's pinned to, and records it either way", async () => {
+    wallet.sendTaggedCalls.mockImplementation(async ({ onSent }) => {
+      await onSent(OP);
+      return RECEIPT;
+    });
+    await sendCalls(me, CALLS, INFO);
+    expect(NONCE).toHaveBeenCalledWith({ key: 0n });
+    expect(wallet.sendTaggedCalls.mock.calls[0]![0].nonce).toBe(7n);
+
+    vi.clearAllMocks();
+    await sendCalls(me, CALLS, { kind: "create-fund", draftId: crypto.randomUUID() }, undefined, 5n);
+    expect(NONCE).not.toHaveBeenCalled();
+    expect(wallet.sendTaggedCalls.mock.calls[0]![0].nonce).toBe(5n);
+    expect(posted()[0]![1]).toMatchObject({ nonce: "5" });
   });
 
   it("waits for /api/bundler longer than it waits for Pimlico (30 s), so a slow send is never taken for an unsent one", async () => {
@@ -156,67 +175,42 @@ describe("sendCalls", () => {
 });
 
 describe("settleOperation", () => {
-  const RECEIPT_RPC = {
-    userOpHash: OP,
-    entryPoint: entryPoint07Address,
-    sender: ACCOUNT,
-    nonce: "0x1",
-    actualGasCost: "0x1",
-    actualGasUsed: "0x1",
-    success: false,
-    logs: [],
-    receipt: { transactionHash: TX, blockNumber: "0x1", logs: [], status: "0x1" },
-  };
-  const KNOWN_RPC = { userOperation: { sender: ACCOUNT, nonce: "0x1" }, entryPoint: entryPoint07Address, transactionHash: null, blockHash: null, blockNumber: null };
-
-  /** /api/bundler answering each method with a result, or with a JSON-RPC error; the methods it was asked. */
-  function bundler(answers: Record<string, { result: unknown } | { error: string }>) {
-    const asked: string[] = [];
+  /** /api/bundler answering eth_getUserOperationReceipt with `result`; the requests it got. */
+  function bundler(result: unknown) {
+    const requests: { url: string; method: string; params: unknown }[] = [];
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string, init: { body: string }) => {
         const { id, method, params } = JSON.parse(init.body);
-        expect([String(url), params]).toEqual(["http://localhost:3000/api/bundler", [OP]]);
-        asked.push(method);
-        const answer = answers[method]!;
-        const body = "result" in answer ? { result: answer.result } : { error: { code: -32601, message: answer.error } };
-        return new Response(JSON.stringify({ jsonrpc: "2.0", id, ...body }), { headers: { "content-type": "application/json" } });
+        requests.push({ url: String(url), method, params });
+        return new Response(JSON.stringify({ jsonrpc: "2.0", id, result }), { headers: { "content-type": "application/json" } });
       }),
     );
-    return asked;
+    return requests;
   }
-  const onItsWay = async () => {
-    const error = await settleOperation(OP).catch((caught) => caught);
-    expect(error).toBeInstanceOf(UserFacingError);
-    expect(error.message).toMatch(/en camino/);
-  };
 
   it("records the receipt of an operation that went out earlier", async () => {
-    const asked = bundler({ eth_getUserOperationReceipt: { result: RECEIPT_RPC } });
+    const requests = bundler({
+      userOpHash: OP,
+      entryPoint: entryPoint07Address,
+      sender: ACCOUNT,
+      nonce: "0x1",
+      actualGasCost: "0x1",
+      actualGasUsed: "0x1",
+      success: false,
+      logs: [],
+      receipt: { transactionHash: TX, blockNumber: "0x1", logs: [], status: "0x1" },
+    });
     await settleOperation(OP);
-    expect(asked).toEqual(["eth_getUserOperationReceipt"]);
+    expect(requests).toEqual([{ url: "http://localhost:3000/api/bundler", method: "eth_getUserOperationReceipt", params: [OP] }]);
     expect(posted()).toEqual([["/api/operations/done", { userOpHash: OP, transactionHash: TX, success: false }]]);
   });
 
-  it("says it's on its way, and records nothing, while the bundler still has it", async () => {
-    bundler({ eth_getUserOperationReceipt: { result: null }, eth_getUserOperationByHash: { result: KNOWN_RPC } });
-    await onItsWay();
-    expect(api.post).not.toHaveBeenCalled();
-  });
-
-  it("reports one the bundler no longer knows as dropped, which the server takes only once it's old enough", async () => {
-    bundler({ eth_getUserOperationReceipt: { result: null }, eth_getUserOperationByHash: { result: null } });
-    api.post.mockResolvedValueOnce({ ok: true, dropped: true } as never);
-    await settleOperation(OP);
-    expect(posted()).toEqual([["/api/operations/done", { userOpHash: OP, dropped: true }]]);
-
-    api.post.mockResolvedValueOnce({ ok: true, dropped: false } as never); // too recent: it may still land
-    await onItsWay();
-  });
-
-  it("never takes a bundler that can't say (the fork's doesn't know the method) for a dropped one", async () => {
-    bundler({ eth_getUserOperationReceipt: { result: null }, eth_getUserOperationByHash: { error: "fork bundler: eth_getUserOperationByHash is not supported" } });
-    await onItsWay();
+  it("says it's on its way, and records nothing, while the bundler has no receipt for it", async () => {
+    bundler(null);
+    const error = await settleOperation(OP).catch((caught) => caught);
+    expect(error).toBeInstanceOf(UserFacingError);
+    expect(error.message).toMatch(/en camino/);
     expect(api.post).not.toHaveBeenCalled();
   });
 });

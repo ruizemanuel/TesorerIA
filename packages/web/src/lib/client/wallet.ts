@@ -1,11 +1,6 @@
 import { type Call, type SendTaggedCallsResult, createMemberAccount, createPimlicoBundlerClient, sendTaggedCalls } from "@tesoreria/wallet";
 import { type Address, type Hash, type Hex, createPublicClient, http } from "viem";
-import {
-  UserOperationNotFoundError,
-  UserOperationReceiptNotFoundError,
-  createBundlerClient,
-  toWebAuthnAccount,
-} from "viem/account-abstraction";
+import { UserOperationReceiptNotFoundError, createBundlerClient, toWebAuthnAccount } from "viem/account-abstraction";
 import { celo } from "viem/chains";
 import { get, post } from "./api";
 import { UserFacingError } from "./errors";
@@ -45,6 +40,7 @@ const ON_ITS_WAY = "Tu operación está en camino. En unos minutos la vas a ver 
  * (spec, 12). The operation is recorded before its receipt, so it shows "en camino" and is never sent twice.
  *
  * `onSigned` is called as soon as the person has confirmed with the passkey, before the operation is sent.
+ * `nonce` pins the operation's EntryPoint nonce: a resend of one that never came back, so both can't land.
  * Its own errors are `UserFacingError`s; viem's and the bundler's pass through for `userMessage` to map.
  */
 export async function sendCalls(
@@ -52,6 +48,7 @@ export async function sendCalls(
   calls: Call[],
   info: OperationInfo,
   onSigned?: () => void,
+  nonce?: bigint,
 ): Promise<SendTaggedCallsResult> {
   const client = celoBrowserClient();
   const passkey = toWebAuthnAccount({ credential: me.credential });
@@ -74,7 +71,11 @@ export async function sendCalls(
     sponsorshipPolicyId: "set by the server", // /api/bundler replaces it
   });
 
-  const record = (userOpHash: Hash) => post("/api/operations", { ...info, amount: info.amount?.toString(), userOpHash });
+  // Its nonce (key 0, the Safe's) is read here rather than inside the send, so the record can keep it: the server
+  // releases a createFund that never came back only while the chain still has that nonce (funds.ts).
+  const useNonce = nonce ?? (await nonceOf(account));
+  const record = (userOpHash: Hash) =>
+    post("/api/operations", { ...info, amount: info.amount?.toString(), nonce: useNonce.toString(), userOpHash });
   let sent = undefined as Hash | undefined; // the hash as soon as the bundler took the operation, whatever happens next
   let result: SendTaggedCallsResult;
   try {
@@ -82,6 +83,7 @@ export async function sendCalls(
       bundlerClient,
       account,
       calls,
+      nonce: useNonce,
       onSent: async (userOpHash) => {
         sent = userOpHash;
         await record(userOpHash);
@@ -103,27 +105,25 @@ export async function sendCalls(
   return result;
 }
 
+/** The account's EntryPoint nonce now, with key 0: the one its next operation takes. */
+async function nonceOf(account: Awaited<ReturnType<typeof createMemberAccount>>): Promise<bigint> {
+  if (account.getNonce === undefined) throw new Error("The account can't tell its nonce");
+  return account.getNonce({ key: 0n });
+}
+
 /**
  * Settles an operation that went out earlier but whose receipt the server never got (the page closed, the wait
- * ran out): asks the bundler for it and records it. One the bundler no longer knows either is reported as
- * dropped, which the server takes only once it's old enough (`dropOperation`). Anything else throws "en
- * camino", so nothing is sent again in the meantime (spec, 6).
+ * ran out): asks the bundler for it and records it. While it isn't included it throws "en camino", so nothing
+ * is sent again in the meantime (spec, 6).
  */
 export async function settleOperation(userOpHash: Hash): Promise<void> {
   const bundlerClient = createBundlerClient({ transport: bundlerTransport() });
-  const receipt = await bundlerClient.getUserOperationReceipt({ hash: userOpHash }).catch((error: unknown) => {
-    if (error instanceof UserOperationReceiptNotFoundError) return null;
+  let receipt: Awaited<ReturnType<typeof bundlerClient.getUserOperationReceipt>>;
+  try {
+    receipt = await bundlerClient.getUserOperationReceipt({ hash: userOpHash });
+  } catch (error) {
+    if (error instanceof UserOperationReceiptNotFoundError) throw new UserFacingError(ON_ITS_WAY, { cause: error });
     throw error;
-  });
-  if (receipt !== null) {
-    await post("/api/operations/done", { userOpHash, transactionHash: receipt.receipt.transactionHash, success: receipt.success });
-    return;
   }
-  // Only a clear "not found" means dropped. An error, or a bundler without the method (the fork's), says nothing.
-  const forgotten = await bundlerClient.getUserOperation({ hash: userOpHash }).then(
-    () => false,
-    (error: unknown) => error instanceof UserOperationNotFoundError,
-  );
-  if (forgotten && (await post<{ dropped: boolean }>("/api/operations/done", { userOpHash, dropped: true })).dropped) return;
-  throw new UserFacingError(ON_ITS_WAY);
+  await post("/api/operations/done", { userOpHash, transactionHash: receipt.receipt.transactionHash, success: receipt.success });
 }

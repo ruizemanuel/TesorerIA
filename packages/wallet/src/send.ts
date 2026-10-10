@@ -22,24 +22,30 @@ export type SendTaggedCallsResult = {
  * `onSent` gets the UserOperation's hash before the wait, so the caller can keep it and never send the same
  * thing twice after a timeout. If it throws, the wait goes on: the operation is already out. The failure is
  * reported in the result's `unrecorded`, or, if the wait then fails too, in the error thrown, which names the hash.
+ *
+ * `nonce` is the EntryPoint nonce to use instead of the account's current one: a resend pinned to the nonce of an
+ * operation that may still be out, so at most one of the two can ever land.
  */
 export async function sendTaggedCalls({
   bundlerClient,
   account,
   calls,
   timeout = 120_000,
+  nonce,
   onSent,
 }: {
   bundlerClient: BundlerClient;
   account: SmartAccount;
   calls: readonly Call[];
   timeout?: number;
+  nonce?: bigint;
   onSent?: (userOpHash: Hash) => Promise<void> | void;
 }): Promise<SendTaggedCallsResult> {
   const userOpHash = await bundlerClient.sendUserOperation({
     account,
     calls,
     dataSuffix: ATTRIBUTION_SUFFIX,
+    ...(nonce === undefined ? {} : { nonce }),
   });
   let unrecorded: string | undefined;
   try {

@@ -17,6 +17,11 @@ const Operation = z
       .regex(/^\d{1,78}$/)
       .optional(),
     token: z.enum(["wars", "usdt"]).optional(),
+    /** Its EntryPoint nonce, in decimal. */
+    nonce: z
+      .string()
+      .regex(/^\d{1,78}$/)
+      .optional(),
   })
   .refine(({ draftId, kind }) => draftId === undefined || kind === "create-fund");
 
@@ -25,11 +30,15 @@ export async function POST(request: Request) {
   if (user === null) return jsonError(401, "Entrá con tu passkey.");
   const body = await readJson(request, Operation);
   if (!body.ok) return body.response;
-  const { amount, ...rest } = body.value;
+  const { amount, nonce, ...rest } = body.value;
   const db = await getDb();
   if (rest.draftId !== undefined && !(await ownsDraft(db, user.id, rest.draftId))) {
     return jsonError(403, "Ese borrador no es tuyo.");
   }
-  await recordOperation(db, user.id, { ...rest, amount: amount === undefined ? undefined : BigInt(amount) });
+  await recordOperation(db, user.id, {
+    ...rest,
+    amount: amount === undefined ? undefined : BigInt(amount),
+    nonce: nonce === undefined ? undefined : BigInt(nonce),
+  });
   return Response.json({ ok: true });
 }

@@ -1,0 +1,1 @@
+ALTER TABLE "operations" ADD COLUMN "nonce" numeric(78, 0);

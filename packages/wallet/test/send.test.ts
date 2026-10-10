@@ -87,4 +87,16 @@ describe("sendTaggedCalls", () => {
     expect(message).toContain("not recorded: database is down");
     expect(cause).toBe(timeout);
   });
+
+  it("sends with the nonce it's given, and lets the account pick one otherwise", async () => {
+    const asked: unknown[] = [];
+    const bundlerClient = {
+      sendUserOperation: async (parameters: unknown) => (asked.push(parameters), USER_OP),
+      waitForUserOperationReceipt: async () => ({ success: true, receipt: { transactionHash: TX } }),
+    } as unknown as BundlerClient;
+    await sendTaggedCalls({ bundlerClient, account, calls: [], nonce: 0n });
+    await sendTaggedCalls({ bundlerClient, account, calls: [] });
+    expect(asked[0]).toMatchObject({ nonce: 0n });
+    expect(asked[1]).not.toHaveProperty("nonce");
+  });
 });

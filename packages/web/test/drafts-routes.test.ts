@@ -3,7 +3,9 @@ import { getAddress } from "viem";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CurrentUser } from "../src/lib/current-user";
 import type { Db } from "../src/lib/db/client";
+import { operations } from "../src/lib/db/schema";
 import { draftById } from "../src/lib/funds";
+import { PENDING_FOR_MS, recordOperation } from "../src/lib/operations";
 import { addUser, testDb } from "./support/db";
 
 // The routes as the server runs them, with the session and the database standing in.
@@ -13,6 +15,8 @@ vi.mock("../src/lib/db/client", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../src/lib/db/client")>()),
   getDb: async () => state.db,
 }));
+// Celo, where every account's EntryPoint nonce is 5.
+vi.mock("../src/lib/chain", () => ({ celoClient: () => ({ readContract: async () => 5n }) }));
 
 type Handler = (request: Request, context: { params: Promise<Record<string, string>> }) => Promise<Response>;
 
@@ -106,6 +110,17 @@ describe("the invitation and the deploy", () => {
 
     expect(await (await cancel(new Request("http://localhost:3000/api", { method: "DELETE" }), params({ id }))).json()).toEqual({ reopened: true });
     expect((await draftById(db, id))?.status).toBe("draft");
+  });
+
+  it("sends the nonce a resend is pinned to as a decimal string", async () => {
+    const id = await draftOfThree();
+    await deploy(json({ votesRequired: 2 }), params({ id }));
+    const userOpHash = `0x${"0b".repeat(32)}` as const;
+    await recordOperation(db, people[0]!.id, { userOpHash, kind: "create-fund", draftId: id, nonce: 5n });
+    await db.update(operations).set({ createdAt: new Date(Date.now() - PENDING_FOR_MS - 60_000) });
+    const response = await deploy(json({ votesRequired: 2 }), params({ id }));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ ok: true, call: { to: FUND_FACTORY }, nonce: "5" });
   });
 
   it("answers 404 to an id that isn't one, and 400 to a transaction that isn't a hash", async () => {

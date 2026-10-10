@@ -148,6 +148,11 @@ export const operations = pgTable("operations", {
   /** For a contribution: the amount in the token's units. */
   amount: units("amount"),
   token: text("token", { enum: ["wars", "usdt"] }),
+  /**
+   * Its EntryPoint nonce (key 0). A createFund that never came back is released only while the chain still has
+   * this nonce, and its resend is pinned to it (funds.ts). Null in rows from before it was kept: never released.
+   */
+  nonce: units("nonce"),
   transactionHash: text("transaction_hash"),
   success: boolean("success"),
   createdAt: createdAt(),

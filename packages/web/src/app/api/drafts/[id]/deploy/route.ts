@@ -6,7 +6,7 @@ import { getDb } from "../../../../../lib/db/client";
 import { cancelDeploy, deployStep } from "../../../../../lib/funds";
 import { jsonError, readJson } from "../../../../../lib/http";
 
-/** "Crear el fondo": the fund if it's already there, the operation to check if one is on its way, or the call to sign. */
+/** "Crear el fondo": the fund if it's already there, the operation to check if one is on its way, or the call to sign (with the nonce to pin it to, for a resend). */
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const user = await currentUser();
   if (user === null) return jsonError(401, "Entrá con tu passkey.");
@@ -19,7 +19,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     agent: agentAddress(),
     client: celoClient(),
   });
-  return result.ok ? Response.json(result) : jsonError(result.status, result.error);
+  if (!result.ok) return jsonError(result.status, result.error);
+  // A pinned nonce goes as a decimal string: JSON has no bigint.
+  return Response.json("call" in result ? { ok: true, call: result.call, nonce: result.nonce?.toString() } : result);
 }
 
 /**

@@ -8,6 +8,10 @@ import { loadMe, sendCalls, settleOperation } from "../lib/client/wallet";
 import type { DeployStep } from "../lib/funds";
 import { Button } from "./ui";
 
+type Call = Extract<DeployStep, { call: unknown }>["call"];
+/** The deploy route's answer: a DeployStep whose pinned nonce comes as a decimal string (JSON has no bigint). */
+type Answer = Exclude<DeployStep, { call: unknown }> | { call: Call; nonce?: string };
+
 /**
  * The creator picks the votes and creates the fund in Celo, signing with their passkey (spec, 9).
  * `chosenVotes`: the ones of a creation already started, which stay as they are until it ends.
@@ -20,8 +24,8 @@ export function DeployForm({ fundId, memberCount, chosenVotes }: { fundId: strin
   const options = Array.from({ length: memberCount - 2 }, (_, i) => i + 2);
 
   /** The fund if it's already in Celo, or the call to sign. A createFund that went out is never sent again (spec, 6). */
-  async function nextStep(): Promise<Exclude<DeployStep, { pending: unknown }>> {
-    const ask = () => post<DeployStep>(`/api/drafts/${fundId}/deploy`, { votesRequired: votes });
+  async function nextStep(): Promise<Exclude<Answer, { pending: unknown }>> {
+    const ask = () => post<Answer>(`/api/drafts/${fundId}/deploy`, { votesRequired: votes });
     let next = await ask();
     while ("pending" in next) {
       // One went out and the server never got its receipt: the bundler's answer comes before anything else.
@@ -32,10 +36,11 @@ export function DeployForm({ fundId, memberCount, chosenVotes }: { fundId: strin
     return next;
   }
 
-  /** Signs and sends the call; the fund's address once it's in Celo. */
-  async function create(call: Extract<DeployStep, { call: unknown }>["call"]): Promise<string> {
+  /** Signs and sends the call, pinned to `nonce` when it resends one that never came back; the fund's address. */
+  async function create(call: Call, nonce: string | undefined): Promise<string> {
     const me = await loadMe();
-    const result = await sendCalls(me, [call], { kind: "create-fund", draftId: fundId }, () => setStep("sending"));
+    const info = { kind: "create-fund", draftId: fundId } as const;
+    const result = await sendCalls(me, [call], info, () => setStep("sending"), nonce === undefined ? undefined : BigInt(nonce));
     const { address } = await post<{ address: string }>(`/api/drafts/${fundId}/deployed`, { transactionHash: result.transactionHash });
     return address;
   }
@@ -68,7 +73,7 @@ export function DeployForm({ fundId, memberCount, chosenVotes }: { fundId: strin
               router.push(`/f/${next.address}`);
             } else {
               built = true;
-              router.push(`/f/${await create(next.call)}`);
+              router.push(`/f/${await create(next.call, next.nonce)}`);
             }
           } catch (caught) {
             // Only a deploy this click built is called off, so people can join again: a refusal from the server,
