@@ -14,7 +14,7 @@ import {
 } from "viem";
 import { entryPoint07Abi, entryPoint07Address } from "viem/account-abstraction";
 import { z } from "zod";
-import type { Db } from "./db/client";
+import { type Db, inTransaction } from "./db/client";
 import { funds, memberships, operations, users } from "./db/schema";
 import { MAX_PESOS, formatPesos } from "./format";
 import { DEFAULT_BALANCE_CAP, memberFundAbi } from "./fund-abi";
@@ -77,14 +77,29 @@ export async function createDraft(
  * A fund's people in the order they joined, and by id when two joined at the same instant, so every reader
  * (deployCall, confirmDeploy, the week's list) gets the same order.
  */
-async function membersOf(db: Db, fundId: string): Promise<DraftSummary["members"]> {
-  const rows = await db
+function membersQuery(db: Db, fundId: string) {
+  return db
     .select({ userId: users.id, name: users.name, account: users.account })
     .from(memberships)
     .innerJoin(users, eq(users.id, memberships.userId))
     .where(eq(memberships.fundId, fundId))
     .orderBy(asc(memberships.joinedAt), asc(memberships.userId));
+}
+
+function asMembers(rows: Awaited<ReturnType<typeof membersQuery>>): DraftSummary["members"] {
   return rows.map((row) => ({ ...row, account: getAddress(row.account) }));
+}
+
+async function membersOf(db: Db, fundId: string): Promise<DraftSummary["members"]> {
+  return asMembers(await membersQuery(db, fundId));
+}
+
+/**
+ * Locks the fund's row until the transaction it's in ends. A join and the deploy's freeze both take it first, so
+ * they never interleave: one waits for the other to commit, and then reads what it left.
+ */
+function lockFund(db: Db, fundId: string) {
+  return db.select({ id: funds.id }).from(funds).where(eq(funds.id, fundId)).for("update");
 }
 
 async function summarize(db: Db, where: SQL): Promise<DraftSummary | null> {
@@ -142,19 +157,25 @@ export async function joinFund(
   if (draft.status === "live") return fail(409, "El fondo ya está en marcha: pedile a alguien del grupo que proponga sumarte.");
   if (draft.status === "deploying") return fail(409, BEING_CREATED);
   if (draft.members.length >= MAX_MEMBERS) return fail(409, FULL);
-  // Checked again in the same statement as the insert, since the read above may be stale: only while it's still
-  // a draft (a deploy that started since keeps the list it was built with), and only while there's room (two
-  // people joining at nine would make eleven, which createFund always refuses).
-  const joining = db.$count(memberships, eq(memberships.fundId, draft.id));
-  await db
-    .insert(memberships)
-    .select((qb) =>
-      qb
-        .select({ fundId: funds.id, userId: sql<string>`${userId}::uuid`.as("user_id"), joinedAt: sql<Date>`now()`.as("joined_at") })
-        .from(funds)
-        .where(and(eq(funds.id, draft.id), eq(funds.status, "draft"), sql`${joining} < ${MAX_MEMBERS}`)),
-    )
-    .onConflictDoNothing();
+  // Checked again in the insert, since the read above may be stale: only while it's still a draft (a deploy that
+  // started since keeps the list it was built with), and only while there's room (two people joining at nine would
+  // make eleven, which createFund always refuses). The fund's row is locked first, so a freeze or another join that
+  // got there before has committed by the time the insert reads.
+  await inTransaction(db, (tx) => {
+    const joining = tx.$count(memberships, eq(memberships.fundId, draft.id));
+    return [
+      lockFund(tx, draft.id),
+      tx
+        .insert(memberships)
+        .select((qb) =>
+          qb
+            .select({ fundId: funds.id, userId: sql<string>`${userId}::uuid`.as("user_id"), joinedAt: sql<Date>`now()`.as("joined_at") })
+            .from(funds)
+            .where(and(eq(funds.id, draft.id), eq(funds.status, "draft"), sql`${joining} < ${MAX_MEMBERS}`)),
+        )
+        .onConflictDoNothing(),
+    ];
+  });
   if (await isMember(db, draft.id, userId)) return joined;
   const [now] = await db.select({ status: funds.status }).from(funds).where(eq(funds.id, draft.id));
   return fail(409, now?.status === "draft" ? FULL : BEING_CREATED);
@@ -183,19 +204,24 @@ export async function deployCall(
   if (draft.status === "deploying" && draft.votesRequired !== votesRequired) {
     return fail(409, `Ya empezaste a crear el fondo con ${draft.votesRequired} votos necesarios: elegí ${draft.votesRequired} para seguir.`);
   }
-  const [frozen] = await db
-    .update(funds)
-    .set({ votesRequired, status: "deploying" })
-    .where(
-      and(
-        eq(funds.id, fundId),
-        or(eq(funds.status, "draft"), and(eq(funds.status, "deploying"), eq(funds.votesRequired, votesRequired))),
-      ),
-    )
-    .returning({ id: funds.id });
+  // Frozen and read under the fund's lock (see `lockFund`): whoever got in before is in the call, and nobody gets
+  // in after.
+  const [, [frozen], rows] = await inTransaction(db, (tx) => [
+    lockFund(tx, fundId),
+    tx
+      .update(funds)
+      .set({ votesRequired, status: "deploying" })
+      .where(
+        and(
+          eq(funds.id, fundId),
+          or(eq(funds.status, "draft"), and(eq(funds.status, "deploying"), eq(funds.votesRequired, votesRequired))),
+        ),
+      )
+      .returning({ id: funds.id }),
+    membersQuery(tx, fundId),
+  ]);
   if (frozen === undefined) return fail(409, BEING_CREATED); // it changed since the read above
-  // Read after freezing: whoever got in before it is in the call, and nobody gets in after it.
-  const members = await membersOf(db, fundId);
+  const members = asMembers(rows);
   const data = encodeFunctionData({
     abi: fundFactoryAbi,
     functionName: "createFund",

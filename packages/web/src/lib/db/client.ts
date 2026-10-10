@@ -27,6 +27,28 @@ export async function openDb(url: string): Promise<Db> {
   return drizzleNeon({ client: neon(url), schema }) as unknown as Db;
 }
 
+/**
+ * Runs the statements `build` makes on `tx`, in order and in one transaction, and returns their results. Neon's
+ * HTTP driver has no interactive transactions, only batches (one request, one transaction), and PGlite has no
+ * batches, so this is a batch on the one and a transaction on the other. Either way a statement can't use another's
+ * result: only what the database holds when it runs, which under READ COMMITTED is what committed before it began,
+ * so a row locked by an earlier statement is read as whoever held it before left it.
+ */
+export async function inTransaction<T extends unknown[] | []>(
+  db: Db,
+  build: (tx: Db) => { [K in keyof T]: PromiseLike<T[K]> },
+): Promise<T> {
+  if ("batch" in db && typeof db.batch === "function") {
+    const batch = db.batch as (statements: readonly unknown[]) => Promise<unknown[]>;
+    return (await batch.call(db, build(db))) as T;
+  }
+  return db.transaction(async (tx) => {
+    const results: unknown[] = [];
+    for (const statement of build(tx as unknown as Db) as readonly PromiseLike<unknown>[]) results.push(await statement);
+    return results as T;
+  });
+}
+
 const shared = globalThis as { tesoreriaDb?: Promise<Db> };
 
 /**

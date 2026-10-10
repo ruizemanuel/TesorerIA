@@ -35,6 +35,27 @@ async function group(db: Db, size = 3) {
   return { people, fundId: created.id, inviteCode: created.inviteCode };
 }
 
+/** The statements of each transaction `db` runs from now on, in order (PGlite's own transactions, under drizzle's). */
+function recordTransactions(db: Db): string[][] {
+  type Query = (sql: string, ...rest: unknown[]) => Promise<unknown>;
+  type Client = { transaction: (fn: (tx: { query: Query }) => Promise<unknown>) => Promise<unknown> };
+  const client = (db as unknown as { $client: Client }).$client;
+  const transactions: string[][] = [];
+  const transaction = client.transaction.bind(client);
+  client.transaction = (fn) =>
+    transaction((tx) => {
+      const statements: string[] = [];
+      transactions.push(statements);
+      const query = tx.query.bind(tx);
+      tx.query = (sql, ...rest) => {
+        statements.push(sql);
+        return query(sql, ...rest);
+      };
+      return fn(tx);
+    });
+  return transactions;
+}
+
 /** A receipt with these FundCreated logs, a chain where every fund has `settings`, and the EntryPoint's nonce for anyone. */
 function fakeClient(logs: { address: Address; fund: Address; creator: Address }[], settings: unknown[]) {
   return {
@@ -112,6 +133,27 @@ describe("drafts and invitations", () => {
     expect(results.filter((result) => result.ok)).toHaveLength(1);
     expect(results.find((result) => !result.ok)).toEqual({ ok: false, status: 409, error: "El fondo ya tiene 10 personas, que es el máximo." });
     expect((await draftById(db, fundId))?.members).toHaveLength(10);
+  });
+
+  it("locks the fund's row to join it and to freeze it, so a join and a deploy never interleave", async () => {
+    // PGlite runs one statement at a time, so the race itself can't happen here: what keeps it from happening on
+    // Neon is that both take the row's lock first, in the same transaction as what they write and read.
+    const db = await testDb();
+    const { people, fundId, inviteCode } = await group(db);
+    const transactions = recordTransactions(db);
+    const lock = /^select .* from "funds" where "funds"."id" = \$1 for update$/;
+
+    expect(await joinFund(db, (await addUser(db, "Dani")).id, inviteCode)).toMatchObject({ ok: true });
+    expect(transactions).toHaveLength(1);
+    expect(transactions[0]).toEqual([expect.stringMatching(lock), expect.stringMatching(/^insert into "memberships"/)]);
+
+    expect(await deployCall(db, { fundId, userId: people[0]!.id, votesRequired: 2, agent: AGENT })).toMatchObject({ ok: true });
+    expect(transactions).toHaveLength(2);
+    expect(transactions[1]).toEqual([
+      expect.stringMatching(lock),
+      expect.stringMatching(/^update "funds" set/),
+      expect.stringMatching(/^select .* from "memberships"/),
+    ]);
   });
 
   it("finds nothing for an id that isn't one, instead of failing", async () => {
