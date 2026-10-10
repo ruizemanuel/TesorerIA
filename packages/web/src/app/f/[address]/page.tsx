@@ -2,6 +2,7 @@ import { notFound, redirect } from "next/navigation";
 import { connection } from "next/server";
 import type { ReactNode } from "react";
 import { isAddress } from "viem";
+import { ContributePanel } from "../../../components/contribute-panel";
 import { FundScreenView } from "../../../components/fund-screen";
 import { LogoutButton } from "../../../components/logout-button";
 import { Panel } from "../../../components/panel";
@@ -25,7 +26,19 @@ export default async function FundPage({ params, searchParams }: { params: Promi
   const here = `/f/${screen.view.address}`;
 
   let panel: ReactNode = null;
-  if (search.p === "comprobante") {
+  if (search.p === "aportar") {
+    panel = (
+      <Panel title="Aportar" closeHref={here}>
+        <ContributePanel
+          fund={screen.view.address}
+          account={user.account}
+          balance={screen.view.balance}
+          owed={screen.view.me?.owed ?? 0n}
+          weeklyFee={screen.view.weeklyFee}
+        />
+      </Panel>
+    );
+  } else if (search.p === "comprobante") {
     const item = screen.timeline.find((i) => i.id === search.id);
     if (item) {
       panel = (

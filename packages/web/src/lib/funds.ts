@@ -16,12 +16,10 @@ import { entryPoint07Abi, entryPoint07Address } from "viem/account-abstraction";
 import { z } from "zod";
 import type { Db } from "./db/client";
 import { funds, memberships, operations, users } from "./db/schema";
-import { MAX_PESOS, WARS_UNIT, formatPesos } from "./format";
-import { memberFundAbi } from "./fund-abi";
+import { MAX_PESOS, formatPesos } from "./format";
+import { DEFAULT_BALANCE_CAP, memberFundAbi } from "./fund-abi";
 import { PENDING_FOR_MS } from "./operations";
 
-/** The spec's default (4): about US$ 300. */
-export const DEFAULT_BALANCE_CAP = 450_000n * WARS_UNIT;
 export const MIN_MEMBERS = 3;
 const MAX_MEMBERS = 10;
 
