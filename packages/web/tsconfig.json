@@ -4,6 +4,8 @@
     "lib": ["dom", "dom.iterable", "es2023"],
     "jsx": "preserve",
     "types": ["node"],
+    // e2e/serve.ts runs on Node as is, and Node needs the extension in its own imports.
+    "allowImportingTsExtensions": true,
     "plugins": [{ "name": "next" }]
   },
   "include": ["next-env.d.ts", "src", "test", "e2e", ".next/types/**/*.ts", "*.ts"],
