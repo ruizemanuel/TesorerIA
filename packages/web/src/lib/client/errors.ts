@@ -40,3 +40,13 @@ export function userMessage(error: unknown): string {
   if (error instanceof UserFacingError) return error.message;
   return wasCancelled(error) ? CANCELLED : GENERIC;
 }
+
+const NO_PASSKEY = "No se pudo entrar. Si no te aparece tu passkey, probá desde el teléfono donde creaste tu cuenta.";
+
+/**
+ * `userMessage`, for logging in. There the browser throws the same error when the person cancels and when this
+ * device has no passkey for the site, so it can't be read as a cancel: it says where the passkey may be instead.
+ */
+export function loginMessage(error: unknown): string {
+  return !(error instanceof UserFacingError) && wasCancelled(error) ? NO_PASSKEY : userMessage(error);
+}

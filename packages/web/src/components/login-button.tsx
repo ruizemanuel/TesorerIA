@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { userMessage } from "../lib/client/errors";
+import { loginMessage } from "../lib/client/errors";
 import { logInWithPasskey } from "../lib/client/passkey";
 import { safeNext } from "../lib/safe-next";
 import { Button } from "./ui";
@@ -23,7 +23,7 @@ export function LoginButton({ next = "/" }: { next?: string }) {
             router.replace(safeNext(next)); // the prop is checked again here: this never leaves the site
             router.refresh();
           } catch (caught) {
-            setError(userMessage(caught));
+            setError(loginMessage(caught));
             setBusy(false);
           }
         }}

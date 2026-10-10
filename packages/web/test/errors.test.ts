@@ -1,7 +1,7 @@
 import { WebAuthnP256 } from "ox";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { post } from "../src/lib/client/api";
-import { OnItsWayError, UserFacingError, isOnItsWay, userMessage } from "../src/lib/client/errors";
+import { OnItsWayError, UserFacingError, isOnItsWay, loginMessage, userMessage } from "../src/lib/client/errors";
 
 const CANCELLED = "Cancelaste la confirmación. Probá de nuevo.";
 const GENERIC = "No se pudo completar. Probá de nuevo en un rato.";
@@ -44,6 +44,17 @@ describe("userMessage", () => {
     // ox wraps what the browser threw as the cause of its own error.
     const wrapped = new WebAuthnP256.CredentialRequestFailedError({ cause: new DOMException("not allowed", "NotAllowedError") });
     expect(userMessage(wrapped)).toBe(CANCELLED);
+  });
+
+  it("on login, says the passkey may be on another phone, since the browser can't tell that from a cancel", () => {
+    const NO_PASSKEY = "No se pudo entrar. Si no te aparece tu passkey, probá desde el teléfono donde creaste tu cuenta.";
+    const notAllowed = new DOMException("The operation either timed out or was not allowed.", "NotAllowedError");
+    expect(loginMessage(notAllowed)).toBe(NO_PASSKEY);
+    expect(loginMessage(new WebAuthnP256.CredentialRequestFailedError({ cause: notAllowed }))).toBe(NO_PASSKEY);
+    // Anything else reads as it does everywhere, and everywhere else a cancel is still a cancel.
+    expect(loginMessage(new UserFacingError("Esa passkey no tiene una cuenta acá."))).toBe("Esa passkey no tiene una cuenta acá.");
+    expect(loginMessage(new TypeError("Failed to fetch"))).toBe(GENERIC);
+    expect(userMessage(notAllowed)).toBe(CANCELLED);
   });
 
   it("hides everything else behind a generic sentence", () => {
