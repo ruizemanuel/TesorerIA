@@ -2,6 +2,8 @@
 export const NBSP = "\u00A0";
 export const WARS_UNIT = 10n ** 18n;
 export const USDT_UNIT = 10n ** 6n;
+/** The most any amount typed in the app may be, $ 1.000.000.000.000: beyond anything real, far below uint256. */
+export const MAX_PESOS = 1_000_000_000_000n * WARS_UNIT;
 const CENT = 10n ** 16n;
 const TIME_ZONE = "America/Argentina/Buenos_Aires";
 

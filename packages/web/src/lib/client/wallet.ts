@@ -1,6 +1,6 @@
 import { type Call, type SendTaggedCallsResult, createMemberAccount, createPimlicoBundlerClient, sendTaggedCalls } from "@tesoreria/wallet";
 import { type Address, type Hash, type Hex, createPublicClient, http } from "viem";
-import { toWebAuthnAccount } from "viem/account-abstraction";
+import { UserOperationReceiptNotFoundError, createBundlerClient, toWebAuthnAccount } from "viem/account-abstraction";
 import { celo } from "viem/chains";
 import { get, post } from "./api";
 import { UserFacingError } from "./errors";
@@ -26,6 +26,11 @@ export function loadMe(): Promise<Me> {
 
 /** Above the 30 s /api/bundler waits for Pimlico: if the browser gave up first, an operation Pimlico accepted would look unsent and invite a second one. */
 const BUNDLER_TIMEOUT_MS = 45_000;
+
+/** The bundler, through /api/bundler: the only door to it (spec, 6). */
+function bundlerTransport() {
+  return http(new URL("/api/bundler", window.location.origin).toString(), { timeout: BUNDLER_TIMEOUT_MS });
+}
 
 const ON_ITS_WAY = "Tu operación está en camino. En unos minutos la vas a ver reflejada: no la mandes de nuevo.";
 
@@ -60,7 +65,7 @@ export async function sendCalls(
   }
   const bundlerClient = createPimlicoBundlerClient({
     client,
-    transport: http(new URL("/api/bundler", window.location.origin).toString(), { timeout: BUNDLER_TIMEOUT_MS }),
+    transport: bundlerTransport(),
     sponsorshipPolicyId: "set by the server", // /api/bundler replaces it
   });
 
@@ -91,4 +96,21 @@ export async function sendCalls(
   }).catch(() => {});
   if (!result.success) throw new UserFacingError("La operación no se pudo completar. No se movió plata.");
   return result;
+}
+
+/**
+ * Settles an operation that went out earlier but whose receipt the server never got (the page closed, the wait
+ * ran out): asks the bundler for it and records it. While it isn't included it throws "en camino", so nothing
+ * is sent again in the meantime (spec, 6).
+ */
+export async function settleOperation(userOpHash: Hash): Promise<void> {
+  const bundlerClient = createBundlerClient({ transport: bundlerTransport() });
+  let receipt: Awaited<ReturnType<typeof bundlerClient.getUserOperationReceipt>>;
+  try {
+    receipt = await bundlerClient.getUserOperationReceipt({ hash: userOpHash });
+  } catch (error) {
+    if (error instanceof UserOperationReceiptNotFoundError) throw new UserFacingError(ON_ITS_WAY, { cause: error });
+    throw error;
+  }
+  await post("/api/operations/done", { userOpHash, transactionHash: receipt.receipt.transactionHash, success: receipt.success });
 }

@@ -1,4 +1,5 @@
 import { type Address, type Chain, type Hash, type Hex, getAddress, pad } from "viem";
+import { entryPoint07Address } from "viem/account-abstraction";
 import { celo } from "viem/chains";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -22,7 +23,7 @@ const api = vi.hoisted(() => ({ post: vi.fn(async (_path: string, _body?: unknow
 vi.mock("../src/lib/client/api", () => api);
 
 import { UserFacingError } from "../src/lib/client/errors";
-import { type Me, sendCalls } from "../src/lib/client/wallet";
+import { type Me, sendCalls, settleOperation } from "../src/lib/client/wallet";
 
 const ACCOUNT = getAddress("0x2F8218c7cF6d822091EDe24Db9c46B0324c21A6F");
 const me: Me = { name: "Ema", account: ACCOUNT, credential: { id: "cred", publicKey: "0x1234" } };
@@ -151,5 +152,46 @@ describe("sendCalls", () => {
     await sendCalls(me, CALLS, INFO);
     const { transport } = wallet.createPimlicoBundlerClient.mock.calls[0]![0];
     expect(transport({ chain: celo }).config.timeout).toBeGreaterThan(30_000);
+  });
+});
+
+describe("settleOperation", () => {
+  /** /api/bundler answering eth_getUserOperationReceipt with `result`; the requests it got. */
+  function bundler(result: unknown) {
+    const requests: { url: string; method: string; params: unknown }[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init: { body: string }) => {
+        const { id, method, params } = JSON.parse(init.body);
+        requests.push({ url: String(url), method, params });
+        return new Response(JSON.stringify({ jsonrpc: "2.0", id, result }), { headers: { "content-type": "application/json" } });
+      }),
+    );
+    return requests;
+  }
+
+  it("records the receipt of an operation that went out earlier", async () => {
+    const requests = bundler({
+      userOpHash: OP,
+      entryPoint: entryPoint07Address,
+      sender: ACCOUNT,
+      nonce: "0x1",
+      actualGasCost: "0x1",
+      actualGasUsed: "0x1",
+      success: false,
+      logs: [],
+      receipt: { transactionHash: TX, blockNumber: "0x1", logs: [], status: "0x1" },
+    });
+    await settleOperation(OP);
+    expect(requests).toEqual([{ url: "http://localhost:3000/api/bundler", method: "eth_getUserOperationReceipt", params: [OP] }]);
+    expect(posted()).toEqual([["/api/operations/done", { userOpHash: OP, transactionHash: TX, success: false }]]);
+  });
+
+  it("says it's on its way, and records nothing, while the bundler has no receipt for it", async () => {
+    bundler(null);
+    const error = await settleOperation(OP).catch((caught) => caught);
+    expect(error).toBeInstanceOf(UserFacingError);
+    expect(error.message).toMatch(/en camino/);
+    expect(api.post).not.toHaveBeenCalled();
   });
 });

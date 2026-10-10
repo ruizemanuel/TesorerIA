@@ -20,6 +20,11 @@ export async function post<T = unknown>(path: string, body?: unknown): Promise<T
   );
 }
 
+/** DELETEs one of our routes' resources. */
+export async function del<T = unknown>(path: string): Promise<T> {
+  return answer<T>(await fetch(path, { method: "DELETE" }));
+}
+
 export async function get<T>(path: string): Promise<T> {
   return answer<T>(await fetch(path));
 }
