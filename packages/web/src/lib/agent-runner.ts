@@ -21,10 +21,12 @@ export type AgentRun = { ran: false } | { ran: true; decisions: Decision[] };
 /**
  * An expense's status after the agent's decision on it; `before` is the status the run found it in. A dry run
  * (sending off) decides to reimburse or propose but sends nothing, so its decision has no hash and no status:
- * the expense stays as it was, to be handled for real once sending is on. It is never "sending", which means
- * "sent, receipt unknown".
+ * the expense stays as it was, to be handled for real once sending is on. "sending" means "sent, receipt unknown",
+ * or "the send threw, so it may be out": without a hash, settleSent requeues it only once nothing of the agent's is
+ * unmined, and then the chain's history shows whether it landed (the ref, or the agent's proposal).
  */
 export function statusAfter(decision: Decision, before: ExpenseStatus): ExpenseStatus {
+  if (decision.sendFailed) return "sending";
   if (decision.tx !== undefined) {
     if (decision.status === "reverted") return "blocked";
     if (decision.status === undefined) return "sending"; // sent, receipt unknown: settleSent finishes it
@@ -60,9 +62,10 @@ async function saveDecisions(db: Db, list: readonly Decision[], expenseId?: stri
 /**
  * Settles the expenses a run left in "sending". With a hash, its receipt decides; one that never shows up stays
  * "sending", since nothing is ever sent again on a guess. Without a hash, the run died before sending, or
- * between sending and keeping the hash. It goes back to the queue only once the lock that run held has expired
- * and none of the agent's transactions is waiting to be mined: a transaction that did go out is mined by then,
- * and handleExpense finds its ref. (The run may have sent near its end, well after the claim it is timed from.)
+ * between sending and keeping the hash, or its send threw (and may have gone out all the same). It goes back to
+ * the queue only once the lock that run held has expired and none of the agent's transactions is waiting to be
+ * mined: a transaction that did go out is mined by then, and handleExpense finds its ref, or its proposal. (The
+ * run may have sent near its end, well after the claim it is timed from.)
  */
 async function settleSent(db: Db, txStatus: TxStatus, inFlight: InFlight): Promise<void> {
   const rows = await db.select().from(expenses).where(eq(expenses.status, "sending"));
@@ -112,6 +115,7 @@ async function processExpense(db: Db, makeContext: MakeContext, id: string, queu
     kind: expense.kind,
     ref: expense.ref as Hex,
     note: expense.note,
+    enteredAt: BigInt(Math.floor(expense.createdAt.getTime() / 1000)),
   });
   // The hash and what it was, again: if onSent couldn't keep them, settleSent still needs both.
   const sent = decision.tx === undefined ? {} : { tx: decision.tx, sentAction: sentAction(decision.kind) };

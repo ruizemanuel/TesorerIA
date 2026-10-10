@@ -51,11 +51,16 @@ export function converted(usdtIn: bigint, block = BLOCK - 10n, tx = 2): FundEven
   return { eventName: "Conversion", args: { usdtIn, warsOut: usdtIn * 1_600n * 10n ** 12n }, ...position(block, tx) };
 }
 
-export function proposed(proposer: Address, block = BLOCK - 10n, tx = 3): FundEvent {
+export function proposed(
+  proposer: Address,
+  block = BLOCK - 10n,
+  tx = 3,
+  change: Partial<{ action: number; a: Address; amount: bigint; note: string }> = {},
+): FundEvent {
   const member = MEMBERS[0] as Address;
   return {
     eventName: "ProposalCreated",
-    args: { id: 0n, action: 0, a: member, b: OUTSIDER, amount: 1n, proposer, note: "" },
+    args: { id: 0n, action: 0, a: member, b: OUTSIDER, amount: 1n, proposer, note: "", ...change },
     ...position(block, tx),
   };
 }

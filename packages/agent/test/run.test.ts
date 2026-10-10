@@ -7,7 +7,7 @@ import type { FundSnapshot } from "../src/fund";
 import type { ConversionQuote, References } from "../src/market";
 import { type AgentContext, type ChainView, MIN_GAS_USDT, handleExpense, runHeartbeat } from "../src/run";
 import type { AgentSigner, AgentTransaction } from "../src/signer";
-import { AGENT, FUND, MEMBERS, OUTSIDER, USDT_UNIT, WARS_UNIT, fundSnapshot, ref, reimbursed } from "./support/fixtures";
+import { AGENT, BLOCK, FUND, MEMBERS, OUTSIDER, USDT_UNIT, WARS_UNIT, fundSnapshot, proposed, ref, reimbursed } from "./support/fixtures";
 
 const NOW = 1_791_561_510n;
 const HASH: Hash = pad("0x7a", { size: 32 });
@@ -53,8 +53,11 @@ function fakeChain(
   };
 }
 
-/** The agent's wallet, keeping what it would send. `estimateError` makes every estimate fail. */
-function fakeSigner({ estimateError }: { estimateError?: Error } = {}) {
+/**
+ * The agent's wallet, keeping what it would send. `estimateError` makes every estimate fail; `sendError`, every
+ * send, after the node took it (kept in `sent`).
+ */
+function fakeSigner({ estimateError, sendError }: { estimateError?: Error; sendError?: Error } = {}) {
   const sent: AgentTransaction[] = [];
   const signer: AgentSigner = {
     address: AGENT,
@@ -64,6 +67,7 @@ function fakeSigner({ estimateError }: { estimateError?: Error } = {}) {
     },
     send: async (tx) => {
       sent.push(tx);
+      if (sendError) throw sendError;
       return HASH;
     },
   };
@@ -222,7 +226,7 @@ describe("runHeartbeat", () => {
 });
 
 describe("handleExpense", () => {
-  const PITCH: Expense = { member: MEMBER, amount: 45_000n * WARS_UNIT, kind: "agreed", ref: ref(7), note: "Cancha" };
+  const PITCH: Expense = { member: MEMBER, amount: 45_000n * WARS_UNIT, kind: "agreed", ref: ref(7), note: "Cancha", enteredAt: NOW - 60n };
 
   it("pays the agreed expense back", async () => {
     const { signer, sent } = fakeSigner();
@@ -243,6 +247,38 @@ describe("handleExpense", () => {
       functionName: "propose",
       args: [0, MEMBER, expect.any(String), 45_000n * WARS_UNIT, "Cancha"],
     });
+  });
+
+  it("takes a payment it already proposed for this expense as proposed, with that transaction, and sends nothing", async () => {
+    const { signer, sent } = fakeSigner();
+    const earlier = proposed(AGENT, BLOCK - 30n, 42, { a: MEMBER, amount: PITCH.amount, note: "Pelotas" });
+    const chain = fakeChain([fundSnapshot()], { events: [earlier] });
+    expect(await handleExpense(context(chain, signer), FUND, { ...PITCH, kind: "other", note: "Pelotas" })).toEqual({
+      fund: FUND,
+      kind: "propose-payment",
+      reason: `Already proposed, in transaction ${earlier.transactionHash}`,
+      tx: earlier.transactionHash,
+      status: "success",
+    });
+    expect(sent).toEqual([]);
+  });
+
+  it("says a send that threw may have reached the node: the transaction may be out, so it's never a plain block", async () => {
+    const { signer, sent } = fakeSigner({ sendError: new Error("nonce too low") });
+    const decision = await handleExpense(context(fakeChain([fundSnapshot()]), signer), FUND, PITCH);
+    expect(decision).toEqual({
+      fund: FUND,
+      kind: "blocked",
+      reason: "Could not send the transaction: nonce too low",
+      action: { kind: "reimburse", member: MEMBER, amount: PITCH.amount, ref: PITCH.ref },
+      sendFailed: true,
+    });
+    expect(sent).toHaveLength(1);
+    // A block before anything was sent is just that.
+    const refused = fakeSigner({ estimateError: new Error("execution reverted") });
+    const before = await handleExpense(context(fakeChain([fundSnapshot()]), refused.signer), FUND, PITCH);
+    expect(before).toMatchObject({ kind: "blocked" });
+    expect(before).not.toHaveProperty("sendFailed");
   });
 
   it("rejects a fund the factory didn't create, without reading it", async () => {

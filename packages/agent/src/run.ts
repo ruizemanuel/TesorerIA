@@ -34,6 +34,12 @@ export type Decision = {
   action?: AgentAction;
   tx?: Hash;
   status?: "success" | "reverted";
+  /**
+   * The send itself threw. The transaction may have gone out all the same: a request that timed out after the node
+   * took it, retried as "already known" or "nonce too low". So it's never a plain block to retry: whoever keeps the
+   * decision waits until nothing of the agent's is unmined, and then the history shows whether it landed.
+   */
+  sendFailed?: true;
 };
 
 export type AgentContext = {
@@ -88,7 +94,7 @@ async function act(
   try {
     hash = await ctx.signer.send(tx);
   } catch (error) {
-    return blocked(`Could not send the transaction: ${shortMessage(error)}`);
+    return { ...blocked(`Could not send the transaction: ${shortMessage(error)}`), sendFailed: true };
   }
   // The decision below still carries the hash; a hook that fails leaves its trace in the reason.
   let unrecorded = "";
@@ -175,11 +181,14 @@ export async function handleExpense(ctx: AgentContext, address: Address, expense
       return { fund: address, kind: "reject", reason: "This agent doesn't run that fund" };
     }
     const { events, today } = await history(ctx, fund);
-    const decision = decideExpense({ expense, fund, events, today });
+    const decision = decideExpense({ expense, fund, events, today, now: ctx.now() });
     switch (decision.kind) {
       case "reject":
       case "wait":
         return { fund: address, kind: decision.kind, reason: decision.reason };
+      case "proposed":
+        // On chain already: as if this run had proposed it, in that transaction.
+        return { fund: address, kind: "propose-payment", reason: decision.reason, tx: decision.transactionHash, status: "success" };
       case "reimburse": {
         const { member, amount, ref } = decision;
         const reason = `Pay back ${wholeWars(amount)} wARS of the agreed expense`;

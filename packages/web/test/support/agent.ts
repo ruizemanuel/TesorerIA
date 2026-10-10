@@ -8,19 +8,22 @@ export const SENT_HASH: Hash = pad("0x7a", { size: 32 });
 /**
  * An agent context over a fixed fund, keeping what it would send. `snapshot()` is read on each call, so a test
  * can change the fund between runs; `receipt` is how every sent transaction ends, and `receiptError` makes every
- * receipt wait fail instead; `send: false` is a dry run, as with the kill switch off.
+ * receipt wait fail instead; `sendError()`, when it returns one, makes the send throw after the node took it (it's
+ * kept in `sent`); `send: false` is a dry run, as with the kill switch off.
  */
 export function fakeAgent({
   snapshot,
   events = () => [],
   receipt = "success",
   receiptError,
+  sendError = () => undefined,
   send = true,
 }: {
   snapshot: () => FundSnapshot;
   events?: () => FundEvent[];
   receipt?: "success" | "reverted";
   receiptError?: Error;
+  sendError?: () => Error | undefined;
   send?: boolean;
 }) {
   const sent: AgentTransaction[] = [];
@@ -45,6 +48,8 @@ export function fakeAgent({
     estimate: async () => ({ gas: 200_000n, maxFeePerGas: 1n, maxCost: 200_000n }),
     send: async (tx) => {
       sent.push(tx);
+      const error = sendError();
+      if (error) throw error;
       return SENT_HASH;
     },
   };

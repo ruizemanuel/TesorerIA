@@ -2,7 +2,7 @@ import { fundAbi } from "@tesoreria/agent";
 import { eq } from "drizzle-orm";
 import { type Hash, type Hex, decodeFunctionData, pad } from "viem";
 import { describe, expect, it } from "vitest";
-import { AGENT_LOCK, AGENT_LOCK_TTL_MS, type MakeContext, runAgent } from "../src/lib/agent-runner";
+import { AGENT_LOCK, AGENT_LOCK_TTL_MS, type MakeContext, runAgent, statusAfter } from "../src/lib/agent-runner";
 import type { Db } from "../src/lib/db/client";
 import { acquireLock, releaseLock } from "../src/lib/db/lock";
 import { decisions, expenses } from "../src/lib/db/schema";
@@ -10,7 +10,7 @@ import { submitExpense } from "../src/lib/expenses";
 import { MAX_PESOS } from "../src/lib/format";
 import { SENT_HASH, fakeAgent } from "./support/agent";
 import { addLiveFund, addUser, testDb } from "./support/db";
-import { ANA, BETO, BLOCK, CARO, FUND, WARS, event, snapshot } from "./support/fixtures";
+import { AGENT, ANA, BETO, BLOCK, CARO, FUND, WARS, event, snapshot } from "./support/fixtures";
 
 const always = (status: "success" | "reverted" | "pending") => async () => status;
 /** No agent transaction is waiting to be mined. */
@@ -87,7 +87,74 @@ describe("submitExpense", () => {
   });
 });
 
+describe("statusAfter", () => {
+  it("keeps a send that threw as sending, with no hash: it may be out, so it waits instead of being tried again", () => {
+    const threw = { kind: "blocked", reason: "Could not send the transaction: nonce too low", sendFailed: true } as const;
+    for (const before of ["new", "waiting", "blocked"] as const) expect(statusAfter(threw, before)).toBe("sending");
+    expect(statusAfter({ kind: "blocked", reason: "The transaction would fail: execution reverted" }, "new")).toBe("blocked");
+  });
+});
+
+/** Back in the queue only once the run's lock could have expired: what settleSent waits for. */
+async function lockExpired(db: Db, id: string) {
+  await db.update(expenses).set({ updatedAt: new Date(Date.now() - AGENT_LOCK_TTL_MS - 1_000) }).where(eq(expenses.id, id));
+}
+
 describe("runAgent", () => {
+  it("never pays twice when the send threw after the node took the reimbursement", async () => {
+    const { db, ana, fund } = await setup();
+    const { id } = await load(db, ana, fund.id);
+    const { ref } = await statusOf(db, id);
+    const paid = event("Reimbursement", { member: ANA, amount: 45_000n * WARS, ref: ref as Hex, week: 2n }, BLOCK - 10n);
+    let mined = false;
+    const { makeContext, sent } = fakeAgent({
+      snapshot: () => snapshot({ spentThisWeek: mined ? 45_000n * WARS : 0n }),
+      events: () => (mined ? [paid] : []),
+      sendError: () => (sent.length === 1 ? new Error("already known") : undefined), // the first send went out all the same
+    });
+    const inFlight = async () => !mined;
+
+    await runAgent(db, makeContext, { expenseId: id, txStatus: always("success"), inFlight });
+    expect(await statusOf(db, id)).toMatchObject({ status: "sending", tx: null, reason: "Could not send the transaction: already known" });
+
+    // Not tried again while the lock could be held, nor while that transaction may still be unmined: not even by a heartbeat.
+    await runAgent(db, makeContext, { heartbeat: true, txStatus: always("success"), inFlight });
+    await lockExpired(db, id);
+    await runAgent(db, makeContext, { heartbeat: true, txStatus: always("success"), inFlight });
+    expect((await statusOf(db, id)).status).toBe("sending");
+
+    // Mined: back to the queue, where the agent finds the ref on chain and sends nothing.
+    mined = true;
+    await runAgent(db, makeContext, { heartbeat: true, txStatus: always("success"), inFlight });
+    expect((await statusOf(db, id)).status).toBe("reimbursed");
+    expect(sent).toHaveLength(1);
+  });
+
+  it("never proposes twice when the send threw after the node took the proposal", async () => {
+    const { db, ana, fund } = await setup();
+    const { id } = await load(db, ana, fund.id, { kind: "other", amount: 3_000n * WARS, note: "la pelota nueva" });
+    const proposal = event(
+      "ProposalCreated",
+      { id: 0n, action: 0, a: ANA, b: "0x0000000000000000000000000000000000000000", amount: 3_000n * WARS, proposer: AGENT, note: "la pelota nueva" },
+      BLOCK - 5n,
+    );
+    let mined = false;
+    const { makeContext, sent } = fakeAgent({
+      snapshot: () => snapshot(),
+      events: () => (mined ? [proposal] : []),
+      sendError: () => (sent.length === 1 ? new Error("request timed out") : undefined),
+    });
+    const inFlight = async () => !mined;
+
+    await runAgent(db, makeContext, { expenseId: id, txStatus: always("success"), inFlight });
+    expect(await statusOf(db, id)).toMatchObject({ status: "sending", tx: null });
+    mined = true;
+    await lockExpired(db, id);
+    await runAgent(db, makeContext, { heartbeat: true, txStatus: always("success"), inFlight });
+    expect(await statusOf(db, id)).toMatchObject({ status: "proposed", tx: proposal.transactionHash, sentAction: "propose-payment" });
+    expect(sent).toHaveLength(1);
+  });
+
   it("pays an agreed expense back once, keeping the hash before the receipt", async () => {
     const { db, ana, fund } = await setup();
     const { id } = await load(db, ana, fund.id);

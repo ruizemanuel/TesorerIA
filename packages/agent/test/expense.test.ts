@@ -2,14 +2,17 @@ import type { Address } from "viem";
 import { describe, expect, it } from "vitest";
 import { type Expense, decideExpense } from "../src/expense";
 import { LIMITS } from "../src/limits";
-import { MEMBERS, OUTSIDER, WARS_UNIT, fundSnapshot, ref, reimbursed } from "./support/fixtures";
+import type { FundEvent } from "../src/events";
+import { AGENT, BLOCK, MEMBERS, OUTSIDER, WARS_UNIT, fundSnapshot, proposed, ref, reimbursed } from "./support/fixtures";
 
 const MEMBER = MEMBERS[1] as Address;
 const QUIET_DAY = { reimbursedWars: 0n, convertedUsdt: 0n, transactions: 0 };
-const PITCH: Expense = { member: MEMBER, amount: 45_000n * WARS_UNIT, kind: "agreed", ref: ref(7), note: "Cancha del jueves" };
+const NOW = 1_791_561_510n;
+/** Entered an hour ago: about 3,600 blocks before BLOCK, the snapshot's. */
+const PITCH: Expense = { member: MEMBER, amount: 45_000n * WARS_UNIT, kind: "agreed", ref: ref(7), note: "Cancha del jueves", enteredAt: NOW - 3_600n };
 
-function decide(expense: Expense, change: Parameters<typeof fundSnapshot>[0] = {}, events = [] as ReturnType<typeof reimbursed>[], today = QUIET_DAY) {
-  return decideExpense({ expense, fund: fundSnapshot(change), events, today });
+function decide(expense: Expense, change: Parameters<typeof fundSnapshot>[0] = {}, events = [] as FundEvent[], today = QUIET_DAY) {
+  return decideExpense({ expense, fund: fundSnapshot(change), events, today, now: NOW });
 }
 
 describe("decideExpense", () => {
@@ -70,6 +73,33 @@ describe("decideExpense", () => {
       kind: "wait",
       reason: "The fund doesn't hold enough wARS yet",
     });
+  });
+
+  it("takes a payment the agent already proposed for this expense as proposed: the contract keeps no ref for proposals", () => {
+    const BALLS: Expense = { ...PITCH, kind: "other", note: "  Pelotas nuevas " };
+    const ours = { a: MEMBER, amount: PITCH.amount, note: "Pelotas nuevas" };
+    const earlier = proposed(AGENT, BLOCK - 600n, 42, ours); // ten minutes ago, after it was entered
+    expect(decide(BALLS, {}, [earlier])).toEqual({
+      kind: "proposed",
+      transactionHash: earlier.transactionHash,
+      reason: `Already proposed, in transaction ${earlier.transactionHash}`,
+    });
+    // The same holds for an agreed expense that didn't fit in the week's cap.
+    const over = proposed(AGENT, BLOCK - 600n, 43, { ...ours, note: "Cancha del jueves" });
+    expect(decide(PITCH, { spentThisWeek: 50_000n * WARS_UNIT }, [over])).toMatchObject({ kind: "proposed", transactionHash: over.transactionHash });
+
+    // Anything else is another expense's, and this one is proposed.
+    const others: Record<string, FundEvent> = {
+      "another member": proposed(AGENT, BLOCK - 600n, 44, { ...ours, a: MEMBERS[0] as Address }),
+      "another amount": proposed(AGENT, BLOCK - 600n, 45, { ...ours, amount: PITCH.amount + 1n }),
+      "another note": proposed(AGENT, BLOCK - 600n, 46, { ...ours, note: "Pelotas" }),
+      "a member's own proposal": proposed(MEMBERS[0] as Address, BLOCK - 600n, 47, ours),
+      "another action": proposed(AGENT, BLOCK - 600n, 48, { ...ours, action: 4 }),
+      "an earlier, identical expense's": proposed(AGENT, BLOCK - 3_600n - 301n, 49, ours),
+    };
+    for (const [why, event] of Object.entries(others)) expect(decide(BALLS, {}, [event]), why).toMatchObject({ kind: "propose-payment" });
+    // Five minutes before it was entered still count, for clocks that don't agree.
+    expect(decide(BALLS, {}, [proposed(AGENT, BLOCK - 3_600n - 300n, 50, ours)])).toMatchObject({ kind: "proposed" });
   });
 
   it("keeps the proposal's note to 140 characters", () => {

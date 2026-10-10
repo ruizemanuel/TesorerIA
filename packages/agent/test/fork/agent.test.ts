@@ -157,7 +157,8 @@ describe("the agent against a fork of Celo mainnet, with the deployed FundFactor
 
   it("pays the agreed expense back to the member, once", async () => {
     const before = await wars(beto.address);
-    const pitch = { member: beto.address, amount: parseUnits("45000", 18), kind: "agreed", ref: ref(1), note: "Cancha" } as const;
+    const enteredAt = BigInt(Math.floor(Date.now() / 1000));
+    const pitch = { member: beto.address, amount: parseUnits("45000", 18), kind: "agreed", ref: ref(1), note: "Cancha", enteredAt } as const;
     expect(await handleExpense(ctx, fund, pitch)).toMatchObject({ kind: "reimburse", status: "success" });
     expect((await wars(beto.address)) - before).toBe(parseUnits("45000", 18));
     expect(await handleExpense(ctx, fund, pitch)).toMatchObject({ kind: "reject", reason: expect.stringContaining("Already reimbursed") });
@@ -165,7 +166,8 @@ describe("the agent against a fork of Celo mainnet, with the deployed FundFactor
   });
 
   it("turns what doesn't fit in the week's cap into a proposal for the members", async () => {
-    const extra = { member: beto.address, amount: parseUnits("20000", 18), kind: "agreed", ref: ref(2), note: "Segunda cancha" } as const;
+    const enteredAt = BigInt(Math.floor(Date.now() / 1000));
+    const extra = { member: beto.address, amount: parseUnits("20000", 18), kind: "agreed", ref: ref(2), note: "Segunda cancha", enteredAt } as const;
     expect(await handleExpense(ctx, fund, extra)).toMatchObject({ kind: "propose-payment", status: "success" });
     const proposal = await publicClient.readContract({ address: fund, abi: memberAbi, functionName: "getProposal", args: [0n] });
     expect(proposal).toMatchObject({
