@@ -18,11 +18,52 @@ Status: early development.
 
 Its own limits, on top of the contract's: it only pays addresses the contract lists as members, never one taken from text a person or a model wrote; at most 100,000 wARS per reimbursement and 150,000 wARS a day per fund, 500 USDT per conversion and 1,000 USDT a day, and 20 transactions a day per fund. A reimbursement over a limit becomes a proposal. Every decision, including what it didn't do and why, comes back as an entry for the fund's timeline.
 
+In production the agent runs inside the web (below), and only on the funds the web created: anyone can create a fund that names our agent, and those are never read or acted on. A run holds a database lock that outlives it (310 s, above the routes' 300 s limit), so two runs never pay the same expense. Each expense a member enters goes through these states:
+
+- `new`: entered, not handled yet;
+- `sending`: the agent sent its transaction and is waiting for the receipt. It is never sent again on a guess: if the run died before keeping the hash, the expense goes back to the queue only once the lock has expired and none of the agent's transactions is waiting to be mined;
+- `reimbursed` or `proposed`: done, as a reimbursement or as a payment proposal for the members to vote on;
+- `waiting`: the fund doesn't hold enough pesos yet; retried on every run;
+- `blocked`: a check failed (an old or disagreeing price, a reverted transaction); retried on the heartbeat;
+- `rejected`: it can't be paid (for example, the fund isn't live).
+
     pnpm --filter @tesoreria/agent test         # the rules, with fixed data
     pnpm --filter @tesoreria/agent test:fork    # the agent against a fork of Celo mainnet and the deployed FundFactory
     pnpm --filter @tesoreria/agent agent:tick   # one heartbeat on Celo mainnet; a dry run unless --send
 
 Its ERC-8004 registration file is [`packages/agent/registration.json`](packages/agent/registration.json), generated from the code with `pnpm --filter @tesoreria/agent registration:write`.
+
+## The web
+
+`packages/web` is the app the group uses: Next.js on Vercel, in Rioplatense Spanish, with every amount in pesos. Each member signs in with a passkey (fingerprint, face or PIN) that controls their own Safe smart account on Celo: no seed phrase, no browser extension. Members create the fund together from an invite link, contribute in wARS or USDT, enter the expenses they paid, and vote on proposals from the fund's timeline. Their actions are ERC-4337 UserOperations, sponsored by Pimlico and tagged with the same attribution suffix as the agent's transactions.
+
+- **`/api/bundler` is the only door to Pimlico.** The API key stays on the server. The route forwards only the methods a sponsored UserOperation needs, only operations from the logged-in member's own account (and only for members of a fund), only for EntryPoint v0.7 on Celo, and with a ceiling on the gas it sponsors. The sponsorship policy is set on the server, never by the browser.
+- **The agent's heartbeat runs every 15 minutes from GitHub Actions** ([`.github/workflows/heartbeat.yml`](.github/workflows/heartbeat.yml)), calling `/api/agent/heartbeat` with a shared secret. An expense is handled as soon as a member enters it, and contributions and votes ask for a run too.
+- **The deployed agent sends nothing until `AGENT_SEND=on`.** Until then, every run is a dry run.
+
+Against a fork of Celo mainnet:
+
+    pnpm --filter @tesoreria/web test       # unit tests, on an in-memory database
+    pnpm --filter @tesoreria/web e2e:serve  # an anvil fork, a local bundler and the app on http://localhost:3000
+    pnpm --filter @tesoreria/web test:e2e   # three friends end to end, with virtual passkeys (starts e2e:serve itself)
+
+`e2e:serve` needs Foundry's `anvil` on the `PATH` and ports 8548 and 3000 free. It sets every variable itself, with keys generated on the spot.
+
+Its settings (the production values live in Vercel, never in the repo; see [`packages/web/.env.example`](packages/web/.env.example)):
+
+| Variable | What it is |
+|---|---|
+| `RP_ID`, `ORIGIN` | The passkeys' site and the page's origin. Passkeys are bound to it. |
+| `SESSION_SECRET` | Signs the session cookie. |
+| `DATABASE_URL` | Neon Postgres in production. |
+| `CHAIN_MODE` | `mainnet`, or `fork` for local runs. |
+| `CELO_RPC_URL`, `NEXT_PUBLIC_CELO_RPC_URL`, `BASE_RPC_URL` | Celo for the server and the browser; Base for Chainlink's USD / ARS. |
+| `PIMLICO_API_KEY`, `PIMLICO_SPONSORSHIP_POLICY_ID` | The server's Pimlico key and its sponsorship policy. |
+| `AGENT_PRIVATE_KEY` | The agent's key. |
+| `AGENT_SEND` | `on` lets the agent send transactions; `off` by default. |
+| `HEARTBEAT_SECRET` | Shared with the GitHub Actions heartbeat (with `HEARTBEAT_URL` as a repository variable). |
+| `BLOCKSCOUT_API_KEY` | Optional, for reading a fund's history. |
+| `PUBLIC_FUND` | Optional: the fund the home page shows, if its group turned its public view on. |
 
 ## On Celo mainnet
 
