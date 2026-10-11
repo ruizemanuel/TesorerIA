@@ -4,7 +4,8 @@ import { formatPesos } from "../lib/format";
 
 // One radius for buttons and cards (14 px), 48 px tall buttons, one primary per screen (spec, 9.1).
 // Height and padding live in each variant, so the link's 44 px never fights a base class.
-const BUTTON = "inline-flex items-center justify-center rounded-[14px] text-[15px] font-bold disabled:opacity-50";
+// `text-center`: a label that wraps on a narrow phone stays centered, line by line.
+const BUTTON = "inline-flex items-center justify-center rounded-[14px] text-center text-[15px] font-bold disabled:opacity-50";
 const VARIANTS = {
   primary: "min-h-12 bg-primary px-4 text-white hover:bg-primary/90",
   secondary: "min-h-12 bg-tint px-4 text-primary hover:bg-tint/70",
