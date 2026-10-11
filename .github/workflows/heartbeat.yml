@@ -1,5 +1,7 @@
 name: Agent heartbeat
 
+# A backup, and the way to run the agent by hand: the clock is the Cloudflare Worker in infra/heartbeat-trigger, since
+# GitHub's schedule is best effort (runs come hours late, or never).
 on:
   schedule:
     # Every 15 minutes, off the top of the hour, when GitHub delays scheduled runs the most.

@@ -9,6 +9,7 @@ coverage/
 .turbo/
 next-env.d.ts
 .pglite/
+.wrangler/
 test-results/
 playwright-report/
 

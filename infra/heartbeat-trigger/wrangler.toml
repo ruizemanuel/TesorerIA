@@ -1,0 +1,25 @@
+# The agent's clock (spec, 8.3): a Cloudflare Worker whose Cron Trigger calls /api/agent/heartbeat every 15 minutes.
+# GitHub Actions' schedule is best effort (runs come hours late, or never), so this is the clock, and
+# .github/workflows/heartbeat.yml stays as a backup and for manual runs. Two runs at once are safe: the agent holds a
+# database lock, and the second one answers 202.
+#
+# Secret: HEARTBEAT_SECRET, the same value Vercel has, set with `wrangler secret put` (never in this file).
+# Deploy from the repository's root: pnpm dlx wrangler@4.149.0 deploy --config infra/heartbeat-trigger/wrangler.toml
+name = "tesoreria-heartbeat"
+main = "src/index.ts"
+compatibility_date = "2026-10-10"
+
+# No public URL: the Worker only runs on its schedule.
+workers_dev = false
+preview_urls = false
+
+# Workers Logs: each run's answer, or why it failed.
+[observability]
+enabled = true
+
+# Off the top of the hour, the busiest minute, and off the GitHub backup's minutes (7, 22, 37, 52).
+[triggers]
+crons = ["2,17,32,47 * * * *"]
+
+[vars]
+HEARTBEAT_URL = "https://tesoreriaia.vercel.app/api/agent/heartbeat"

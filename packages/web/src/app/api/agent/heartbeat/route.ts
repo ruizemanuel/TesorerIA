@@ -8,8 +8,9 @@ import { isHeartbeatAuthorized } from "../../../../lib/heartbeat-auth";
 export const maxDuration = 300;
 
 /**
- * The periodic run (spec, 8.3), called by GitHub Actions every 15 minutes. The Action's log is public, so the
- * answer never carries an error's text: the cause goes to our own log.
+ * The periodic run (spec, 8.3), called every 15 minutes by a Cloudflare Worker (infra/heartbeat-trigger), with
+ * GitHub Actions as a backup. The Action's log is public, so the answer never carries an error's text: the cause goes
+ * to our own log.
  */
 export async function POST(request: Request) {
   if (!isHeartbeatAuthorized(request.headers.get("authorization"), env().HEARTBEAT_SECRET)) {
