@@ -71,16 +71,20 @@ export async function createDraft(
 }
 
 /**
- * A fund's people in the order they joined, and by id when two joined at the same instant, so every reader
- * (deployCall, confirmDeploy, the week's list) gets the same order.
+ * The order of a fund's people: as they joined, and by id when two joined at the same instant, so every reader
+ * (deployCall, confirmDeploy, the week's list, and the bundler gateway through `frozenCreateFunds`) gets the same.
  */
+const MEMBER_ORDER = [asc(memberships.joinedAt), asc(memberships.userId)];
+const memberFields = { userId: users.id, name: users.name, account: users.account };
+
+/** A fund's people, in MEMBER_ORDER. */
 function membersQuery(db: Db, fundId: string) {
   return db
-    .select({ userId: users.id, name: users.name, account: users.account })
+    .select(memberFields)
     .from(memberships)
     .innerJoin(users, eq(users.id, memberships.userId))
     .where(eq(memberships.fundId, fundId))
-    .orderBy(asc(memberships.joinedAt), asc(memberships.userId));
+    .orderBy(...MEMBER_ORDER);
 }
 
 function asMembers(rows: Awaited<ReturnType<typeof membersQuery>>): DraftSummary["members"] {
@@ -253,17 +257,32 @@ function createFundData(
 /**
  * The createFund calldata of each draft `creatorId` made that is being created (`deploying`), naming `agent()`:
  * exactly what deployCall built when it froze it, since nobody joins and the votes don't change until it's live
- * or open again. The only createFunds the bundler gateway sponsors (spec, 6). `agent` is called only if there's
- * one: it throws on a misconfigured server (`agentAddress`), which mustn't stop everyone else's requests.
+ * or open again, and with its members in the same order (MEMBER_ORDER). The only createFunds the bundler gateway
+ * sponsors (spec, 6). `agent` is called only if there's one: it throws on a misconfigured server (`agentAddress`),
+ * which mustn't stop everyone else's requests.
  */
 export async function frozenCreateFunds(db: Db, creatorId: string, agent: () => Address): Promise<Hex[]> {
-  const frozen = await db
-    .select({ id: funds.id, name: funds.name, agreedExpense: funds.agreedExpense, weeklyCap: funds.weeklyCap, votesRequired: funds.votesRequired })
+  // Each draft once per member, in one statement: by draft, then in MEMBER_ORDER, which the grouping below keeps.
+  const rows = await db
+    .select({
+      draft: { id: funds.id, name: funds.name, agreedExpense: funds.agreedExpense, weeklyCap: funds.weeklyCap, votesRequired: funds.votesRequired },
+      member: memberFields,
+    })
     .from(funds)
-    .where(and(eq(funds.creatorId, creatorId), eq(funds.status, "deploying"), isNotNull(funds.votesRequired)));
-  if (frozen.length === 0) return [];
+    .innerJoin(memberships, eq(memberships.fundId, funds.id))
+    .innerJoin(users, eq(users.id, memberships.userId))
+    .where(and(eq(funds.creatorId, creatorId), eq(funds.status, "deploying"), isNotNull(funds.votesRequired)))
+    .orderBy(asc(funds.id), ...MEMBER_ORDER);
+  if (rows.length === 0) return [];
+  type Row = (typeof rows)[number];
+  const frozen = new Map<string, { draft: Row["draft"]; members: Row["member"][] }>();
+  for (const { draft, member } of rows) {
+    const entry = frozen.get(draft.id) ?? { draft, members: [] };
+    entry.members.push(member);
+    frozen.set(draft.id, entry);
+  }
   const named = agent();
-  return Promise.all(frozen.map(async (draft) => createFundData(draft, await membersOf(db, draft.id), draft.votesRequired!, named)));
+  return [...frozen.values()].map(({ draft, members }) => createFundData(draft, asMembers(members), draft.votesRequired!, named));
 }
 
 /**

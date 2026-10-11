@@ -1,5 +1,6 @@
 import { FUND_FACTORY, USDT, WARS, fundFactoryAbi } from "@tesoreria/agent";
 import { ATTRIBUTION_SUFFIX, type Call } from "@tesoreria/wallet";
+import { eq } from "drizzle-orm";
 import { type Address, type Hex, concat, decodeFunctionData, encodeFunctionData, erc20Abi, getAddress, numberToHex, parseAbi } from "viem";
 import { entryPoint07Address } from "viem/account-abstraction";
 import { describe, expect, it, vi } from "vitest";
@@ -21,7 +22,7 @@ import { contributeCalls } from "../src/lib/contribute";
 import type { Db } from "../src/lib/db/client";
 import { funds, memberships } from "../src/lib/db/schema";
 import { memberFundAbi } from "../src/lib/fund-abi";
-import { cancelDeploy, createDraft, deployCall, joinFund } from "../src/lib/funds";
+import { cancelDeploy, createDraft, deployCall, frozenCreateFunds, joinFund } from "../src/lib/funds";
 import { voteCalls } from "../src/lib/vote";
 import { AGENT } from "./support/fixtures";
 import { WARS as WARS_UNIT, addLiveFund, addUser, randomAccount, testDb } from "./support/db";
@@ -468,6 +469,41 @@ describe("authorizeBundlerRequest", () => {
       const { fundId, call } = await frozenDraft(db, ana.id, "Fútbol");
       expect(await cancelDeploy(db, { fundId, userId: ana.id })).toEqual({ ok: true, reopened: true });
       for (const answer of await answers(db, ana, [call])) expect(answer).toMatchObject(refused);
+    });
+
+    it("refuses the call of a draft that went live: it's no longer being created", async () => {
+      const db = await testDb();
+      const ana = await addUser(db, "Ana");
+      const { fundId, call } = await frozenDraft(db, ana.id, "Fútbol");
+      expect(await frozenCreateFunds(db, ana.id, agent)).toEqual([call.data]);
+      await db.update(funds).set({ status: "live", address: FUND, createdBlock: 79_700_000n }).where(eq(funds.id, fundId));
+      const unread = () => {
+        throw new Error("Nothing being created needs the agent");
+      };
+      expect(await frozenCreateFunds(db, ana.id, unread)).toEqual([]);
+      for (const answer of await answers(db, ana, [call])) expect(answer).toMatchObject(refused); // a member of it now, so the call is what's refused
+    });
+
+    it("gives each draft's call with its members in the order they joined, and by id at the same instant, as deployCall does", async () => {
+      const db = await testDb();
+      const ana = await addUser(db, "Ana");
+      const people = await Promise.all(["Beto", "Caro", "Dani", "Eli"].map((name) => addUser(db, name)));
+      const at = (minutes: number) => new Date(Date.UTC(2026, 9, 10, 12, minutes));
+      const calls: Hex[] = [];
+      for (const [i, name] of ["Fútbol", "Asado"].entries()) {
+        const created = await createDraft(db, ana.id, { name, agreedExpense: "la cancha", weeklyFee: 10_000n * WARS_UNIT, weeklyCap: 60_000n * WARS_UNIT });
+        if (!created.ok) throw new Error(created.error);
+        await db.update(memberships).set({ joinedAt: at(0) }).where(eq(memberships.fundId, created.id));
+        // The two drafts' joins interleave in time, each in another order than the people were added in, and two of
+        // each draft's people join at the same instant.
+        for (const [j, person] of (i === 0 ? [...people].reverse() : people).entries()) {
+          await db.insert(memberships).values({ fundId: created.id, userId: person.id, joinedAt: at(2 * Math.max(j, 1) + i) });
+        }
+        const deploy = await deployCall(db, { fundId: created.id, userId: ana.id, votesRequired: 2, agent: AGENT });
+        if (!deploy.ok) throw new Error(deploy.error);
+        calls.push(deploy.call.data);
+      }
+      expect([...(await frozenCreateFunds(db, ana.id, agent))].sort()).toEqual([...calls].sort());
     });
 
     it("sponsors each of two drafts being created with its own exact call, one at a time", async () => {
