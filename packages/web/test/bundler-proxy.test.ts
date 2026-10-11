@@ -5,6 +5,7 @@ import { entryPoint07Address } from "viem/account-abstraction";
 import { describe, expect, it, vi } from "vitest";
 import {
   MAX_CREATE_FUND_GAS,
+  MAX_CREATE_FUND_NONCES,
   MAX_FEE_MULTIPLE,
   MAX_OPERATION_GAS,
   type OperationCall,
@@ -13,6 +14,7 @@ import {
   checkBundlerRequest,
   checkCalls,
   checkSponsoredGas,
+  claimCreateFundNonce,
   operationCalls,
 } from "../src/lib/bundler-proxy";
 import { contributeCalls } from "../src/lib/contribute";
@@ -459,6 +461,116 @@ describe("authorizeBundlerRequest", () => {
       }
       for (const answer of await answers(db, ana, [changed(futbol.call, { name: "Asado" })])) expect(answer).toMatchObject(refused);
       for (const answer of await answers(db, ana, [futbol.call, asado.call])) expect(answer).toMatchObject({ ok: false, status: 403 });
+    });
+  });
+
+  describe("a creator's createFund: on nonce key 0, and at most MAX_CREATE_FUND_NONCES nonces signed, ever", () => {
+    /** Someone creating a fund, and the createFund deployCall built for their frozen draft. */
+    async function creator(db: Db, name: string) {
+      const person = await addUser(db, name);
+      return { person, call: (await frozenDraft(db, person.id, `${name}'s`)).call };
+    }
+    /** `method` with `person`'s createFund `call` on EntryPoint nonce `nonce`, a quantity or whatever a browser could send. */
+    const createFund = (method: string, person: { account: string }, call: Call, nonce: unknown) =>
+      request(method, sponsored(person.account, { nonce: typeof nonce === "bigint" ? hex(nonce) : nonce }, MAX_CREATE_FUND_GAS, safeCallData([call])));
+    const sign = (db: Db, { person, call }: Awaited<ReturnType<typeof creator>>, nonce: bigint, fast: typeof price | null = price) =>
+      authorizeBundlerRequest(db, asUser(person), createFund("pm_getPaymasterData", person, call, nonce), POLICY, fast, AGENT);
+    const signed = { ok: true };
+    const capped = { ok: false, status: 403, error: `This account already had ${MAX_CREATE_FUND_NONCES} createFunds sponsored; no more are` };
+
+    it("signs nonces 0, 1 and 2, refuses a fourth, and still signs one it already signed, which can't land twice", async () => {
+      const db = await testDb();
+      const ana = await creator(db, "Ana");
+      for (const nonce of [0n, 1n, 2n]) expect(await sign(db, ana, nonce), `nonce ${nonce}`).toMatchObject(signed);
+      expect(await sign(db, ana, 3n)).toEqual(capped);
+      expect(await sign(db, ana, 0n)).toMatchObject(signed);
+      expect(MAX_CREATE_FUND_NONCES).toBe(3);
+    });
+
+    it("counts a nonce signed twice once", async () => {
+      const db = await testDb();
+      const ana = await creator(db, "Ana");
+      for (const nonce of [0n, 0n, 1n, 2n]) expect(await sign(db, ana, nonce), `nonce ${nonce}`).toMatchObject(signed);
+      expect(await sign(db, ana, 3n)).toEqual(capped);
+    });
+
+    it("counts only what the paymaster signs: not estimates, stubs or sends, nor a signature refused for its gas or price", async () => {
+      const db = await testDb();
+      const ana = await creator(db, "Ana");
+      for (const method of ["eth_estimateUserOperationGas", "pm_getPaymasterStubData", "eth_sendUserOperation"]) {
+        for (const nonce of [5n, 6n, 7n, 8n, 9n]) {
+          const answer = await authorizeBundlerRequest(db, asUser(ana.person), createFund(method, ana.person, ana.call, nonce), POLICY, price, AGENT);
+          expect(answer, `${method}, nonce ${nonce}`).toMatchObject(signed);
+        }
+      }
+      const greedy = (nonce: bigint) =>
+        request("pm_getPaymasterData", sponsored(ana.person.account, { nonce: hex(nonce) }, MAX_CREATE_FUND_GAS + 1n, safeCallData([ana.call])));
+      for (const nonce of [10n, 11n, 12n]) {
+        expect(await authorizeBundlerRequest(db, asUser(ana.person), greedy(nonce), POLICY, price, AGENT)).toMatchObject({ ok: false, status: 400 });
+      }
+      const down = async (): Promise<bigint> => {
+        throw new Error("Pimlico is down");
+      };
+      for (const nonce of [13n, 14n, 15n]) expect(await sign(db, ana, nonce, down)).toMatchObject({ ok: false, status: 502 });
+      for (const nonce of [0n, 1n, 2n]) expect(await sign(db, ana, nonce), `nonce ${nonce}`).toMatchObject(signed);
+    });
+
+    it("refuses a createFund on any other nonce key with 403, and one without a nonce it can read with 400, whatever the method", async () => {
+      const db = await testDb();
+      const ana = await creator(db, "Ana");
+      const ask = (method: string, nonce: unknown) =>
+        authorizeBundlerRequest(db, asUser(ana.person), createFund(method, ana.person, ana.call, nonce), POLICY, price, AGENT);
+      for (const method of SPONSORED) {
+        for (const nonce of [1n << 64n, (1n << 64n) + 1n, ((1n << 192n) - 1n) << 64n]) {
+          expect(await ask(method, nonce), `${method}: ${hex(nonce)}`).toMatchObject({ ok: false, status: 403, error: expect.stringContaining("key 0") });
+        }
+        for (const nonce of [undefined, null, 0, "0", "0x", "0xzz", "-0x1", `0x${"f".repeat(65)}`]) {
+          expect(await ask(method, nonce), `${method}: ${String(nonce)}`).toMatchObject({ ok: false, status: 400 });
+        }
+      }
+      for (const nonce of [0n, 1n, 2n]) expect(await sign(db, ana, nonce), `nonce ${nonce}`).toMatchObject(signed); // none of those used one up
+    });
+
+    it("counts per creator: another one still gets their own first nonce signed", async () => {
+      const db = await testDb();
+      const ana = await creator(db, "Ana");
+      const bea = await creator(db, "Bea");
+      for (const nonce of [0n, 1n, 2n]) expect(await sign(db, ana, nonce), `nonce ${nonce}`).toMatchObject(signed);
+      expect(await sign(db, ana, 3n)).toEqual(capped);
+      expect(await sign(db, bea, 0n)).toMatchObject(signed);
+    });
+
+    it("holds the cap on the fork too, where there's no price to check the gas against", async () => {
+      const db = await testDb();
+      const ana = await creator(db, "Ana");
+      for (const nonce of [0n, 1n, 2n]) expect(await sign(db, ana, nonce, null), `nonce ${nonce}`).toMatchObject(signed);
+      expect(await sign(db, ana, 3n, null)).toEqual(capped);
+    });
+
+    it("leaves a live member's contributions and votes alone, on whatever key viem picks", async () => {
+      const { db, juan } = await people();
+      const shapes = [contribute(FUND), contribute(FUND, "usdt"), voteCalls({ fund: FUND, proposalId: 0n, completes: false }), voteCalls({ fund: FUND, proposalId: 0n, completes: true })];
+      for (const calls of [...shapes, ...shapes]) {
+        const nonce = BigInt(Math.floor(Math.random() * 2 ** 48) + 1) << 64n; // a fresh non-zero key, as viem picks one
+        const answer = await authorizeBundlerRequest(
+          db,
+          asUser(juan),
+          request("pm_getPaymasterData", sponsored(juan.account, { nonce: hex(nonce) }, MAX_OPERATION_GAS, safeCallData(calls))),
+          POLICY,
+          price,
+          AGENT,
+        );
+        expect(answer, hex(nonce)).toMatchObject(signed);
+      }
+    });
+
+    it("lets exactly MAX_CREATE_FUND_NONCES of many claims made at once through", async () => {
+      // PGlite runs one transaction at a time anyway, so this guards against a regression rather than proving the
+      // lock: on Neon, the lock on the user's row is what keeps two claims from counting the same rows.
+      const db = await testDb();
+      const ana = await addUser(db, "Ana");
+      const claims = await Promise.all(Array.from({ length: MAX_CREATE_FUND_NONCES + 2 }, (_, i) => claimCreateFundNonce(db, ana.id, BigInt(i))));
+      expect(claims.filter(Boolean)).toHaveLength(MAX_CREATE_FUND_NONCES);
     });
   });
 });

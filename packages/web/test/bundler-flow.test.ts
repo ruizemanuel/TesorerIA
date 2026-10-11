@@ -1,7 +1,20 @@
 import { AGENT_ADDRESS, FUND_FACTORY } from "@tesoreria/agent";
 import { ATTRIBUTION_SUFFIX, type Call, createMemberAccount, createPimlicoBundlerClient } from "@tesoreria/wallet";
 import { createFakePasskey } from "@tesoreria/wallet/testing";
-import { type Address, type Hash, createPublicClient, custom, encodeAbiParameters, getAddress, numberToHex, pad, toFunctionSelector } from "viem";
+import {
+  type Address,
+  type Hash,
+  type Hex,
+  createPublicClient,
+  custom,
+  decodeFunctionData,
+  encodeAbiParameters,
+  getAddress,
+  numberToHex,
+  pad,
+  parseAbi,
+  toFunctionSelector,
+} from "viem";
 import { toWebAuthnAccount } from "viem/account-abstraction";
 import { celo } from "viem/chains";
 import { describe, expect, it } from "vitest";
@@ -18,6 +31,7 @@ const PAYMASTER: Address = getAddress("0x00000000000000000000000000000000000fa57
 const fee = { maxFeePerGas: numberToHex(FAST), maxPriorityFeePerGas: numberToHex(1_000_000_000n) };
 
 const PROXY_CREATION_CODE = toFunctionSelector("proxyCreationCode()");
+const entryPointNonceAbi = parseAbi(["function getNonce(address sender, uint192 key) view returns (uint256)"]);
 
 /** Celo's node, as little of it as a counterfactual Safe's first operation reads. */
 const node = custom({
@@ -25,9 +39,12 @@ const node = custom({
     if (method === "eth_chainId") return numberToHex(celo.id);
     if (method === "eth_getCode") return "0x"; // not deployed yet
     if (method === "eth_call") {
-      const { data } = (params as [{ data: string }])[0];
-      // The factory's proxy bytecode (any bytes will do: only the account's address depends on it), else the EntryPoint's nonce.
-      return data.startsWith(PROXY_CREATION_CODE) ? encodeAbiParameters([{ type: "bytes" }], ["0x6080"]) : pad("0x00", { size: 32 });
+      const { data } = (params as [{ data: Hex }])[0];
+      // The factory's proxy bytecode: any bytes will do, only the account's address depends on it.
+      if (data.startsWith(PROXY_CREATION_CODE)) return encodeAbiParameters([{ type: "bytes" }], ["0x6080"]);
+      // The EntryPoint's nonce for an account that never sent an operation: the key asked for, sequence 0.
+      const { args } = decodeFunctionData({ abi: entryPointNonceAbi, data });
+      return encodeAbiParameters([{ type: "uint256" }], [args[1] << 64n]);
     }
     throw new Error(`unexpected node RPC: ${method}`);
   },
@@ -99,7 +116,9 @@ describe("the requests viem really sends for a sponsored operation", () => {
     };
     for (const [shape, calls] of Object.entries(shapes)) {
       forwarded.length = 0;
-      expect(await bundler.sendUserOperation({ account, calls }), shape).toBe(OP);
+      // As the web sends them (client/wallet.ts): a createFund on nonce key 0, anything else on a fresh key viem picks.
+      const nonce = shape === "createFund" ? await account.getNonce!({ key: 0n }) : undefined;
+      expect(await bundler.sendUserOperation({ account, calls, nonce }), shape).toBe(OP);
 
       expect(forwarded.at(-1)?.method, shape).toBe("eth_sendUserOperation");
       for (const { method, params } of forwarded.filter(({ method }) => method.startsWith("pm_"))) {
@@ -115,5 +134,7 @@ describe("the requests viem really sends for a sponsored operation", () => {
         expect((params[0] as { callData: string }).callData.endsWith(ATTRIBUTION_SUFFIX.slice(2)), `${shape}, ${method}`).toBe(true);
       }
     }
+    // A createFund on the key viem would pick by itself isn't one the gate counts, so it never gets through.
+    await expect(bundler.sendUserOperation({ account, calls: [deploy.call] })).rejects.toThrow("403 A createFund is sponsored only on EntryPoint nonce key 0");
   });
 });

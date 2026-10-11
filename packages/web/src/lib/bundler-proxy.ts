@@ -1,6 +1,6 @@
 import { FUND_FACTORY, USDT, WARS } from "@tesoreria/agent";
 import { ATTRIBUTION_SUFFIX } from "@tesoreria/wallet";
-import { and, eq, isNotNull } from "drizzle-orm";
+import { and, eq, isNotNull, sql } from "drizzle-orm";
 import {
   type Abi,
   type Address,
@@ -20,8 +20,8 @@ import {
   slice,
 } from "viem";
 import { entryPoint07Address } from "viem/account-abstraction";
-import type { Db } from "./db/client";
-import { funds, memberships } from "./db/schema";
+import { type Db, inTransaction } from "./db/client";
+import { createFundNonces, funds, memberships, users } from "./db/schema";
 import { memberFundAbi } from "./fund-abi";
 import { frozenCreateFunds } from "./funds";
 
@@ -216,6 +216,12 @@ export const MAX_CREATE_FUND_GAS = 10_000_000n;
  * about three times that leaves room for Pimlico's estimate, and keeps what one operation can take small.
  */
 export const MAX_OPERATION_GAS = 2_000_000n;
+/**
+ * The most createFund nonces the paymaster signs for one person, ever. A nonce lands at most once, so a creator gets
+ * at most 3 createFunds sponsored: a legit one uses one per fund, and one more for each createFund that reverted
+ * (retrying after a cancelled passkey prompt, or resending one that never came back, reuses the same nonce).
+ */
+export const MAX_CREATE_FUND_NONCES = 3;
 
 const QUANTITY = /^0x[0-9a-fA-F]{1,64}$/;
 
@@ -254,6 +260,41 @@ export function checkSponsoredGas(
   return { ok: true };
 }
 
+/** The operation's EntryPoint nonce, if it's a hex quantity: its key in the upper 192 bits, its sequence in the lower 64. */
+function operationNonce(userOp: unknown): bigint | undefined {
+  const nonce = typeof userOp === "object" && userOp !== null ? (userOp as { nonce?: unknown }).nonce : undefined;
+  return typeof nonce === "string" && QUANTITY.test(nonce) ? BigInt(nonce) : undefined;
+}
+
+/**
+ * Whether the paymaster may sign `userId`'s createFund on `nonce`: it's one they already got signed (re-signing it
+ * can't make it land twice), or a new one within MAX_CREATE_FUND_NONCES, which it then counts. The user's row is
+ * locked first, so two claims by one person never count the same rows: the second waits for the first to commit,
+ * and then reads what it left.
+ */
+export async function claimCreateFundNonce(db: Db, userId: string, nonce: bigint): Promise<boolean> {
+  const [, , [claimed]] = await inTransaction(db, (tx) => {
+    const signed = tx.$count(createFundNonces, eq(createFundNonces.userId, userId));
+    return [
+      tx.select({ id: users.id }).from(users).where(eq(users.id, userId)).for("update"),
+      tx
+        .insert(createFundNonces)
+        .select((qb) =>
+          qb
+            .select({ userId: users.id, nonce: sql<bigint>`${nonce.toString()}::numeric`.as("nonce"), createdAt: sql<Date>`now()`.as("created_at") })
+            .from(users)
+            .where(and(eq(users.id, userId), sql`${signed} < ${MAX_CREATE_FUND_NONCES}`)),
+        )
+        .onConflictDoNothing(),
+      tx
+        .select({ nonce: createFundNonces.nonce })
+        .from(createFundNonces)
+        .where(and(eq(createFundNonces.userId, userId), eq(createFundNonces.nonce, nonce))),
+    ];
+  });
+  return claimed !== undefined;
+}
+
 /** The live funds `userId` is a member of, and the createFund of each draft they created that is being created, naming `agent`. */
 async function sponsorshipOf(db: Db, userId: string, agent: Address): Promise<Sponsorship> {
   const live = await db
@@ -271,11 +312,17 @@ async function sponsorshipOf(db: Db, userId: string, agent: Address): Promise<Sp
  *   live fund, or the creator of a draft being created (deployCall freezes it to `deploying` before the browser
  *   asks for anything), and only for the calls `checkCalls` allows: a stranger who makes an account and a draft
  *   gets nothing paid, and a creator only the createFund deployCall built for their frozen draft, naming `agent`
- *   (the server's, `agentAddress`).
+ *   (the server's, `agentAddress`), and only on EntryPoint nonce key 0, the one the web sends it on.
  *
  * `fastMaxFeePerGas` reads Pimlico's current price, only when it's needed: a sponsoring request (pm_getPaymasterData)
  * also has to pass `checkSponsoredGas`, with 10M gas for a createFund and 2M for anything else, and if the price can't
  * be read it's refused with 502 rather than signed blind. It's null only on the fork, which has no paymaster to protect.
+ *
+ * Last, a createFund is signed only on one of the creator's MAX_CREATE_FUND_NONCES nonces (`claimCreateFundNonce`),
+ * on the fork too. A nonce lands at most once, so that's at most that many createFunds sponsored per creator, ever,
+ * however long a draft stays `deploying` (it's live only once the creator's browser reports the receipt). Counted
+ * only there: estimating, stubbing and sending sign nothing, and a request refused for its gas or price doesn't use
+ * one up.
  */
 export async function authorizeBundlerRequest(
   db: Db,
@@ -300,16 +347,26 @@ export async function authorizeBundlerRequest(
   if (calls === null) return { ok: false, status: 403, error: "Only a Safe's calls, one or a MultiSendCallOnly batch, are sponsored" };
   const allowed = checkCalls(calls, sponsorship);
   if (!allowed.ok) return allowed;
+  // The web sends a createFund on nonce key 0 (client/wallet.ts), the only key whose nonces are counted below.
+  const nonce = allowed.createsFund ? operationNonce(params[0]) : undefined;
+  if (allowed.createsFund && nonce === undefined) return { ok: false, status: 400, error: "The nonce must be a hex quantity" };
+  if (nonce !== undefined && nonce >> 64n !== 0n) return { ok: false, status: 403, error: "A createFund is sponsored only on EntryPoint nonce key 0" };
 
-  if (fastMaxFeePerGas === null || method !== "pm_getPaymasterData") return check;
-  let price: bigint;
-  try {
-    price = await fastMaxFeePerGas();
-  } catch {
-    return { ok: false, status: 502, error: "Couldn't read the current gas price" };
+  if (method !== "pm_getPaymasterData") return check;
+  if (fastMaxFeePerGas !== null) {
+    let price: bigint;
+    try {
+      price = await fastMaxFeePerGas();
+    } catch {
+      return { ok: false, status: 502, error: "Couldn't read the current gas price" };
+    }
+    const gas = checkSponsoredGas(params[0], price, allowed.createsFund ? MAX_CREATE_FUND_GAS : MAX_OPERATION_GAS);
+    if (!gas.ok) return gas;
   }
-  const gas = checkSponsoredGas(params[0], price, allowed.createsFund ? MAX_CREATE_FUND_GAS : MAX_OPERATION_GAS);
-  return gas.ok ? check : gas;
+  if (nonce !== undefined && !(await claimCreateFundNonce(db, user.id, nonce))) {
+    return { ok: false, status: 403, error: `This account already had ${MAX_CREATE_FUND_NONCES} createFunds sponsored; no more are` };
+  }
+  return check;
 }
 
 /**

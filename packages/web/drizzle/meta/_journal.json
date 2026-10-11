@@ -15,6 +15,13 @@
       "when": 1791652830784,
       "tag": "0001_short_ghost_rider",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1791684042291,
+      "tag": "0002_create_fund_nonces",
+      "breakpoints": true
     }
   ]
 }
