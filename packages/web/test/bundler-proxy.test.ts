@@ -288,6 +288,8 @@ describe("authorizeBundlerRequest", () => {
   /** What `currentUser` gives: the account checksummed. */
   const asUser = (user: { id: string; account: string }) => ({ id: user.id, account: getAddress(user.account) });
   const price = async () => FAST;
+  /** The server's agent, as `agentAddress` gives it. */
+  const agent = () => AGENT;
 
   /** A stranger; someone only in a draft; a live fund's member; and the creator of a fund being created. */
   async function people() {
@@ -312,19 +314,19 @@ describe("authorizeBundlerRequest", () => {
     for (const method of SPONSORED) {
       const juanOp = request(method, sponsored(juan.account));
       const anaOp = request(method, sponsored(ana.account, {}, MAX_OPERATION_GAS, safeCallData([anaCreate])));
-      expect(await authorizeBundlerRequest(db, asUser(juan), juanOp, POLICY, price, AGENT), method).toMatchObject({ ok: true });
-      expect(await authorizeBundlerRequest(db, asUser(ana), anaOp, POLICY, price, AGENT), method).toMatchObject({ ok: true });
+      expect(await authorizeBundlerRequest(db, asUser(juan), juanOp, POLICY, price, agent), method).toMatchObject({ ok: true });
+      expect(await authorizeBundlerRequest(db, asUser(ana), anaOp, POLICY, price, agent), method).toMatchObject({ ok: true });
       for (const person of [stranger, founder]) {
-        const refused = await authorizeBundlerRequest(db, asUser(person), request(method, sponsored(person.account)), POLICY, price, AGENT);
+        const refused = await authorizeBundlerRequest(db, asUser(person), request(method, sponsored(person.account)), POLICY, price, agent);
         expect(refused, `${method}: ${person.name}`).toMatchObject({ ok: false, status: 403 });
       }
     }
     // Reading the chain or a receipt costs the paymaster nothing: anyone in a fund, draft or live, may.
     for (const person of [founder, juan, ana]) {
-      expect(await authorizeBundlerRequest(db, asUser(person), rpc("eth_getUserOperationReceipt", ["0x01"]), POLICY, price, AGENT), person.name).toMatchObject({ ok: true });
+      expect(await authorizeBundlerRequest(db, asUser(person), rpc("eth_getUserOperationReceipt", ["0x01"]), POLICY, price, agent), person.name).toMatchObject({ ok: true });
     }
-    expect(await authorizeBundlerRequest(db, asUser(stranger), rpc("eth_chainId"), POLICY, price, AGENT)).toMatchObject({ ok: false, status: 403 });
-    expect(await authorizeBundlerRequest(db, null, rpc("eth_chainId"), POLICY, price, AGENT)).toMatchObject({ ok: false, status: 401 });
+    expect(await authorizeBundlerRequest(db, asUser(stranger), rpc("eth_chainId"), POLICY, price, agent)).toMatchObject({ ok: false, status: 403 });
+    expect(await authorizeBundlerRequest(db, null, rpc("eth_chainId"), POLICY, price, agent)).toMatchObject({ ok: false, status: 401 });
   });
 
   it("refuses calls off the list before reading any price, whoever asks", async () => {
@@ -340,7 +342,7 @@ describe("authorizeBundlerRequest", () => {
     ];
     for (const [person, callData] of cases) {
       for (const method of SPONSORED) {
-        const refused = await authorizeBundlerRequest(db, asUser(person), request(method, sponsored(person.account, {}, MAX_OPERATION_GAS, callData)), POLICY, reads, AGENT);
+        const refused = await authorizeBundlerRequest(db, asUser(person), request(method, sponsored(person.account, {}, MAX_OPERATION_GAS, callData)), POLICY, reads, agent);
         expect(refused, `${person.name}, ${method}: ${callData.slice(0, 74)}`).toMatchObject({ ok: false, status: 403 });
       }
     }
@@ -350,7 +352,7 @@ describe("authorizeBundlerRequest", () => {
   it("gives the creator's createFund a ceiling of 10M gas, and every other operation one of 2M", async () => {
     const { db, juan, ana, anaCreate } = await people();
     const sign = (person: typeof ana, total: bigint, callData: Hex) =>
-      authorizeBundlerRequest(db, asUser(person), request("pm_getPaymasterData", sponsored(person.account, {}, total, callData)), POLICY, price, AGENT);
+      authorizeBundlerRequest(db, asUser(person), request("pm_getPaymasterData", sponsored(person.account, {}, total, callData)), POLICY, price, agent);
     const create = safeCallData([anaCreate]);
     expect(await sign(ana, MAX_CREATE_FUND_GAS, create)).toMatchObject({ ok: true });
     expect(await sign(ana, MAX_CREATE_FUND_GAS + 1n, create)).toMatchObject({ ok: false, status: 400, error: "Gas limits too high" });
@@ -367,19 +369,19 @@ describe("authorizeBundlerRequest", () => {
     const reads = vi.fn(price);
     const sponsor = (change: Record<string, unknown> = {}) => request("pm_getPaymasterData", sponsored(juan.account, change));
 
-    const ok = await authorizeBundlerRequest(db, asUser(juan), sponsor(), POLICY, reads, AGENT);
+    const ok = await authorizeBundlerRequest(db, asUser(juan), sponsor(), POLICY, reads, agent);
     expect(ok).toMatchObject({ ok: true, request: { params: [sponsored(juan.account), entryPoint07Address, CELO, { sponsorshipPolicyId: POLICY }] } });
     expect(reads).toHaveBeenCalledTimes(1);
     const high = { maxFeePerGas: hex(MAX_FEE_MULTIPLE * FAST + 1n) };
-    expect(await authorizeBundlerRequest(db, asUser(juan), sponsor(high), POLICY, reads, AGENT)).toMatchObject({ ok: false, status: 400 });
+    expect(await authorizeBundlerRequest(db, asUser(juan), sponsor(high), POLICY, reads, agent)).toMatchObject({ ok: false, status: 400 });
 
     reads.mockClear();
     const answers = await Promise.all([
-      authorizeBundlerRequest(db, null, sponsor(), POLICY, reads, AGENT), // logged out
-      authorizeBundlerRequest(db, asUser(juan), request("pm_getPaymasterData", sponsored(OTHER)), POLICY, reads, AGENT), // someone else's operation
-      authorizeBundlerRequest(db, asUser(juan), rpc("eth_chainId"), POLICY, reads, AGENT), // nothing is sponsored
+      authorizeBundlerRequest(db, null, sponsor(), POLICY, reads, agent), // logged out
+      authorizeBundlerRequest(db, asUser(juan), request("pm_getPaymasterData", sponsored(OTHER)), POLICY, reads, agent), // someone else's operation
+      authorizeBundlerRequest(db, asUser(juan), rpc("eth_chainId"), POLICY, reads, agent), // nothing is sponsored
       // The send itself isn't what the paymaster signs: its fees are fixed by then (and checked when it signed).
-      authorizeBundlerRequest(db, asUser(juan), request("eth_sendUserOperation", sponsored(juan.account, high)), POLICY, reads, AGENT),
+      authorizeBundlerRequest(db, asUser(juan), request("eth_sendUserOperation", sponsored(juan.account, high)), POLICY, reads, agent),
     ]);
     expect(answers.map((answer) => answer.ok)).toEqual([false, false, true, true]);
     expect(reads).not.toHaveBeenCalled();
@@ -390,7 +392,7 @@ describe("authorizeBundlerRequest", () => {
     const broken = vi.fn(async (): Promise<bigint> => {
       throw new Error("Pimlico is down");
     });
-    expect(await authorizeBundlerRequest(db, asUser(juan), request("pm_getPaymasterData", sponsored(juan.account)), POLICY, broken, AGENT)).toMatchObject({
+    expect(await authorizeBundlerRequest(db, asUser(juan), request("pm_getPaymasterData", sponsored(juan.account)), POLICY, broken, agent)).toMatchObject({
       ok: false,
       status: 502,
     });
@@ -399,21 +401,38 @@ describe("authorizeBundlerRequest", () => {
   it("doesn't look at fees or gas without a price, as on the fork, which has no paymaster, but still at who and what", async () => {
     const { db, juan, founder, anaCreate } = await people();
     const heavy = { maxFeePerGas: hex(1000n * FAST), callGasLimit: hex(8_000_000n), verificationGasLimit: hex(2_000_000n) };
-    expect(await authorizeBundlerRequest(db, asUser(juan), request("pm_getPaymasterData", sponsored(juan.account, heavy)), POLICY, null, AGENT)).toMatchObject({ ok: true });
+    expect(await authorizeBundlerRequest(db, asUser(juan), request("pm_getPaymasterData", sponsored(juan.account, heavy)), POLICY, null, agent)).toMatchObject({ ok: true });
     const createFund = sponsored(juan.account, heavy, MAX_OPERATION_GAS, safeCallData([anaCreate]));
-    expect(await authorizeBundlerRequest(db, asUser(juan), request("pm_getPaymasterData", createFund), POLICY, null, AGENT)).toMatchObject({ ok: false, status: 403 });
-    expect(await authorizeBundlerRequest(db, asUser(founder), request("pm_getPaymasterData", sponsored(founder.account)), POLICY, null, AGENT)).toMatchObject({
+    expect(await authorizeBundlerRequest(db, asUser(juan), request("pm_getPaymasterData", createFund), POLICY, null, agent)).toMatchObject({ ok: false, status: 403 });
+    expect(await authorizeBundlerRequest(db, asUser(founder), request("pm_getPaymasterData", sponsored(founder.account)), POLICY, null, agent)).toMatchObject({
       ok: false,
       status: 403,
     });
   });
 
+  it("reads the server's agent only for someone creating a fund, so a bad agent key stops nobody else", async () => {
+    const { db, founder, juan, ana, anaCreate } = await people();
+    const badKey = vi.fn((): Address => {
+      throw new Error("bad key");
+    });
+    const contribution = request("pm_getPaymasterData", sponsored(juan.account));
+    expect(await authorizeBundlerRequest(db, asUser(juan), contribution, POLICY, price, badKey)).toMatchObject({ ok: true });
+    for (const person of [founder, juan, ana]) {
+      const reading = await authorizeBundlerRequest(db, asUser(person), rpc("eth_getUserOperationReceipt", ["0x01"]), POLICY, price, badKey);
+      expect(reading, person.name).toMatchObject({ ok: true });
+    }
+    expect(badKey).not.toHaveBeenCalled();
+    // Ana's createFund names the agent, so it can't be checked without it.
+    const create = request("pm_getPaymasterStubData", sponsored(ana.account, {}, MAX_OPERATION_GAS, safeCallData([anaCreate])));
+    await expect(authorizeBundlerRequest(db, asUser(ana), create, POLICY, price, badKey)).rejects.toThrow("bad key");
+  });
+
   describe("the only createFund it sponsors: the one deployCall built for the creator's frozen draft", () => {
-    /** Each sponsored method's answer to `person` sending `calls`, with `agent` as the server's agent. */
-    const answers = (db: Db, person: { id: string; account: string }, calls: Call[], agent: Address = AGENT) =>
+    /** Each sponsored method's answer to `person` sending `calls`, with `server` as the server's agent. */
+    const answers = (db: Db, person: { id: string; account: string }, calls: Call[], server: () => Address = agent) =>
       Promise.all(
         SPONSORED.map((method) =>
-          authorizeBundlerRequest(db, asUser(person), request(method, sponsored(person.account, {}, MAX_CREATE_FUND_GAS, safeCallData(calls))), POLICY, price, agent),
+          authorizeBundlerRequest(db, asUser(person), request(method, sponsored(person.account, {}, MAX_CREATE_FUND_GAS, safeCallData(calls))), POLICY, price, server),
         ),
       );
     const allowed = { ok: true };
@@ -439,7 +458,7 @@ describe("authorizeBundlerRequest", () => {
         for (const answer of await answers(db, ana, [changed(call, change)])) expect(answer, why).toMatchObject(refused);
       }
       // The exact call, but the server names another agent: not the fund the server would run.
-      for (const answer of await answers(db, ana, [call], OTHER)) expect(answer).toMatchObject(refused);
+      for (const answer of await answers(db, ana, [call], () => OTHER)) expect(answer).toMatchObject(refused);
     });
 
     it("refuses the call of a draft that is open again (`draft`), not being created", async () => {
@@ -474,7 +493,7 @@ describe("authorizeBundlerRequest", () => {
     const createFund = (method: string, person: { account: string }, call: Call, nonce: unknown) =>
       request(method, sponsored(person.account, { nonce: typeof nonce === "bigint" ? hex(nonce) : nonce }, MAX_CREATE_FUND_GAS, safeCallData([call])));
     const sign = (db: Db, { person, call }: Awaited<ReturnType<typeof creator>>, nonce: bigint, fast: typeof price | null = price) =>
-      authorizeBundlerRequest(db, asUser(person), createFund("pm_getPaymasterData", person, call, nonce), POLICY, fast, AGENT);
+      authorizeBundlerRequest(db, asUser(person), createFund("pm_getPaymasterData", person, call, nonce), POLICY, fast, agent);
     const signed = { ok: true };
     const capped = { ok: false, status: 403, error: `This account already had ${MAX_CREATE_FUND_NONCES} createFunds sponsored; no more are` };
 
@@ -499,14 +518,14 @@ describe("authorizeBundlerRequest", () => {
       const ana = await creator(db, "Ana");
       for (const method of ["eth_estimateUserOperationGas", "pm_getPaymasterStubData", "eth_sendUserOperation"]) {
         for (const nonce of [5n, 6n, 7n, 8n, 9n]) {
-          const answer = await authorizeBundlerRequest(db, asUser(ana.person), createFund(method, ana.person, ana.call, nonce), POLICY, price, AGENT);
+          const answer = await authorizeBundlerRequest(db, asUser(ana.person), createFund(method, ana.person, ana.call, nonce), POLICY, price, agent);
           expect(answer, `${method}, nonce ${nonce}`).toMatchObject(signed);
         }
       }
       const greedy = (nonce: bigint) =>
         request("pm_getPaymasterData", sponsored(ana.person.account, { nonce: hex(nonce) }, MAX_CREATE_FUND_GAS + 1n, safeCallData([ana.call])));
       for (const nonce of [10n, 11n, 12n]) {
-        expect(await authorizeBundlerRequest(db, asUser(ana.person), greedy(nonce), POLICY, price, AGENT)).toMatchObject({ ok: false, status: 400 });
+        expect(await authorizeBundlerRequest(db, asUser(ana.person), greedy(nonce), POLICY, price, agent)).toMatchObject({ ok: false, status: 400 });
       }
       const down = async (): Promise<bigint> => {
         throw new Error("Pimlico is down");
@@ -519,7 +538,7 @@ describe("authorizeBundlerRequest", () => {
       const db = await testDb();
       const ana = await creator(db, "Ana");
       const ask = (method: string, nonce: unknown) =>
-        authorizeBundlerRequest(db, asUser(ana.person), createFund(method, ana.person, ana.call, nonce), POLICY, price, AGENT);
+        authorizeBundlerRequest(db, asUser(ana.person), createFund(method, ana.person, ana.call, nonce), POLICY, price, agent);
       for (const method of SPONSORED) {
         for (const nonce of [1n << 64n, (1n << 64n) + 1n, ((1n << 192n) - 1n) << 64n]) {
           expect(await ask(method, nonce), `${method}: ${hex(nonce)}`).toMatchObject({ ok: false, status: 403, error: expect.stringContaining("key 0") });
@@ -558,7 +577,7 @@ describe("authorizeBundlerRequest", () => {
           request("pm_getPaymasterData", sponsored(juan.account, { nonce: hex(nonce) }, MAX_OPERATION_GAS, safeCallData(calls))),
           POLICY,
           price,
-          AGENT,
+          agent,
         );
         expect(answer, hex(nonce)).toMatchObject(signed);
       }

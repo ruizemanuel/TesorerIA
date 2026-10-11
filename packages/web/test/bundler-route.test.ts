@@ -12,12 +12,22 @@ import { safeCallData } from "./support/safe";
 // The route as the server runs it, with the session and the database standing in, and Pimlico's answer faked.
 const KEY = "pim_test_key_8b1f";
 const POLICY = "sp_server_policy";
-const state = vi.hoisted(() => ({ user: null as CurrentUser | null, db: null as unknown }));
+const state = vi.hoisted(() => ({ user: null as CurrentUser | null, db: null as unknown, agentKeyIsWrong: false }));
 vi.mock("../src/lib/current-user", () => ({ currentUser: async () => state.user }));
 vi.mock("../src/lib/db/client", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../src/lib/db/client")>()),
   getDb: async () => state.db,
 }));
+vi.mock("../src/lib/agent-address", async (importOriginal) => {
+  const real = await importOriginal<typeof import("../src/lib/agent-address")>();
+  return {
+    // With `agentKeyIsWrong`, what the real one does on mainnet when AGENT_PRIVATE_KEY isn't AGENT_ADDRESS's key.
+    agentAddress: () => {
+      if (state.agentKeyIsWrong) throw new Error("AGENT_PRIVATE_KEY is not the key of AGENT_ADDRESS");
+      return real.agentAddress();
+    },
+  };
+});
 
 const CELO = numberToHex(42220);
 const FUND: Address = randomAccount(); // the member's live fund
@@ -71,6 +81,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   vi.clearAllMocks();
+  state.agentKeyIsWrong = false;
 });
 
 function call(body: unknown, contentType = "application/json") {
@@ -128,6 +139,13 @@ describe("POST /api/bundler", () => {
       expect((await call(rpc(method, params))).status, method).toBe(403);
     }
     expect(pimlico).not.toHaveBeenCalled();
+  });
+
+  it("serves a member even when the agent's key is wrong: only a createFund needs the agent's address", async () => {
+    state.agentKeyIsWrong = true;
+    expect((await call(rpc("eth_chainId"))).status).toBe(200);
+    expect((await call(rpc("pm_getPaymasterStubData", [op(member.account), entryPoint07Address, CELO, {}]))).status).toBe(200);
+    expect(asked()).toEqual(["eth_chainId", "pm_getPaymasterStubData"]);
   });
 
   it("answers 502 to a paymaster stub that says it's final, and passes nothing of it on", async () => {
@@ -244,6 +262,13 @@ describe("POST /api/bundler", () => {
         expect(response.status, why).toBe(403);
         expect(await response.json(), why).toMatchObject({ error: { message: expect.stringContaining("createFund") } });
       }
+      expect(pimlico).not.toHaveBeenCalled();
+    });
+
+    it("can't check a createFund without the agent's address, and asks Pimlico nothing", async () => {
+      state.user = creator;
+      state.agentKeyIsWrong = true;
+      await expect(stub(futbol)).rejects.toThrow("AGENT_ADDRESS");
       expect(pimlico).not.toHaveBeenCalled();
     });
   });

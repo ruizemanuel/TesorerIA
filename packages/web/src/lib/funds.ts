@@ -251,16 +251,19 @@ function createFundData(
 }
 
 /**
- * The createFund calldata of each draft `creatorId` made that is being created (`deploying`), naming `agent`:
+ * The createFund calldata of each draft `creatorId` made that is being created (`deploying`), naming `agent()`:
  * exactly what deployCall built when it froze it, since nobody joins and the votes don't change until it's live
- * or open again. The only createFunds the bundler gateway sponsors (spec, 6).
+ * or open again. The only createFunds the bundler gateway sponsors (spec, 6). `agent` is called only if there's
+ * one: it throws on a misconfigured server (`agentAddress`), which mustn't stop everyone else's requests.
  */
-export async function frozenCreateFunds(db: Db, creatorId: string, agent: Address): Promise<Hex[]> {
+export async function frozenCreateFunds(db: Db, creatorId: string, agent: () => Address): Promise<Hex[]> {
   const frozen = await db
     .select({ id: funds.id, name: funds.name, agreedExpense: funds.agreedExpense, weeklyCap: funds.weeklyCap, votesRequired: funds.votesRequired })
     .from(funds)
     .where(and(eq(funds.creatorId, creatorId), eq(funds.status, "deploying"), isNotNull(funds.votesRequired)));
-  return Promise.all(frozen.map(async (draft) => createFundData(draft, await membersOf(db, draft.id), draft.votesRequired!, agent)));
+  if (frozen.length === 0) return [];
+  const named = agent();
+  return Promise.all(frozen.map(async (draft) => createFundData(draft, await membersOf(db, draft.id), draft.votesRequired!, named)));
 }
 
 /**

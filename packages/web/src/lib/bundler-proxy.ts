@@ -295,8 +295,11 @@ export async function claimCreateFundNonce(db: Db, userId: string, nonce: bigint
   return claimed !== undefined;
 }
 
-/** The live funds `userId` is a member of, and the createFund of each draft they created that is being created, naming `agent`. */
-async function sponsorshipOf(db: Db, userId: string, agent: Address): Promise<Sponsorship> {
+/**
+ * The live funds `userId` is a member of, and the createFund of each draft they created that is being created,
+ * naming `agent()`, which is called only if there's one.
+ */
+async function sponsorshipOf(db: Db, userId: string, agent: () => Address): Promise<Sponsorship> {
   const live = await db
     .select({ address: funds.address })
     .from(memberships)
@@ -311,8 +314,10 @@ async function sponsorshipOf(db: Db, userId: string, agent: Address): Promise<Sp
  * - what carries the sponsorship (estimating, stubbing, signing or sending an operation) is only for a member of a
  *   live fund, or the creator of a draft being created (deployCall freezes it to `deploying` before the browser
  *   asks for anything), and only for the calls `checkCalls` allows: a stranger who makes an account and a draft
- *   gets nothing paid, and a creator only the createFund deployCall built for their frozen draft, naming `agent`
- *   (the server's, `agentAddress`), and only on EntryPoint nonce key 0, the one the web sends it on.
+ *   gets nothing paid, and a creator only the createFund deployCall built for their frozen draft, naming `agent()`
+ *   (the server's, `agentAddress`), and only on EntryPoint nonce key 0, the one the web sends it on. `agent` is
+ *   called only for someone with a draft being created: it throws when the server's agent key is wrong, and that
+ *   mustn't stop a member's contributions and votes, or anyone's reads.
  *
  * `fastMaxFeePerGas` reads Pimlico's current price, only when it's needed: a sponsoring request (pm_getPaymasterData)
  * also has to pass `checkSponsoredGas`, with 10M gas for a createFund and 2M for anything else, and if the price can't
@@ -330,7 +335,7 @@ export async function authorizeBundlerRequest(
   body: unknown,
   sponsorshipPolicyId: string,
   fastMaxFeePerGas: (() => Promise<bigint>) | null,
-  agent: Address,
+  agent: () => Address,
 ): Promise<BundlerCheck> {
   const check = checkBundlerRequest(body, user?.account ?? null, sponsorshipPolicyId);
   if (!check.ok || user === null) return check; // without a user the check never passes
