@@ -46,6 +46,17 @@ describe("buildFundView", () => {
     expect(view({}, getAddress("0x0000000000000000000000000000000000000bad")).me).toBeNull();
   });
 
+  it("says what you paid ahead from 1 % of a weekly fee up; below that it's Aportar's margin on USDT", () => {
+    // The fixture's fund is in its third week: $ 30.000 due each (the first test's Caro owes 20.000 of them).
+    const ahead = (contributed: bigint) =>
+      view({ contributed: [contributed, 30_000n * WARS, 30_000n * WARS], totalContributed: contributed + 60_000n * WARS }).me?.ahead;
+    expect(ahead(31_000n * WARS)).toBe(1_000n * WARS);
+    expect(ahead(30_100n * WARS)).toBe(100n * WARS);
+    expect(ahead(30_099n * WARS)).toBe(0n);
+    expect(ahead(30_000n * WARS)).toBe(0n);
+    expect(ahead(29_000n * WARS)).toBe(0n); // owes instead
+  });
+
   it("says what's left of the week's cap, never below zero", () => {
     expect(view({ spentThisWeek: 45_000n * WARS }).leftThisWeek).toBe(15_000n * WARS);
     expect(view({ spentThisWeek: 70_000n * WARS, weeklyCap: 60_000n * WARS }).leftThisWeek).toBe(0n);

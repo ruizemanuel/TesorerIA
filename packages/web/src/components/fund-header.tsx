@@ -39,7 +39,13 @@ export function FundHeader({
           en el fondo.{" "}
           {me !== null &&
             (me.owed === 0n ? (
-              "Estás al día. "
+              me.ahead > 0n ? (
+                <>
+                  Estás al día, con <span className="money">{formatPesos(me.ahead)}</span> adelantados.{" "}
+                </>
+              ) : (
+                "Estás al día. "
+              )
             ) : (
               <span className="font-semibold text-owe">
                 Debés <span className="money">{formatPesos(me.owed)}</span>.{" "}

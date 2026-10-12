@@ -24,9 +24,18 @@ export type FundView = {
   leftThisWeek: bigint;
   votesRequired: number;
   rows: MemberRow[];
-  /** The viewer's own numbers, when they're a member: what they owe, and their part if it closed today. */
-  me: { owed: bigint; share: bigint } | null;
+  /**
+   * The viewer's own numbers, when they're a member: what they owe, what they paid ahead of this week (when it's worth
+   * saying, AHEAD_SAID_FROM_BPS), and their part if it closed today.
+   */
+  me: { owed: bigint; ahead: bigint; share: bigint } | null;
 };
+
+/**
+ * Paid ahead under this part of a weekly fee (1 %) isn't said: it's the margin Aportar adds to USDT
+ * (USDT_MARGIN_BPS) and its cents, not money put in ahead.
+ */
+const AHEAD_SAID_FROM_BPS = 100n;
 
 /** The inicio's numbers (spec, 9.2), from a fund's snapshot and what lives off chain. */
 export function buildFundView({
@@ -51,16 +60,20 @@ export function buildFundView({
   viewer: Address | null;
 }): FundView {
   const me = viewer === null ? null : getAddress(viewer);
-  const rows = memberDues({ fund: snapshot, weeklyFee, joined }).map(({ member, owed }, i) => {
+  const dues = memberDues({ fund: snapshot, weeklyFee, joined });
+  const rows = dues.map(({ member, owed }, i) => {
     const address = getAddress(member);
     return { position: i + 1, member: address, name: names.get(address) ?? `Miembro ${i + 1}`, isMe: address === me, owed };
   });
   const mine = rows.find((row) => row.isMe);
   let share = 0n;
+  let ahead = 0n;
   if (mine !== undefined) {
+    const { due, contributed } = dues[mine.position - 1]!;
+    const over = contributed > due ? contributed - due : 0n;
+    ahead = over * 10_000n >= weeklyFee * AHEAD_SAID_FROM_BPS ? over : 0n;
     // Fund._split pays each token in proportion to what each contributed (equal parts if no one did):
     // in pesos, that's the balance times the member's part.
-    const contributed = snapshot.contributed[mine.position - 1] ?? 0n;
     share =
       snapshot.totalContributed === 0n
         ? balance / BigInt(snapshot.members.length)
@@ -78,6 +91,6 @@ export function buildFundView({
     leftThisWeek: snapshot.weeklyCap > snapshot.spentThisWeek ? snapshot.weeklyCap - snapshot.spentThisWeek : 0n,
     votesRequired: snapshot.votesRequired,
     rows,
-    me: mine === undefined ? null : { owed: mine.owed, share },
+    me: mine === undefined ? null : { owed: mine.owed, ahead, share },
   };
 }
