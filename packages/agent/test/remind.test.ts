@@ -41,6 +41,17 @@ describe("memberDues", () => {
     const fund = fundSnapshot({ contributed: [90_000n * WARS_UNIT, 30_000n * WARS_UNIT, 30_000n * WARS_UNIT] });
     expect(memberDues({ fund, weeklyFee: FEE, joined: new Map() })[0]?.owed).toBe(0n);
   });
+
+  it("owes nothing under a centavo, as when a contribution in USDT was credited to the wei and the rest paid as shown", () => {
+    // The real fund, 12/10: 5 USDT credited as 8,034.2278… wARS, then the $ 1.965,77 the screen showed.
+    const credited = 8_034_227_833_761_027_780_166n;
+    const shown = 1_965_770_000_000_000_000_000n;
+    const centavo = WARS_UNIT / 100n;
+    const owed = (contributed: bigint) => memberDues({ fund: fundSnapshot({ week: 0n, contributed: [contributed, 0n, 0n] }), weeklyFee: FEE, joined: new Map() })[0]?.owed;
+    expect(owed(credited + shown)).toBe(0n);
+    expect(owed(FEE - centavo + 1n)).toBe(0n);
+    expect(owed(FEE - centavo)).toBe(centavo);
+  });
 });
 
 describe("closeShares", () => {

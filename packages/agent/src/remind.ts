@@ -23,8 +23,14 @@ export function joinWeeks(events: readonly FundEvent[], weekOf: (event: FundEven
 export type MemberDues = { member: Address; due: bigint; contributed: bigint; owed: bigint };
 
 /**
+ * Less than this left to pay is nothing left: one centavo, in wARS. Amounts are shown and typed in centavos, but a
+ * contribution in USDT is credited to the wei, so paying what the screen showed can leave a fraction of a centavo.
+ */
+export const DUES_DUST = 10n ** 16n;
+
+/**
  * Each member's dues at `weeklyFee` per week, from the week they joined through the current one (spec, 8.1:
- * reminders). `weeklyFee` is the fund's fee, which lives off chain.
+ * reminders). `weeklyFee` is the fund's fee, which lives off chain. Under DUES_DUST owed is nothing.
  */
 export function memberDues({
   fund,
@@ -39,7 +45,8 @@ export function memberDues({
     const weeks = fund.week - (joined.get(getAddress(member)) ?? 0n) + 1n;
     const due = weeks > 0n ? weeklyFee * weeks : 0n;
     const contributed = fund.contributed[i] ?? 0n;
-    return { member, due, contributed, owed: due > contributed ? due - contributed : 0n };
+    const short = due > contributed ? due - contributed : 0n;
+    return { member, due, contributed, owed: short < DUES_DUST ? 0n : short };
   });
 }
 
