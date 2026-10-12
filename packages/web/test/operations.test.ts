@@ -1,7 +1,7 @@
-import { type Hash, getAddress, pad } from "viem";
+import { type Address, type Hash, getAddress, pad, toHex } from "viem";
 import { describe, expect, it } from "vitest";
 import { funds, operations } from "../src/lib/db/schema";
-import { finishOperation, ownsDraft, pendingOperations, recordOperation } from "../src/lib/operations";
+import { finishOperation, lastOperationBlock, ownsDraft, pendingOperations, recordOperation } from "../src/lib/operations";
 import { addUser, testDb } from "./support/db";
 
 const FUND = getAddress("0x00000000000000000000000000000000000f00d1");
@@ -67,5 +67,28 @@ describe("recordOperation", () => {
       [OP, 7n],
       [OP_LATER, null],
     ]);
+  });
+});
+
+describe("lastOperationBlock: what a member's next read must reach (read-your-writes)", () => {
+  it("is the latest block among the member's landed operations, in one fund or in any, and null without one", async () => {
+    const db = await testDb();
+    const ema = await addUser(db, "Ema");
+    const juan = await addUser(db, "Juan");
+    const OTHER: Address = getAddress("0x00000000000000000000000000000000000f00d2");
+    const land = async (userId: string, n: number, fund: Address, block?: bigint) => {
+      const userOpHash: Hash = pad(toHex(n), { size: 32 });
+      await recordOperation(db, userId, { userOpHash, kind: "vote", fund });
+      if (block !== undefined) await finishOperation(db, userId, { userOpHash, transactionHash: TX, success: true, block });
+    };
+    expect(await lastOperationBlock(db, ema.id, FUND)).toBeNull();
+    await land(ema.id, 10, FUND, 100n);
+    await land(ema.id, 11, FUND, 90n);
+    await land(ema.id, 12, OTHER, 300n);
+    await land(ema.id, 13, FUND); // no receipt yet
+    await land(juan.id, 14, FUND, 500n);
+    expect(await lastOperationBlock(db, ema.id, FUND)).toBe(100n);
+    expect(await lastOperationBlock(db, ema.id)).toBe(300n);
+    expect(await lastOperationBlock(db, juan.id, OTHER)).toBeNull();
   });
 });

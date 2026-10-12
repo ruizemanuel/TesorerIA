@@ -1,4 +1,4 @@
-import { and, desc, eq, gt, isNull } from "drizzle-orm";
+import { and, desc, eq, gt, isNull, max } from "drizzle-orm";
 import type { Address, Hash } from "viem";
 import type { Db } from "./db/client";
 import { funds, operations } from "./db/schema";
@@ -44,16 +44,31 @@ export async function ownsDraft(db: Db, userId: string, draftId: string): Promis
   return draft !== undefined;
 }
 
-/** Its receipt arrived. Only the member who sent it can say so. */
+/**
+ * Its receipt arrived. Only the member who sent it can say so. `block` is the receipt's block; a page loaded before
+ * it was asked for doesn't send it.
+ */
 export async function finishOperation(
   db: Db,
   userId: string,
-  { userOpHash, transactionHash, success }: { userOpHash: Hash; transactionHash: Hash; success: boolean },
+  { userOpHash, transactionHash, success, block }: { userOpHash: Hash; transactionHash: Hash; success: boolean; block?: bigint },
 ): Promise<void> {
   await db
     .update(operations)
-    .set({ transactionHash, success })
+    .set({ transactionHash, success, block: block ?? null })
     .where(and(eq(operations.userOpHash, userOpHash), eq(operations.userId, userId)));
+}
+
+/**
+ * The latest block one of this member's operations landed in, in `fund` or in any fund: what their next read of the
+ * chain has to reach to show it (read-your-writes, spec 9.2). Null when none was recorded with its block.
+ */
+export async function lastOperationBlock(db: Db, userId: string, fund?: Address): Promise<bigint | null> {
+  const [row] = await db
+    .select({ block: max(operations.block) })
+    .from(operations)
+    .where(and(eq(operations.userId, userId), fund === undefined ? undefined : eq(operations.fund, fund)));
+  return row?.block ?? null;
 }
 
 /** A member's operations in a fund still on their way, newest first. */

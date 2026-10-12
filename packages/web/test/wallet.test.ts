@@ -31,9 +31,10 @@ const me: Me = { name: "Ema", account: ACCOUNT, credential: { id: "cred", public
 const FUND = getAddress("0x00000000000000000000000000000000000f00d1");
 const OP: Hash = pad("0x01", { size: 32 });
 const TX: Hash = pad("0x02", { size: 32 });
+const BLOCK = 79_925_582n;
 const CALLS = [{ to: FUND, data: "0x" as const }];
 const INFO = { kind: "contribute", fund: FUND, amount: 10_000_000n, token: "usdt" } as const;
-const RECEIPT = { userOpHash: OP, transactionHash: TX, success: true, reason: undefined };
+const RECEIPT = { userOpHash: OP, transactionHash: TX, blockNumber: BLOCK, success: true, reason: undefined };
 /** The account's EntryPoint nonce, as the Safe reads it. */
 const NONCE = vi.fn(async (_parameters?: { key?: bigint }) => 7n);
 
@@ -72,7 +73,7 @@ describe("sendCalls", () => {
     expect(events).toEqual(["signed", "sent", "post /api/operations", "receipt", "post /api/operations/done"]);
     expect(posted()).toEqual([
       ["/api/operations", { kind: "contribute", fund: FUND, amount: "10000000", token: "usdt", userOpHash: OP }],
-      ["/api/operations/done", { userOpHash: OP, transactionHash: TX, success: true }],
+      ["/api/operations/done", { userOpHash: OP, transactionHash: TX, blockNumber: "79925582", success: true }],
     ]);
     expect(passkey.sign).toHaveBeenCalledWith({ hash: "0xdead" });
   });
@@ -99,7 +100,7 @@ describe("sendCalls", () => {
     expect(error).toBeInstanceOf(UserFacingError);
     expect(error.message).toBe("La operación no se pudo completar. No se movió plata.");
     expect(error).not.toBeInstanceOf(OnItsWayError); // it landed and failed: trying again is the right thing
-    expect(posted().at(-1)).toEqual(["/api/operations/done", { userOpHash: OP, transactionHash: TX, success: false }]);
+    expect(posted().at(-1)).toEqual(["/api/operations/done", { userOpHash: OP, transactionHash: TX, blockNumber: "79925582", success: false }]);
   });
 
   it("keeps trying to record an operation that is out, and never asks to send it again", async () => {
@@ -218,7 +219,7 @@ describe("settleOperation", () => {
     });
     await settleOperation(OP);
     expect(requests).toEqual([{ url: "http://localhost:3000/api/bundler", method: "eth_getUserOperationReceipt", params: [OP] }]);
-    expect(posted()).toEqual([["/api/operations/done", { userOpHash: OP, transactionHash: TX, success: false }]]);
+    expect(posted()).toEqual([["/api/operations/done", { userOpHash: OP, transactionHash: TX, blockNumber: "1", success: false }]]);
   });
 
   it("says it's on its way, and records nothing, while the bundler has no receipt for it", async () => {

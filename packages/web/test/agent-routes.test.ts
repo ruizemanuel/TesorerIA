@@ -1,9 +1,10 @@
-import { getAddress } from "viem";
+import { type Hash, getAddress, pad } from "viem";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AGENT_LOCK, type MakeContext } from "../src/lib/agent-runner";
 import type { CurrentUser } from "../src/lib/current-user";
 import type { Db } from "../src/lib/db/client";
 import { acquireLock } from "../src/lib/db/lock";
+import { finishOperation, recordOperation } from "../src/lib/operations";
 import { fakeAgent } from "./support/agent";
 import { addLiveFund, addUser, testDb } from "./support/db";
 import { ANA, BETO, FUND, USDT_UNIT, snapshot } from "./support/fixtures";
@@ -30,6 +31,13 @@ vi.mock("../src/lib/agent-context", () => ({
   },
   txStatus: async () => "success",
   agentInFlight: async () => false,
+}));
+
+const waitForBlock = vi.hoisted(() => vi.fn(async () => true));
+vi.mock("../src/lib/read-your-writes", () => ({ waitForBlock }));
+vi.mock("../src/lib/chain", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../src/lib/chain")>()),
+  celoClient: () => ({}),
 }));
 
 const heartbeat = await import("../src/app/api/agent/heartbeat/route");
@@ -138,5 +146,15 @@ describe("POST /api/agent/run", () => {
     expect(await response.json()).toEqual({ ran: false, reason: "agent unavailable" });
     expect(logged).toHaveBeenCalledWith(expect.stringContaining("AGENT_PRIVATE_KEY is not set"));
     logged.mockRestore();
+  });
+
+  it("waits for the node to have the member's last operation before running the agent (read-your-writes)", async () => {
+    const landed: Hash = pad("0x0c", { size: 32 });
+    await recordOperation(db, ana.id, { userOpHash: landed, kind: "contribute", fund: FUND, amount: 5_000_000n, token: "usdt" });
+    await finishOperation(db, ana.id, { userOpHash: landed, transactionHash: landed, success: true, block: 79_925_582n });
+    waitForBlock.mockClear();
+    expect((await afterContribution()).status).toBe(202);
+    expect(waitForBlock).toHaveBeenCalledWith(expect.anything(), 79_925_582n);
+    expect(state.contexts).toBe(1);
   });
 });

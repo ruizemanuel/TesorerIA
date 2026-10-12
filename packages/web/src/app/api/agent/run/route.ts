@@ -2,15 +2,18 @@ import { randomUUID } from "node:crypto";
 import { shortMessage } from "@tesoreria/agent";
 import { agentContext, agentInFlight, txStatus } from "../../../../lib/agent-context";
 import { runAgent } from "../../../../lib/agent-runner";
+import { celoClient } from "../../../../lib/chain";
 import { currentUser } from "../../../../lib/current-user";
 import { getDb } from "../../../../lib/db/client";
 import { acquireLock } from "../../../../lib/db/lock";
 import { fundsOf } from "../../../../lib/funds";
 import { jsonError } from "../../../../lib/http";
+import { lastOperationBlock } from "../../../../lib/operations";
+import { waitForBlock } from "../../../../lib/read-your-writes";
 
 export const maxDuration = 300;
 
-/** A run right after a contribution, so the agent converts without waiting for the heartbeat (spec, 8.3). */
+/** A run right after a member's operation, so the agent acts without waiting for the heartbeat (spec, 8.3). */
 export async function POST() {
   const user = await currentUser();
   if (user === null) return jsonError(401, "Entrá con tu passkey.");
@@ -18,6 +21,10 @@ export async function POST() {
   if (!(await fundsOf(db, user.id)).some((f) => f.status === "live")) return jsonError(403, "No estás en ningún fondo.");
   // At most once a minute, whoever asks: the lock is never released, it just expires.
   if (!(await acquireLock(db, "agent-run-cooldown", randomUUID(), 60_000))) return jsonError(429, "El agente acaba de correr.");
+  // Read-your-writes: the run reads the chain after the operation that called it (spec, 8.3), or it can miss the
+  // USDT that operation brought and leave it to the next heartbeat.
+  const mine = await lastOperationBlock(db, user.id);
+  if (mine !== null) await waitForBlock(celoClient(), mine);
   try {
     const run = await runAgent(db, (onSent) => agentContext(db, onSent), { heartbeat: true, txStatus, inFlight: agentInFlight });
     return Response.json({ ran: run.ran }, { status: 202 });

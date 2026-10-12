@@ -99,6 +99,7 @@ export async function sendCalls(
   await post("/api/operations/done", {
     userOpHash: result.userOpHash,
     transactionHash: result.transactionHash,
+    blockNumber: result.blockNumber.toString(),
     success: result.success,
   }).catch(() => {});
   if (!result.success) throw new UserFacingError("La operación no se pudo completar. No se movió plata.");
@@ -125,5 +126,10 @@ export async function settleOperation(userOpHash: Hash): Promise<void> {
     if (error instanceof UserOperationReceiptNotFoundError) throw new OnItsWayError({ cause: error });
     throw error;
   }
-  await post("/api/operations/done", { userOpHash, transactionHash: receipt.receipt.transactionHash, success: receipt.success });
+  await post("/api/operations/done", {
+    userOpHash,
+    transactionHash: receipt.receipt.transactionHash,
+    blockNumber: receipt.receipt.blockNumber.toString(),
+    success: receipt.success,
+  });
 }

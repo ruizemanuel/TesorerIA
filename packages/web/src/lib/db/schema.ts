@@ -155,6 +155,8 @@ export const operations = pgTable("operations", {
    */
   nonce: units("nonce"),
   transactionHash: text("transaction_hash"),
+  /** The block its receipt names: this member's next reads wait for the node to reach it (read-your-writes, spec 9.2). */
+  block: units("block"),
   success: boolean("success"),
   createdAt: createdAt(),
 });

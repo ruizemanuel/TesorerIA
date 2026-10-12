@@ -1,12 +1,12 @@
 import { WARS as WARS_TOKEN } from "@tesoreria/agent";
 import { eq } from "drizzle-orm";
-import { type Address, getAddress } from "viem";
+import { type Address, type Hash, getAddress, pad } from "viem";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CurrentUser } from "../src/lib/current-user";
 import type { Db } from "../src/lib/db/client";
 import { expenses, funds, operations } from "../src/lib/db/schema";
 import { formatPesos } from "../src/lib/format";
-import { recordOperation } from "../src/lib/operations";
+import { finishOperation, recordOperation } from "../src/lib/operations";
 import { HistoryGapError, loadFundScreen, loadPublicFundScreen } from "../src/lib/read-fund";
 import { addLiveFund, addUser, randomAccount, testDb } from "./support/db";
 import { BLOCK, CLOCK, WARS, event, snapshot } from "./support/fixtures";
@@ -34,6 +34,9 @@ vi.mock("@tesoreria/agent", async (importOriginal) => ({
   readFund: agent.readFund,
   readFundEvents: agent.readFundEvents,
 }));
+
+const waitForBlock = vi.hoisted(() => vi.fn(async () => true));
+vi.mock("../src/lib/read-your-writes", () => ({ waitForBlock }));
 
 type Person = Awaited<ReturnType<typeof addUser>>;
 const asViewer = (person: Person): CurrentUser => ({ id: person.id, name: person.name, account: getAddress(person.account) });
@@ -260,5 +263,25 @@ describe("loadFundScreen: the public view", () => {
       await send(ana.id, address, "c6");
       expect((await loadFundScreen(address, asViewer(ana), { publicView: true }))!.contributionOnItsWay).toBe(false);
     });
+  });
+});
+
+describe("loadFundScreen: read-your-writes", () => {
+  it("reads the chain once the node has the viewer's last operation in this fund", async () => {
+    const address = await liveFund();
+    const landed: Hash = pad("0x0b", { size: 32 });
+    await recordOperation(db, beto.id, { userOpHash: landed, kind: "vote", fund: address });
+    await finishOperation(db, beto.id, { userOpHash: landed, transactionHash: landed, success: true, block: BLOCK - 5n });
+    waitForBlock.mockClear();
+    agent.readFund.mockClear();
+
+    await loadFundScreen(address, asViewer(beto));
+    expect(waitForBlock).toHaveBeenCalledTimes(1);
+    expect(waitForBlock).toHaveBeenCalledWith(expect.anything(), BLOCK - 5n);
+    expect(waitForBlock.mock.invocationCallOrder[0]!).toBeLessThan(agent.readFund.mock.invocationCallOrder[0]!);
+
+    waitForBlock.mockClear();
+    await loadFundScreen(address, asViewer(caro)); // nothing of hers landed: nothing to wait for
+    expect(waitForBlock).not.toHaveBeenCalled();
   });
 });

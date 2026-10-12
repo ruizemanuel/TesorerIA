@@ -1,3 +1,4 @@
+import { eq } from "drizzle-orm";
 import { type Hash, getAddress, pad } from "viem";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CurrentUser } from "../src/lib/current-user";
@@ -109,6 +110,23 @@ describe("POST /api/operations/done", () => {
   it("answers 400 to a receipt that is not a pair of hashes and a verdict", async () => {
     for (const body of [{ userOpHash: OP, transactionHash: "0x02", success: true }, { userOpHash: OP, transactionHash: TX, success: "yes" }, {}]) {
       expect((await finish(post("/api/operations/done", body))).status, JSON.stringify(body)).toBe(400);
+    }
+  });
+
+  it("keeps the receipt's block, and takes a receipt without it from a page loaded before it was asked for", async () => {
+    await record(post("/api/operations", { userOpHash: OP, kind: "vote", fund: FUND }));
+    const done = await finish(post("/api/operations/done", { userOpHash: OP, transactionHash: TX, success: true, blockNumber: "79925582" }));
+    expect(done.status).toBe(200);
+    expect((await db.select().from(operations).where(eq(operations.userOpHash, OP)))[0]).toMatchObject({ transactionHash: TX, block: 79_925_582n });
+
+    const OLD_PAGE: Hash = pad("0x03", { size: 32 });
+    await record(post("/api/operations", { userOpHash: OLD_PAGE, kind: "vote", fund: FUND }));
+    expect((await finish(post("/api/operations/done", { userOpHash: OLD_PAGE, transactionHash: TX, success: true }))).status).toBe(200);
+    expect((await db.select().from(operations).where(eq(operations.userOpHash, OLD_PAGE)))[0]).toMatchObject({ transactionHash: TX, block: null });
+
+    for (const blockNumber of ["0x10", "-1", "", 79925582]) {
+      const answer = await finish(post("/api/operations/done", { userOpHash: OP, transactionHash: TX, success: true, blockNumber }));
+      expect(answer.status, JSON.stringify(blockNumber)).toBe(400);
     }
   });
 });

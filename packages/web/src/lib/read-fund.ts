@@ -9,7 +9,8 @@ import { expenses, funds, memberships, users } from "./db/schema";
 import { memberFundAbi } from "./fund-abi";
 import { type FundView, buildFundView } from "./fund-view";
 import { ttlMemo } from "./memo";
-import { pendingOperations } from "./operations";
+import { lastOperationBlock, pendingOperations } from "./operations";
+import { waitForBlock } from "./read-your-writes";
 import { type ProposalState, type TimelineItem, buildTimeline } from "./timeline";
 
 export type FundScreen = {
@@ -66,6 +67,9 @@ export async function loadFundScreen(
 
   // The balance, the block's time and the history are all read up to the snapshot's block.
   const client = celoClient();
+  // Read-your-writes: the viewer's own last operation is on the screen even when the node is a block behind (spec, 9.2).
+  const mine = publicView || viewer === null ? null : await lastOperationBlock(db, viewer.id, getAddress(address));
+  if (mine !== null) await waitForBlock(client, mine);
   const snapshot = await readFund(client, getAddress(address));
   const [balance, block, events] = await Promise.all([
     client.readContract({ address: snapshot.address, abi: memberFundAbi, functionName: "balanceInWars", blockNumber: snapshot.block }),
