@@ -30,3 +30,9 @@ export const USDT_USD_FEED: Address = "0x5e37AF40A7A344ec9b03CCD34a250F3dA9a20B0
 export const IDENTITY_REGISTRY: Address = "0x8004A169FB4a3325136EB29fA0ceB6D2e539a432";
 /** Blockscout's Etherscan-style API for Celo: a fund's whole log history without the RPC's 5,000-block limit. */
 export const BLOCKSCOUT_API = "https://celo.blockscout.com/api";
+/**
+ * The same calls through Blockscout's PRO API, for Celo (chain 42220), with a free key from dev.blockscout.com
+ * (5 requests a second, 100K credits a day). Since Blockscout v12 (7/10/2026) the explorer's own API lets an IP make
+ * 10 requests and then answers 429 for about 45 minutes, and in production an old explorer-account key didn't lift it.
+ */
+export const BLOCKSCOUT_PRO_API = "https://api.blockscout.com/v2/api?chain_id=42220";

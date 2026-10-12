@@ -1,4 +1,4 @@
-import { BLOCKSCOUT_API, type LogReader, RPC_LOG_RANGE, blockscoutLogReader, rpcLogReader } from "@tesoreria/agent";
+import { BLOCKSCOUT_API, BLOCKSCOUT_PRO_API, type LogReader, RPC_LOG_RANGE, blockscoutLogReader, rpcLogReader } from "@tesoreria/agent";
 import { type Chain, type Hash, type PublicClient, type Transport, createPublicClient, getAbiItem, http } from "viem";
 import { entryPoint07Abi, entryPoint07Address } from "viem/account-abstraction";
 import { base, celo } from "viem/chains";
@@ -21,11 +21,36 @@ export function baseClient(): ChainClient {
   return shared.tesoreriaBase;
 }
 
-/** A fund's history: Blockscout plus the node on mainnet; on the fork, the node alone (Blockscout doesn't know it). */
+/** About a day of Celo's one-second blocks: at most 20 of the node's 5,000-block requests. */
+export const NODE_FALLBACK_BLOCKS = 20n * RPC_LOG_RANGE;
+
+/**
+ * `primary`, but a history of at most `maxBlocks` that it fails to read comes from `node` instead: a young fund's page
+ * and heartbeat don't stop when Blockscout does (the real fund's page did, on 11/10, on its 429s). A longer history
+ * still needs `primary`, and its failure still throws.
+ */
+export function withNodeFallback(primary: LogReader, node: LogReader, maxBlocks = NODE_FALLBACK_BLOCKS): LogReader {
+  return async (query) => {
+    try {
+      return await primary(query);
+    } catch (error) {
+      if (query.toBlock - query.fromBlock + 1n > maxBlocks) throw error;
+      console.warn(`Blockscout failed (${error instanceof Error ? error.message : String(error)}): reading the history from the node`);
+      return node(query);
+    }
+  };
+}
+
+/**
+ * A fund's history: Blockscout plus the node on mainnet, through the PRO API when there's a key (see
+ * BLOCKSCOUT_PRO_API), and from the node alone when Blockscout fails on a short one; on the fork, the node alone
+ * (Blockscout doesn't know it).
+ */
 export function logReader(): LogReader {
   const rpc = rpcLogReader(celoClient());
   if (env().CHAIN_MODE === "fork") return rpc;
-  return blockscoutLogReader({ apiUrl: BLOCKSCOUT_API, rpc, apiKey: env().BLOCKSCOUT_API_KEY });
+  const apiKey = env().BLOCKSCOUT_API_KEY;
+  return withNodeFallback(blockscoutLogReader({ apiUrl: apiKey === undefined ? BLOCKSCOUT_API : BLOCKSCOUT_PRO_API, rpc, apiKey }), rpc);
 }
 
 export type LandedOperation = { userOpHash: Hash; transactionHash: Hash; success: boolean };

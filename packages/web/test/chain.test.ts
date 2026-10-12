@@ -1,7 +1,8 @@
 import { type Hash, pad } from "viem";
 import { entryPoint07Address } from "viem/account-abstraction";
 import { describe, expect, it, vi } from "vitest";
-import { userOperationFinder } from "../src/lib/chain";
+import type { LogReader, RawLog } from "@tesoreria/agent";
+import { NODE_FALLBACK_BLOCKS, userOperationFinder, withNodeFallback } from "../src/lib/chain";
 
 const OP: Hash = pad("0x0b", { size: 32 });
 const RESEND: Hash = pad("0x0c", { size: 32 });
@@ -53,5 +54,35 @@ describe("userOperationFinder", () => {
     expect(ranges.at(0)?.[0]).toBe(LATEST - 12_600n);
     expect(ranges.at(-1)?.[1]).toBe(LATEST);
     expect(ranges).toHaveLength(3);
+  });
+});
+
+describe("withNodeFallback", () => {
+  const FUND = "0x00000000000000000000000000000000000F00D5" as const;
+  const LOG: RawLog = { address: FUND, topics: [], data: "0x", blockNumber: 5n, transactionHash: TX, logIndex: 0 };
+  const failing: LogReader = async () => {
+    throw new Error("Blockscout answered HTTP 429 for its indexed block");
+  };
+
+  it("reads a short history from the node when Blockscout fails", async () => {
+    const node = vi.fn<LogReader>(async () => [LOG]);
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const read = withNodeFallback(failing, node);
+    expect(await read({ address: FUND, fromBlock: 1n, toBlock: NODE_FALLBACK_BLOCKS })).toEqual([LOG]);
+    expect(node).toHaveBeenCalledWith({ address: FUND, fromBlock: 1n, toBlock: NODE_FALLBACK_BLOCKS });
+  });
+
+  it("still throws for a history longer than the node should read alone", async () => {
+    const node = vi.fn<LogReader>(async () => [LOG]);
+    const read = withNodeFallback(failing, node);
+    await expect(read({ address: FUND, fromBlock: 0n, toBlock: NODE_FALLBACK_BLOCKS })).rejects.toThrow("HTTP 429");
+    expect(node).not.toHaveBeenCalled();
+  });
+
+  it("asks the node nothing while Blockscout answers", async () => {
+    const node = vi.fn<LogReader>(async () => []);
+    const read = withNodeFallback(async () => [LOG], node);
+    expect(await read({ address: FUND, fromBlock: 1n, toBlock: 10n })).toEqual([LOG]);
+    expect(node).not.toHaveBeenCalled();
   });
 });

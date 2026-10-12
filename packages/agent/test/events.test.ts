@@ -196,6 +196,16 @@ describe("blockscoutLogReader", () => {
     ]);
   });
 
+  it("adds its query to an API URL that already has one, like the PRO API's chain_id", async () => {
+    const { fetchFn, urls } = fakeFetch([head(10n), { status: "0", message: "No logs found", result: [] }]);
+    const read = blockscoutLogReader({ apiUrl: "https://example.org/v2/api?chain_id=42220", rpc: noTail, fetchFn, apiKey: "proapi_k" });
+    await read({ address: FUND, fromBlock: 0n, toBlock: 10n });
+    expect(urls).toEqual([
+      "https://example.org/v2/api?chain_id=42220&module=block&action=eth_block_number&apikey=proapi_k",
+      `https://example.org/v2/api?chain_id=42220&module=logs&action=getLogs&address=${FUND}&fromBlock=0&toBlock=10&apikey=proapi_k`,
+    ]);
+  });
+
   it("throws when Blockscout's index is further behind than the node's 5,000 blocks cover", async () => {
     const read = (indexed: bigint, fromBlock: bigint, toBlock: bigint) => {
       const { fetchFn, urls } = fakeFetch([head(indexed), { status: "0", message: "No logs found", result: [] }]);

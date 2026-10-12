@@ -88,7 +88,8 @@ export function blockscoutLogReader({
   timeoutMs?: number;
 }): LogReader {
   const get = async (query: string): Promise<Response> => {
-    const url = `${apiUrl}?${query}${apiKey === undefined ? "" : `&apikey=${encodeURIComponent(apiKey)}`}`;
+    // The PRO API's URL already carries its chain_id.
+    const url = `${apiUrl}${apiUrl.includes("?") ? "&" : "?"}${query}${apiKey === undefined ? "" : `&apikey=${encodeURIComponent(apiKey)}`}`;
     for (let attempt = 0; ; attempt++) {
       try {
         const response = await fetchFn(url, { signal: AbortSignal.timeout(timeoutMs) });
