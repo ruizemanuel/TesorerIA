@@ -30,7 +30,8 @@ type Held = { usdt: bigint; wars: bigint; usdtInWars: bigint | null };
 const WATCH_EVERY_MS = 10_000;
 
 /**
- * Aportar (spec, 9, pantalla 3): where to send from Binance or Ripio, and the button once the money has arrived.
+ * Aportar (spec, 9, pantalla 3): where to send USDT (from Binance or any other exchange or wallet) or wARS (from
+ * Ripio), and the button once the money has arrived.
  * `balance` is the fund's, as the page showed it: the one the balance counts up from afterwards (spec, 9.2).
  */
 export function ContributePanel({
@@ -141,7 +142,7 @@ export function ContributePanel({
             onClick={() => setTab(token)}
             className={`min-h-11 rounded-[11px] text-sm font-bold ${tab === token ? "bg-surface text-primary" : "text-muted"}`}
           >
-            {token === "usdt" ? "Tengo USDT en Binance" : "Tengo pesos en Ripio"}
+            {token === "usdt" ? "Tengo USDT" : "Tengo pesos en Ripio"}
           </button>
         ))}
       </div>
@@ -149,7 +150,8 @@ export function ContributePanel({
       <div role="tabpanel" className="grid gap-4">
         {tab === "usdt" ? (
           <p>
-            En Binance, retirá USDT a tu cuenta del fondo. El mínimo de Binance es <span className="money">{formatUsdt(MIN_BINANCE_USDT)}</span>.
+            Mandá USDT a tu cuenta del fondo desde cualquier exchange o wallet. Si lo retirás de Binance, el mínimo es{" "}
+            <span className="money">{formatUsdt(MIN_BINANCE_USDT)}</span>.
           </p>
         ) : (
           <div className="grid gap-2">

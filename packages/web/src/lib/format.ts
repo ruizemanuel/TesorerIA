@@ -69,11 +69,6 @@ export function formatWhen(date: Date, now: Date): string {
   return `${day}/${month}`;
 }
 
-/** "0x2F82 18c7 cF6d …": an address in groups of four, for checking it against an exchange's screen. */
-export function groupAddress(address: string): string {
-  return `0x${(address.slice(2).match(/.{1,4}/g) ?? []).join(" ")}`;
-}
-
 /** Two letters for an avatar: the first of two words, or the first two of one. */
 export function initials(name: string): string {
   const words = name.trim().split(/\s+/).filter(Boolean);

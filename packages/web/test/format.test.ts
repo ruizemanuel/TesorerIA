@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { NBSP, USDT_UNIT, WARS_UNIT, formatPesos, formatUsdt, formatWhen, groupAddress, initials, parsePesos } from "../src/lib/format";
+import { NBSP, USDT_UNIT, WARS_UNIT, formatPesos, formatUsdt, formatWhen, initials, parsePesos } from "../src/lib/format";
 
 describe("formatPesos", () => {
   it("writes pesos the Argentine way, with a space that doesn't break after the sign", () => {
@@ -60,13 +60,7 @@ describe("formatWhen", () => {
   });
 });
 
-describe("groupAddress and initials", () => {
-  it("groups an address in fours, for reading it out of an exchange's screen", () => {
-    expect(groupAddress("0x2F8218c7cF6d822091EDe24Db9c46B0324c21A6F")).toBe(
-      "0x2F82 18c7 cF6d 8220 91ED e24D b9c4 6B03 24c2 1A6F",
-    );
-  });
-
+describe("initials", () => {
   it("takes two letters for the avatar", () => {
     expect(initials("Ema")).toBe("EM");
     expect(initials("juan pablo")).toBe("JP");

@@ -2,10 +2,9 @@
 
 import QRCode from "qrcode";
 import { useEffect, useState } from "react";
-import { groupAddress } from "../lib/format";
 import { Button } from "./ui";
 
-/** Your account's address, only here (spec, 9.2): in groups of four, with its QR, "Copiar" and the network warning. */
+/** Your account's address, only here (spec, 9.2): whole, as wallets show it, with its QR, "Copiar" and the network warning. */
 export function AddressBox({ address }: { address: string }) {
   const [svg, setSvg] = useState("");
   const [copied, setCopied] = useState<"yes" | "failed" | null>(null);
@@ -25,9 +24,9 @@ export function AddressBox({ address }: { address: string }) {
       </p>
       {/* The QR is SVG this component generated from the address itself. */}
       <div className="mx-auto size-44 [&>svg]:size-full" aria-hidden="true" dangerouslySetInnerHTML={{ __html: svg }} />
-      {/* No `money` here: it keeps a line from breaking, and 42 characters don't fit on a phone. The groups wrap between them. */}
-      <p className="rounded-[14px] bg-surface p-3 text-center text-[15px] font-semibold tracking-wide [font-variant-numeric:lining-nums_tabular-nums]">
-        {groupAddress(address)}
+      {/* No spaces, so it can be copied by hand, and `break-all`: 42 characters don't fit on one line of a phone. */}
+      <p className="break-all rounded-[14px] bg-surface p-3 text-center text-[15px] font-semibold [font-variant-numeric:lining-nums_tabular-nums]">
+        {address}
       </p>
       <Button
         variant="secondary"
