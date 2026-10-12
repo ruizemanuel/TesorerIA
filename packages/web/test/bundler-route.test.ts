@@ -265,11 +265,14 @@ describe("POST /api/bundler", () => {
       expect(pimlico).not.toHaveBeenCalled();
     });
 
-    it("can't check a createFund without the agent's address, and asks Pimlico nothing", async () => {
+    it("refuses a createFund when the agent's address can't be read, and asks Pimlico nothing (M3)", async () => {
       state.user = creator;
       state.agentKeyIsWrong = true;
-      await expect(stub(futbol)).rejects.toThrow("AGENT_ADDRESS");
+      const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+      const response = await stub(futbol);
+      expect(response.status).toBe(403);
       expect(pimlico).not.toHaveBeenCalled();
+      logged.mockRestore();
     });
   });
 

@@ -7,6 +7,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   MAX_CREATE_FUND_GAS,
   MAX_CREATE_FUND_NONCES,
+  MAX_CREATE_FUND_NONCES_PER_DAY,
   MAX_FEE_MULTIPLE,
   MAX_OPERATION_GAS,
   type OperationCall,
@@ -20,7 +21,7 @@ import {
 } from "../src/lib/bundler-proxy";
 import { contributeCalls } from "../src/lib/contribute";
 import type { Db } from "../src/lib/db/client";
-import { funds, memberships } from "../src/lib/db/schema";
+import { createFundNonces, funds, memberships } from "../src/lib/db/schema";
 import { memberFundAbi } from "../src/lib/fund-abi";
 import { cancelDeploy, createDraft, deployCall, frozenCreateFunds, joinFund } from "../src/lib/funds";
 import { voteCalls } from "../src/lib/vote";
@@ -411,7 +412,7 @@ describe("authorizeBundlerRequest", () => {
     });
   });
 
-  it("reads the server's agent only for someone creating a fund, so a bad agent key stops nobody else", async () => {
+  it("reads the server's agent only for someone creating a fund, so a bad agent key stops nobody else, and refuses that one's createFund", async () => {
     const { db, founder, juan, ana, anaCreate } = await people();
     const badKey = vi.fn((): Address => {
       throw new Error("bad key");
@@ -423,9 +424,12 @@ describe("authorizeBundlerRequest", () => {
       expect(reading, person.name).toMatchObject({ ok: true });
     }
     expect(badKey).not.toHaveBeenCalled();
-    // Ana's createFund names the agent, so it can't be checked without it.
+    // Ana's createFund names the agent, so it can't be checked without it: it's refused, and the error is logged (M3).
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
     const create = request("pm_getPaymasterStubData", sponsored(ana.account, {}, MAX_OPERATION_GAS, safeCallData([anaCreate])));
-    await expect(authorizeBundlerRequest(db, asUser(ana), create, POLICY, price, badKey)).rejects.toThrow("bad key");
+    expect(await authorizeBundlerRequest(db, asUser(ana), create, POLICY, price, badKey)).toMatchObject({ ok: false, status: 403 });
+    expect(logged).toHaveBeenCalled();
+    logged.mockRestore();
   });
 
   describe("the only createFund it sponsors: the one deployCall built for the creator's frozen draft", () => {
@@ -531,7 +535,11 @@ describe("authorizeBundlerRequest", () => {
     const sign = (db: Db, { person, call }: Awaited<ReturnType<typeof creator>>, nonce: bigint, fast: typeof price | null = price) =>
       authorizeBundlerRequest(db, asUser(person), createFund("pm_getPaymasterData", person, call, nonce), POLICY, fast, agent);
     const signed = { ok: true };
-    const capped = { ok: false, status: 403, error: `This account already had ${MAX_CREATE_FUND_NONCES} createFunds sponsored; no more are` };
+    const capped = {
+      ok: false,
+      status: 403,
+      error: `No more createFunds are sponsored for this account (${MAX_CREATE_FUND_NONCES} at most, ever) or today (${MAX_CREATE_FUND_NONCES_PER_DAY} at most, among everyone)`,
+    };
 
     it("signs nonces 0, 1 and 2, refuses a fourth, and still signs one it already signed, which can't land twice", async () => {
       const db = await testDb();
@@ -602,11 +610,52 @@ describe("authorizeBundlerRequest", () => {
       expect(await sign(db, ana, 3n, null)).toEqual(capped);
     });
 
-    it("leaves a live member's contributions and votes alone, on whatever key viem picks", async () => {
+    it("signs at most MAX_CREATE_FUND_NONCES_PER_DAY new nonces a day among everyone, and one already signed again (M4)", async () => {
+      const db = await testDb();
+      const creators = [await creator(db, "Ana"), await creator(db, "Bea"), await creator(db, "Ceci"), await creator(db, "Dani")];
+      let claimed = 0;
+      for (const person of creators) {
+        for (const nonce of [0n, 1n, 2n]) {
+          if (claimed === MAX_CREATE_FUND_NONCES_PER_DAY) break;
+          expect(await sign(db, person, nonce), `${claimed}`).toMatchObject(signed);
+          claimed++;
+        }
+      }
+      const late = await creator(db, "Eli");
+      expect(await sign(db, late, 0n)).toEqual(capped);
+      expect(await sign(db, creators[0]!, 0n)).toMatchObject(signed); // already signed: it can't land twice
+      // A day later, the day's count starts over.
+      await db.update(createFundNonces).set({ createdAt: new Date(Date.now() - 86_400_000 - 60_000) });
+      expect(await sign(db, late, 0n)).toMatchObject(signed);
+      expect(MAX_CREATE_FUND_NONCES_PER_DAY).toBe(10);
+    });
+
+    it("still signs a creator's contribution to their live fund when the agent's address can't be read, but not their createFund (M3)", async () => {
+      const db = await testDb();
+      const ana = await creator(db, "Ana");
+      await addLiveFund(db, { creatorId: ana.person.id, address: FUND, members: [ana.person.id] });
+      const wrongKey = () => {
+        throw new Error("AGENT_ADDRESS doesn't match AGENT_PRIVATE_KEY");
+      };
+      const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+      const contribution = request(
+        "pm_getPaymasterData",
+        sponsored(ana.person.account, { nonce: hex(1n << 64n) }, MAX_OPERATION_GAS, safeCallData(contribute(FUND))),
+      );
+      expect(await authorizeBundlerRequest(db, asUser(ana.person), contribution, POLICY, price, wrongKey)).toMatchObject(signed);
+      const theirCreateFund = createFund("pm_getPaymasterData", ana.person, ana.call, 0n);
+      expect(await authorizeBundlerRequest(db, asUser(ana.person), theirCreateFund, POLICY, price, wrongKey)).toMatchObject({ ok: false, status: 403 });
+      expect(logged).toHaveBeenCalled();
+      logged.mockRestore();
+    });
+
+    it("leaves a live member's contributions and votes alone, on whatever key viem picks, and counts none of them", async () => {
       const { db, juan } = await people();
       const shapes = [contribute(FUND), contribute(FUND, "usdt"), voteCalls({ fund: FUND, proposalId: 0n, completes: false }), voteCalls({ fund: FUND, proposalId: 0n, completes: true })];
-      for (const calls of [...shapes, ...shapes]) {
-        const nonce = BigInt(Math.floor(Math.random() * 2 ** 48) + 1) << 64n; // a fresh non-zero key, as viem picks one
+      // Key 0 (the createFund's), the smallest viem could pick, one in its usual range, and the largest.
+      const keys = [0n, 1n, 1n << 48n, (1n << 192n) - 1n];
+      for (const [i, calls] of [...shapes, ...shapes].entries()) {
+        const nonce = keys[i % keys.length]! << 64n;
         const answer = await authorizeBundlerRequest(
           db,
           asUser(juan),
@@ -617,6 +666,7 @@ describe("authorizeBundlerRequest", () => {
         );
         expect(answer, hex(nonce)).toMatchObject(signed);
       }
+      expect(await db.$count(createFundNonces)).toBe(0);
     });
 
     it("lets exactly MAX_CREATE_FUND_NONCES of many claims made at once through", async () => {

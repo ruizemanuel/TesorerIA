@@ -1,4 +1,4 @@
-import { FUND_FACTORY, USDT, WARS } from "@tesoreria/agent";
+import { FUND_FACTORY, USDT, WARS, shortMessage } from "@tesoreria/agent";
 import { ATTRIBUTION_SUFFIX } from "@tesoreria/wallet";
 import { and, eq, isNotNull, sql } from "drizzle-orm";
 import {
@@ -222,6 +222,13 @@ export const MAX_OPERATION_GAS = 2_000_000n;
  * (retrying after a cancelled passkey prompt, or resending one that never came back, reuses the same nonce).
  */
 export const MAX_CREATE_FUND_NONCES = 3;
+/**
+ * The most new createFund nonces the paymaster signs in a day, among everyone (M4). Passkey accounts are free to
+ * make, so throwaway ones could each take MAX_CREATE_FUND_NONCES and use up the month's sponsorship, the real
+ * groups' contributions and votes with it. A real group creates a fund or two a day. Two people claiming at once may
+ * pass it by one: only each person's own row is locked.
+ */
+export const MAX_CREATE_FUND_NONCES_PER_DAY = 10;
 
 const QUANTITY = /^0x[0-9a-fA-F]{1,64}$/;
 
@@ -268,13 +275,15 @@ function operationNonce(userOp: unknown): bigint | undefined {
 
 /**
  * Whether the paymaster may sign `userId`'s createFund on `nonce`: it's one they already got signed (re-signing it
- * can't make it land twice), or a new one within MAX_CREATE_FUND_NONCES, which it then counts. The user's row is
- * locked first, so two claims by one person never count the same rows: the second waits for the first to commit,
- * and then reads what it left.
+ * can't make it land twice), or a new one within MAX_CREATE_FUND_NONCES for them and MAX_CREATE_FUND_NONCES_PER_DAY
+ * among everyone, which it then counts. The user's row is locked first, so two claims by one person never count the
+ * same rows: the second waits for the first to commit, and then reads what it left. That relies on READ COMMITTED,
+ * Neon's default (db/client.ts): under REPEATABLE READ, the count after the lock would miss the other claim (M1).
  */
 export async function claimCreateFundNonce(db: Db, userId: string, nonce: bigint): Promise<boolean> {
   const [, , [claimed]] = await inTransaction(db, (tx) => {
     const signed = tx.$count(createFundNonces, eq(createFundNonces.userId, userId));
+    const signedToday = tx.$count(createFundNonces, sql`${createFundNonces.createdAt} > now() - interval '1 day'`);
     return [
       tx.select({ id: users.id }).from(users).where(eq(users.id, userId)).for("update"),
       tx
@@ -283,7 +292,13 @@ export async function claimCreateFundNonce(db: Db, userId: string, nonce: bigint
           qb
             .select({ userId: users.id, nonce: sql<bigint>`${nonce.toString()}::numeric`.as("nonce"), createdAt: sql<Date>`now()`.as("created_at") })
             .from(users)
-            .where(and(eq(users.id, userId), sql`${signed} < ${MAX_CREATE_FUND_NONCES}`)),
+            .where(
+              and(
+                eq(users.id, userId),
+                sql`${signed} < ${MAX_CREATE_FUND_NONCES}`,
+                sql`${signedToday} < ${MAX_CREATE_FUND_NONCES_PER_DAY}`,
+              ),
+            ),
         )
         .onConflictDoNothing(),
       tx
@@ -305,7 +320,15 @@ async function sponsorshipOf(db: Db, userId: string, agent: () => Address): Prom
     .from(memberships)
     .innerJoin(funds, eq(funds.id, memberships.fundId))
     .where(and(eq(memberships.userId, userId), eq(funds.status, "live"), isNotNull(funds.address)));
-  return { liveFunds: live.map((row) => getAddress(row.address!)), createFundCalls: await frozenCreateFunds(db, userId, agent) };
+  let createFundCalls: Sponsorship["createFundCalls"];
+  try {
+    createFundCalls = await frozenCreateFunds(db, userId, agent);
+  } catch (error) {
+    // A wrong agent key, say: no createFund is sponsored meanwhile, and a member's contributions and votes go on (M3).
+    console.error(`No createFund is sponsored for now: ${shortMessage(error)}`);
+    createFundCalls = [];
+  }
+  return { liveFunds: live.map((row) => getAddress(row.address!)), createFundCalls };
 }
 
 /**
@@ -316,8 +339,8 @@ async function sponsorshipOf(db: Db, userId: string, agent: () => Address): Prom
  *   asks for anything), and only for the calls `checkCalls` allows: a stranger who makes an account and a draft
  *   gets nothing paid, and a creator only the createFund deployCall built for their frozen draft, naming `agent()`
  *   (the server's, `agentAddress`), and only on EntryPoint nonce key 0, the one the web sends it on. `agent` is
- *   called only for someone with a draft being created: it throws when the server's agent key is wrong, and that
- *   mustn't stop a member's contributions and votes, or anyone's reads.
+ *   called only for someone with a draft being created; when it throws (the server's agent key is wrong), their
+ *   createFund is refused, and their contributions and votes, and anyone's reads, go on.
  *
  * `fastMaxFeePerGas` reads Pimlico's current price, only when it's needed: a sponsoring request (pm_getPaymasterData)
  * also has to pass `checkSponsoredGas`, with 10M gas for a createFund and 2M for anything else, and if the price can't
@@ -369,7 +392,11 @@ export async function authorizeBundlerRequest(
     if (!gas.ok) return gas;
   }
   if (nonce !== undefined && !(await claimCreateFundNonce(db, user.id, nonce))) {
-    return { ok: false, status: 403, error: `This account already had ${MAX_CREATE_FUND_NONCES} createFunds sponsored; no more are` };
+    return {
+      ok: false,
+      status: 403,
+      error: `No more createFunds are sponsored for this account (${MAX_CREATE_FUND_NONCES} at most, ever) or today (${MAX_CREATE_FUND_NONCES_PER_DAY} at most, among everyone)`,
+    };
   }
   return check;
 }
