@@ -12,6 +12,7 @@ import {
   contributeCalls,
   defaultUsdtAmount,
   defaultWarsAmount,
+  nextRate,
   pesosText,
   rampUrl,
   readPesosAmount,
@@ -30,7 +31,8 @@ import { Button, ButtonLink, FIELD } from "./ui";
 type Token = "usdt" | "wars";
 /**
  * What the member's account holds, and `rate`: what one USDT is worth to the fund (quoteUsdtInWars, the pool's
- * 30-minute average, the price it credits USDT at); null if it couldn't be read.
+ * 30-minute average, the price it credits USDT at). A look that fails to read it keeps the last one (nextRate);
+ * it is null only until a first one has been read.
  */
 type Held = { usdt: bigint; wars: bigint; rate: bigint | null };
 
@@ -80,7 +82,7 @@ export function ContributePanel({
         client.readContract({ address: fund, abi: memberFundAbi, functionName: "quoteUsdtInWars", args: [USDT_UNIT] }).catch(() => null),
       ]);
       if (live) {
-        setHeld({ usdt, wars, rate: rate === null || rate === 0n ? null : rate });
+        setHeld((previous) => ({ usdt, wars, rate: nextRate(previous?.rate ?? null, rate) }));
         setLookFailed(false);
       }
     };

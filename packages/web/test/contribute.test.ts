@@ -7,6 +7,7 @@ import {
   defaultUsdtAmount,
   defaultWarsAmount,
   fitUnderCap,
+  nextRate,
   pesosText,
   rampUrl,
   readPesosAmount,
@@ -166,6 +167,16 @@ describe("Aportar in USDT: what covers the week, at the fund's rate", () => {
     // $ 5.000 left under the cap: the margin can't take it over (20 USDT are $ 32.000; 5.000 of them, 3,125 USDT).
     expect(defaultUsdtAmount({ held: usdt(20), rate, ...week, room: pesos(5_000) })).toBe(3_125_000n);
     expect(defaultUsdtAmount({ held: usdt(20), rate: null, ...week })).toBe(usdt(20)); // no rate: all of it, as before
+  });
+
+  it("keeps the last rate when reading it again fails, and takes no rate from a zero", () => {
+    const fresh = 1_650n * WARS_UNIT;
+    expect(nextRate(rate, fresh)).toBe(fresh); // a fresh read wins
+    expect(nextRate(null, fresh)).toBe(fresh);
+    expect(nextRate(rate, null)).toBe(rate); // the read failed: the last good one stays
+    expect(nextRate(rate, 0n)).toBe(rate); // a zero isn't a price: it's a failed read too
+    expect(nextRate(null, null)).toBeNull(); // none read yet: no rate
+    expect(nextRate(null, 0n)).toBeNull();
   });
 
   it("says how much more to send for the week, to the cent up, and nothing once it's there", () => {

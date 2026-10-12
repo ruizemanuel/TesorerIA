@@ -110,6 +110,15 @@ export function usdtFor(pesos: bigint, rate: bigint): bigint {
   return centUp(ceilDiv(pesos * (BPS + USDT_MARGIN_BPS) * USDT_UNIT, rate * BPS));
 }
 
+/**
+ * The fund's rate after a refresh: the fresh one, or the last one read when this refresh failed (`fresh` is null) or
+ * came back zero, which is no price. Null only until a first rate has been read: a blip must not turn what Aportar
+ * offers from "just enough" into "all you hold" until the next look.
+ */
+export function nextRate(previous: bigint | null, fresh: bigint | null): bigint | null {
+  return fresh !== null && fresh > 0n ? fresh : previous;
+}
+
 /** What the USDT tab knows: what the member holds, the fund's rate (null if it couldn't be read), and their week. */
 export type UsdtOffer = { held: bigint; rate: bigint | null; owed: bigint; weeklyFee: bigint; room: bigint | null };
 
