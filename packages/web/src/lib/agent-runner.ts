@@ -52,10 +52,10 @@ function sentAction(kind: Decision["kind"]): "reimburse" | "propose-payment" {
 }
 
 /** A decision as a row, its amounts as decimal strings (spec, 8.6). */
-async function saveDecisions(db: Db, list: readonly Decision[], expenseId?: string): Promise<void> {
+export async function saveDecisions(db: Db, list: readonly Decision[], expenseId?: string): Promise<void> {
   for (const d of list) {
     const action = d.action === undefined ? null : Object.fromEntries(Object.entries(d.action).map(([k, v]) => [k, String(v)]));
-    await db.insert(decisions).values({ fund: d.fund ?? null, expenseId: expenseId ?? null, kind: d.kind, reason: d.reason, action, tx: d.tx ?? null, status: d.status ?? null });
+    await db.insert(decisions).values({ fund: d.fund ?? null, expenseId: expenseId ?? null, kind: d.kind, reason: d.reason, code: d.code ?? null, action, tx: d.tx ?? null, status: d.status ?? null });
   }
 }
 

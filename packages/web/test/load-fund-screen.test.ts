@@ -4,12 +4,12 @@ import { type Address, type Hash, getAddress, pad } from "viem";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CurrentUser } from "../src/lib/current-user";
 import type { Db } from "../src/lib/db/client";
-import { expenses, funds, operations } from "../src/lib/db/schema";
+import { decisions, expenses, funds, operations } from "../src/lib/db/schema";
 import { formatPesos } from "../src/lib/format";
 import { finishOperation, recordOperation } from "../src/lib/operations";
 import { HistoryGapError, loadFundScreen, loadPublicFundScreen } from "../src/lib/read-fund";
 import { addLiveFund, addUser, randomAccount, testDb } from "./support/db";
-import { BLOCK, CLOCK, WARS, event, snapshot } from "./support/fixtures";
+import { BLOCK, CLOCK, USDT_UNIT, WARS, event, snapshot } from "./support/fixtures";
 
 // Who may see which fund (spec, 9.2) is decided before and around the chain reads, so the chain and the
 // database stand in: the database is a real (in-memory) one, the chain answers what each test sets.
@@ -284,4 +284,25 @@ describe("loadFundScreen: read-your-writes", () => {
     await loadFundScreen(address, asViewer(caro)); // nothing of hers landed: nothing to wait for
     expect(waitForBlock).not.toHaveBeenCalled();
   });
+});
+
+it("says once why the agent hasn't converted the USDT waiting, from its latest decision on the fund (F8)", async () => {
+  const address = await liveFund();
+  agent.readFund.mockResolvedValue(snapshot({ address, members: [ana, beto, caro].map((p) => getAddress(p.account)), usdtBalance: 5n * USDT_UNIT }));
+  const decide = (kind: string, code: string | null, minutesAgo: number, status: string | null = null) =>
+    db.insert(decisions).values({ fund: address, kind, code, reason: "for the log", status, createdAt: new Date(Date.now() - minutesAgo * 60_000) });
+  const holds = async () => texts((await loadFundScreen(address, asViewer(ana)))!).filter((text) => text.startsWith("Todavía no pasé a pesos"));
+
+  expect(await holds()).toEqual([]);
+  await decide("skip", "price-gap", 30);
+  await decide("skip", "price-reference", 15);
+  expect(await holds()).toEqual([expect.stringContaining("el precio de referencia del dólar no está al día")]);
+  await decide("convert", null, 1, "reverted");
+  expect(await holds()).toEqual([expect.stringContaining("no pude hacer la operación")]);
+  await decide("convert", null, 0, "success");
+  expect(await holds()).toEqual([]);
+
+  await decide("skip", "price-reference", 0);
+  agent.readFund.mockResolvedValue(snapshot({ address, members: [ana, beto, caro].map((p) => getAddress(p.account)), usdtBalance: 4n * USDT_UNIT }));
+  expect(await holds()).toEqual([]); // under 5 USDT the agent leaves it, and has nothing to explain
 });

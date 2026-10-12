@@ -127,6 +127,8 @@ export const decisions = pgTable("decisions", {
   expenseId: uuid("expense_id").references(() => expenses.id),
   kind: text("kind").notNull(),
   reason: text("reason").notNull(),
+  /** For a skipped conversion: why, as the agent's SkipCode. The timeline says it in its own words (F8). */
+  code: text("code"),
   /** The action with its amounts as decimal strings. */
   action: jsonb("action").$type<Record<string, string>>(),
   tx: text("tx"),

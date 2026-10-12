@@ -2,7 +2,7 @@ import { USDT, WARS as WARS_TOKEN } from "@tesoreria/agent";
 import { type Address, pad, toHex, zeroAddress } from "viem";
 import { describe, expect, it } from "vitest";
 import type { ExpenseStatus } from "../src/lib/db/schema";
-import { NBSP } from "../src/lib/format";
+import { NBSP, formatUsdt } from "../src/lib/format";
 import { type ProposalState, buildTimeline } from "../src/lib/timeline";
 import { AGENT, ANA, BETO, BLOCK, CARO, CLOCK, NOW, START, USDT_UNIT, WARS, event } from "./support/fixtures";
 
@@ -26,6 +26,7 @@ function timeline(change: Partial<Parameters<typeof buildTimeline>[0]> = {}) {
     proposals: new Map(),
     expenses: [],
     pending: [],
+    conversionHold: null,
     viewerIsMember: true,
     now: NOW,
     ...change,
@@ -168,5 +169,26 @@ describe("buildTimeline", () => {
       [$("No pude procesar el gasto de $ 45.000 que cargó Ana (la cancha del jueves). Lo vuelvo a intentar en un rato."), false],
       [$("No puedo devolver el gasto de $ 45.000 que cargó Ana (la cancha del jueves)."), false],
     ]);
+  });
+
+  it("says once why the agent hasn't converted the USDT waiting, in its own words (F8)", () => {
+    const at = new Date(NOW.getTime() - 60_000);
+    const hold = (code: string | null) => timeline({ conversionHold: { usdt: 5n * USDT_UNIT, code, at } });
+    expect(hold("price-reference")).toEqual([
+      {
+        id: "conversion-hold",
+        at,
+        actor: { kind: "agent" },
+        text: `Todavía no pasé a pesos ${formatUsdt(5n * USDT_UNIT)}: el precio de referencia del dólar no está al día. Lo vuelvo a intentar en unos minutos.`,
+      },
+    ]);
+    expect(hold("daily-limit")[0]?.text).toContain(": ya cambié todo lo que puedo cambiar por día en este fondo.");
+    expect(hold("pool-depth")[0]?.text).toContain(": en el mercado donde los cambio no hay suficientes pesos.");
+    expect(hold("price-gap")[0]?.text).toContain(": el precio del mercado se alejó más de 2 % del de referencia.");
+    expect(hold("price-floor")[0]?.text).toContain(": el mercado paga menos de lo que permiten mis reglas.");
+    // Blocked, or a code this web doesn't know yet.
+    expect(hold(null)[0]?.text).toContain(": no pude hacer la operación.");
+    expect(hold("something-new")[0]?.text).toContain(": no pude hacer la operación.");
+    expect(timeline({ conversionHold: null })).toEqual([]);
   });
 });

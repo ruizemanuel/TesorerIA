@@ -1,4 +1,4 @@
-import { type FundEvent, USDT } from "@tesoreria/agent";
+import { type FundEvent, type SkipCode, USDT } from "@tesoreria/agent";
 import { type Address, type Hash, getAddress, isAddressEqual } from "viem";
 import { type BlockClock, blockTime, weekAt } from "./chain-time";
 import type { ExpenseStatus } from "./db/schema";
@@ -37,6 +37,22 @@ export type TimelinePending = {
   createdAt: Date;
 };
 
+/** The agent's latest word on the USDT the fund still holds: it skipped converting it, or couldn't (F8). */
+export type ConversionHold = { usdt: bigint; code: string | null; at: Date };
+
+/** Why, as the agent says it (spec, 9.2: no jargon). */
+const HOLD_WHY: Record<SkipCode, string> = {
+  "daily-limit": "ya cambié todo lo que puedo cambiar por día en este fondo",
+  "price-reference": "el precio de referencia del dólar no está al día",
+  "pool-depth": "en el mercado donde los cambio no hay suficientes pesos",
+  "price-gap": "el precio del mercado se alejó más de 2 % del de referencia",
+  "price-floor": "el mercado paga menos de lo que permiten mis reglas",
+};
+
+function holdWhy(code: string | null): string {
+  return code !== null && Object.hasOwn(HOLD_WHY, code) ? HOLD_WHY[code as SkipCode] : "no pude hacer la operación";
+}
+
 /**
  * The fund's movements, newest first (spec, 9.2): its events, the expenses the agent still holds, and the
  * viewer's own operations on their way. The agent speaks in first person; a member's actions are in third;
@@ -55,6 +71,7 @@ export function buildTimeline({
   proposals,
   expenses,
   pending,
+  conversionHold = null,
   viewerIsMember,
   now,
 }: {
@@ -74,6 +91,8 @@ export function buildTimeline({
   proposals: ReadonlyMap<bigint, ProposalState>;
   expenses: readonly TimelineExpense[];
   pending: readonly TimelinePending[];
+  /** Why the USDT waiting hasn't been converted yet, or null (read-fund.ts, conversionHold). */
+  conversionHold?: ConversionHold | null;
   viewerIsMember: boolean;
   now: Date;
 }): TimelineItem[] {
@@ -195,6 +214,15 @@ export function buildTimeline({
       }
       // VoteCast and ProposalExecuted are folded into their proposal.
     }
+  }
+
+  if (conversionHold !== null) {
+    items.push({
+      id: "conversion-hold",
+      at: conversionHold.at,
+      actor: { kind: "agent" },
+      text: `Todavía no pasé a pesos ${formatUsdt(conversionHold.usdt)}: ${holdWhy(conversionHold.code)}. Lo vuelvo a intentar en unos minutos.`,
+    });
   }
 
   for (const expense of expenses) {

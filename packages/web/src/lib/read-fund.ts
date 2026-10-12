@@ -1,17 +1,17 @@
-import { FUND_FACTORY_BLOCK, type FundEvent, type FundSnapshot, joinWeeks, readFund, readFundEvents } from "@tesoreria/agent";
-import { and, desc, eq } from "drizzle-orm";
+import { FUND_FACTORY_BLOCK, type FundEvent, type FundSnapshot, MIN_CONVERSION_USDT, joinWeeks, readFund, readFundEvents } from "@tesoreria/agent";
+import { and, desc, eq, isNull } from "drizzle-orm";
 import { type Address, getAddress, zeroAddress } from "viem";
 import { celoClient, logReader } from "./chain";
 import { blockTime, weekAt } from "./chain-time";
 import type { CurrentUser } from "./current-user";
-import { getDb } from "./db/client";
-import { expenses, funds, memberships, users } from "./db/schema";
+import { type Db, getDb } from "./db/client";
+import { decisions, expenses, funds, memberships, users } from "./db/schema";
 import { memberFundAbi } from "./fund-abi";
 import { type FundView, buildFundView } from "./fund-view";
 import { ttlMemo } from "./memo";
 import { lastOperationBlock, pendingOperations } from "./operations";
 import { waitForBlock } from "./read-your-writes";
-import { type ProposalState, type TimelineItem, buildTimeline } from "./timeline";
+import { type ConversionHold, type ProposalState, type TimelineItem, buildTimeline } from "./timeline";
 
 export type FundScreen = {
   fundId: string;
@@ -98,6 +98,8 @@ export async function loadFundScreen(
         .limit(20);
   const pending = !publicView && viewer !== null && viewerIsMember ? await pendingOperations(db, viewer.id, snapshot.address) : [];
 
+  const hold = await conversionHold(db, snapshot);
+
   const view = buildFundView({
     snapshot,
     name: fund.name,
@@ -121,6 +123,7 @@ export async function loadFundScreen(
     proposals,
     expenses: expenseRows,
     pending,
+    conversionHold: hold,
     viewerIsMember: !publicView && viewerIsMember,
     now: new Date(Number(clock.timestamp) * 1000),
   });
@@ -139,6 +142,25 @@ const publicFundScreen = ttlMemo("public-fund-screen", 45_000, (address) =>
 
 export function loadPublicFundScreen(address: Address): Promise<FundScreen | null> {
   return publicFundScreen(getAddress(address));
+}
+
+/**
+ * Why the agent hasn't converted the USDT the fund holds (spec, 8.1, F8): its latest decision on the fund, when it
+ * skipped the conversion, was blocked, or sent one that reverted. Null under MIN_CONVERSION_USDT (the agent leaves
+ * that much where it is), or when its latest decision was a conversion that went through. Both addresses are
+ * checksummed: the agent's come from viem's decoding, and this one from getAddress.
+ */
+async function conversionHold(db: Db, snapshot: FundSnapshot): Promise<ConversionHold | null> {
+  if (snapshot.usdtBalance < MIN_CONVERSION_USDT) return null;
+  const [latest] = await db
+    .select({ kind: decisions.kind, code: decisions.code, status: decisions.status, createdAt: decisions.createdAt })
+    .from(decisions)
+    .where(and(eq(decisions.fund, snapshot.address), isNull(decisions.expenseId)))
+    .orderBy(desc(decisions.createdAt), desc(decisions.id))
+    .limit(1);
+  if (latest === undefined) return null;
+  const held = latest.kind === "skip" || latest.kind === "blocked" || (latest.kind === "convert" && latest.status === "reverted");
+  return held ? { usdt: snapshot.usdtBalance, code: latest.kind === "skip" ? latest.code : null, at: latest.createdAt } : null;
 }
 
 /** Each proposal's state now: votes, executed, deadline, and whether `viewer` voted. */
