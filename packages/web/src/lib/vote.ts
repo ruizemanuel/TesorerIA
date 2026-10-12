@@ -14,6 +14,11 @@ export function voteCalls({ fund, proposalId, completes }: Vote): Call[] {
   return completes ? [call("vote"), call("execute")] : [call("vote")];
 }
 
+/** Executes a proposal that has its votes but didn't run with the last one (spec, 7.3: anyone may). */
+export function executeCalls({ fund, proposalId }: { fund: Address; proposalId: bigint }): Call[] {
+  return [{ to: fund, data: encodeFunctionData({ abi: memberFundAbi, functionName: "execute", args: [proposalId] }) }];
+}
+
 /**
  * Casts the vote through `send`, which sends one operation. If the vote that completes the count fails with its
  * execution in it (the fund may be short, so the execution reverts and takes the whole operation with it), it is

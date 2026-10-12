@@ -124,6 +124,7 @@ export async function loadFundScreen(
     expenses: expenseRows,
     pending,
     conversionHold: hold,
+    warsBalance: snapshot.warsBalance,
     viewerIsMember: !publicView && viewerIsMember,
     now: new Date(Number(clock.timestamp) * 1000),
   });

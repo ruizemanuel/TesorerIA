@@ -17,7 +17,7 @@ async function serverRenders(page: Page, act: () => Promise<void>): Promise<stri
   return asked;
 }
 
-test("three friends create a fund, contribute, get the agreed expense back and vote on another", async ({ browser }) => {
+test("three friends create a fund, contribute, get the agreed expense back, and vote on and execute others", async ({ browser }) => {
   const ana = await phone(await browser.newContext());
   const beto = await phone(await browser.newContext());
   const caro = await phone(await browser.newContext());
@@ -126,12 +126,54 @@ test("three friends create a fund, contribute, get the agreed expense back and v
   await caro.getByRole("button", { name: "Cargar el gasto" }).click();
   await expect(caro.getByText(/el agente lo propuso/)).toBeVisible();
 
-  // 7. Ana votes (1 of 2); Beto's vote completes the count and executes it in the same operation.
+  // 7. Ana votes (1 of 2); Beto's vote completes the count and executes it in the same operation. Each vote fires a
+  // run of the agent that nobody waits for: the expenses of step 8 must find the agent free (see 4).
+  const agentRunOf = (page: Page) => page.waitForResponse((response) => response.url().endsWith("/api/agent/run"), { timeout: 30_000 });
   await open(ana, `${fund}/movimientos`);
+  const runAfterAnasVote = agentRunOf(ana);
   await ana.getByRole("button", { name: "Votar" }).click();
   await expect(onScreen(ana, "Votaste")).toBeVisible();
   await open(beto, `${fund}/movimientos`);
+  const runAfterBetosVote = agentRunOf(beto);
   await beto.getByRole("button", { name: "Votar" }).click();
   await expect(onScreen(beto, /El fondo le pagó \$\s3\.000 a Caro/)).toBeVisible();
   await expect(onScreen(beto, /pelota nueva\. Se aprobó\./)).toBeVisible();
+  await Promise.all([runAfterAnasVote, runAfterBetosVote]);
+
+  // 8. Two more of Caro's expenses, $ 12.000 each: the fund can pay one of them, not both. The first is approved and
+  // paid; the vote that completes the second can't pay it, so it goes alone, and the proposal waits for pesos.
+  for (const note of ["el asado", "las camisetas"]) {
+    await open(caro, `${fund}?p=gasto`);
+    await caro.getByLabel("Otro gasto (se vota)").check();
+    await caro.getByLabel("Cuánto pagaste").fill("12.000");
+    await caro.getByLabel("Nota (opcional)").fill(note);
+    await caro.getByRole("button", { name: "Cargar el gasto" }).click();
+    // The second has the kind and the amount of one she loaded a few minutes before: the panel asks if it is another.
+    if (note === "las camisetas") await caro.getByRole("button", { name: "Sí, es otro" }).click();
+    await expect(caro.getByText(/el agente lo propuso/)).toBeVisible();
+  }
+  const proposal = (page: typeof ana, note: string) => page.getByRole("listitem").filter({ hasText: note });
+  await open(ana, `${fund}/movimientos`);
+  for (const note of ["el asado", "las camisetas"]) {
+    await proposal(ana, note).getByRole("button", { name: "Votar" }).click();
+    await expect(proposal(ana, note).getByText("Votaste")).toBeVisible();
+  }
+  await open(beto, `${fund}/movimientos`);
+  await proposal(beto, "el asado").getByRole("button", { name: "Votar" }).click();
+  await expect(onScreen(beto, /el asado\. Se aprobó\./)).toBeVisible();
+  await proposal(beto, "las camisetas").getByRole("button", { name: "Votar" }).click();
+  await expect(onScreen(beto, /las camisetas\. Tiene los votos, pero al fondo le faltan/)).toBeVisible();
+  await expect(beto.getByRole("button", { name: "Ejecutar" })).toHaveCount(0);
+
+  // 9. Caro puts in her $ 10.000, and Ana executes the proposal that was waiting.
+  await give(await accountOf(caro), { wars: 10_000n * 10n ** 18n });
+  await open(caro, `${fund}?p=aportar`);
+  await caro.getByRole("tab", { name: "Tengo pesos en Ripio" }).click();
+  await caro.getByRole("button", { name: /Aportar \$\s10\.000/ }).click();
+  await expect(caro).toHaveURL(/\?aporte=/);
+  await open(ana, `${fund}/movimientos`);
+  await expect(onScreen(ana, /las camisetas\. Tiene los votos: falta ejecutarla\./)).toBeVisible();
+  await proposal(ana, "las camisetas").getByRole("button", { name: "Ejecutar" }).click();
+  await expect(onScreen(ana, /las camisetas\. Se aprobó\./)).toBeVisible();
+  await expect(onScreen(ana, /El fondo le pagó \$\s12\.000 a Caro/)).toHaveCount(2);
 });

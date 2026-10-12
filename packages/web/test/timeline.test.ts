@@ -27,6 +27,7 @@ function timeline(change: Partial<Parameters<typeof buildTimeline>[0]> = {}) {
     expenses: [],
     pending: [],
     conversionHold: null,
+    warsBalance: 90_000n * WARS,
     viewerIsMember: true,
     now: NOW,
     ...change,
@@ -104,6 +105,35 @@ describe("buildTimeline", () => {
     );
     const closing = timeline({ events: [byBeto], proposals: new Map([[1n, open]]) })[0];
     expect(closing).toMatchObject({ actor: { kind: "member", name: "Beto" }, text: "Beto propuso cerrar el fondo y repartir el saldo. Lleva 1 de 2 votos." });
+  });
+
+  it("offers Ejecutar on a proposal with its votes that didn't run, unless the fund can't pay it yet or it expired", () => {
+    const proposal = event(
+      "ProposalCreated",
+      { id: 0n, action: 0, a: CARO, b: zeroAddress, amount: 30_000n * WARS, proposer: AGENT, note: "la pelota nueva" },
+      BLOCK - 100n,
+    );
+    const ready = { votes: 2, executed: false, deadline: CLOCK.timestamp + 86_400n, voted: true };
+    // A pending execution is newer than the proposal and sorts first, so pick the proposal's own item.
+    const at = (change: Partial<Parameters<typeof buildTimeline>[0]> = {}, state: ProposalState = ready) =>
+      timeline({ events: [proposal], proposals: new Map([[0n, state]]), ...change }).find((item) => item.text.includes("la pelota nueva"));
+
+    expect(at()).toMatchObject({
+      text: $("Propuse pagarle $ 30.000 a Caro por la pelota nueva. Tiene los votos: falta ejecutarla."),
+      action: { kind: "execute", proposalId: 0n, canExecute: true },
+    });
+    expect(at({ viewerIsMember: false })?.action).toMatchObject({ kind: "execute", canExecute: false });
+    const executing = { userOpHash: "0x01", kind: "execute" as const, amount: null, token: null, createdAt: NOW };
+    expect(at({ pending: [executing] })?.action).toMatchObject({ kind: "execute", canExecute: false });
+
+    const short = at({ warsBalance: 20_000n * WARS });
+    expect(short?.text).toBe($("Propuse pagarle $ 30.000 a Caro por la pelota nueva. Tiene los votos, pero al fondo le faltan $ 10.000 para pagarlo."));
+    expect(short?.action).toBeUndefined();
+
+    expect(at({}, { ...ready, deadline: CLOCK.timestamp - 1n })).toMatchObject({
+      text: $("Propuse pagarle $ 30.000 a Caro por la pelota nueva. Venció sin ejecutarse."),
+    });
+    expect(at({}, { ...ready, deadline: CLOCK.timestamp - 1n })?.action).toBeUndefined();
   });
 
   it("doesn't offer to vote again while the viewer's own vote is on its way, but does for a contribution on its way", () => {

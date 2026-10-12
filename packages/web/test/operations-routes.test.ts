@@ -69,6 +69,11 @@ describe("POST /api/operations", () => {
     ]);
   });
 
+  it("keeps an execution, like a vote, so the timeline shows it on its way", async () => {
+    expect((await record(post("/api/operations", { userOpHash: OP, kind: "execute", fund: FUND }))).status).toBe(200);
+    expect(await db.select().from(operations)).toMatchObject([{ userOpHash: OP, kind: "execute", fund: FUND }]);
+  });
+
   it("keeps the draft a create-fund deploys, only if it is the caller's", async () => {
     expect((await record(post("/api/operations", { userOpHash: OP, kind: "create-fund", draftId }))).status).toBe(200);
     expect(await db.select().from(operations)).toMatchObject([{ userOpHash: OP, kind: "create-fund", draftId }]);

@@ -2,6 +2,7 @@ import type { Address } from "viem";
 import { formatWhen } from "../lib/format";
 import type { TimelineItem } from "../lib/timeline";
 import { Avatar } from "./avatar";
+import { ExecuteButton } from "./execute-button";
 import { PanelLink } from "./panel-link";
 import { buttonClass } from "./ui";
 import { VoteButton } from "./vote-button";
@@ -67,6 +68,9 @@ export function TimelineList({
               )}
               {item.action?.kind === "vote" && !readOnly && item.action.voted && (
                 <p className="mt-1 text-[13px] font-semibold text-muted">Votaste</p>
+              )}
+              {item.action?.kind === "execute" && !readOnly && !closed && item.action.canExecute && (
+                <ExecuteButton fund={fund} proposalId={item.action.proposalId.toString()} />
               )}
             </div>
           </li>

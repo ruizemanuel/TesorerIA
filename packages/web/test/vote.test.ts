@@ -3,7 +3,7 @@ import { decodeFunctionData, getAddress } from "viem";
 import { describe, expect, it } from "vitest";
 import { OnItsWayError, UserFacingError } from "../src/lib/client/errors";
 import { memberFundAbi } from "../src/lib/fund-abi";
-import { castVote, voteCalls } from "../src/lib/vote";
+import { castVote, executeCalls, voteCalls } from "../src/lib/vote";
 
 const FUND = getAddress("0x00000000000000000000000000000000000f00d1");
 
@@ -17,6 +17,12 @@ describe("voteCalls", () => {
       { functionName: "vote", args: [3n] },
       { functionName: "execute", args: [3n] },
     ]);
+  });
+});
+
+describe("executeCalls", () => {
+  it("executes a proposal that has its votes, alone", () => {
+    expect(decode(executeCalls({ fund: FUND, proposalId: 3n }))).toEqual([{ functionName: "execute", args: [3n] }]);
   });
 });
 

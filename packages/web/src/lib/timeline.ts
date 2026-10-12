@@ -9,7 +9,8 @@ export type Actor = { kind: "agent" } | { kind: "member"; name: string } | { kin
 
 export type TimelineAction =
   | { kind: "receipt"; tx: Hash }
-  | { kind: "vote"; proposalId: bigint; votes: number; required: number; canVote: boolean; voted: boolean; completes: boolean };
+  | { kind: "vote"; proposalId: bigint; votes: number; required: number; canVote: boolean; voted: boolean; completes: boolean }
+  | { kind: "execute"; proposalId: bigint; canExecute: boolean };
 
 export type TimelineItem = {
   id: string;
@@ -31,7 +32,7 @@ export type TimelineExpense = { id: string; by: string; amount: bigint; note: st
 
 export type TimelinePending = {
   userOpHash: string;
-  kind: "create-fund" | "contribute" | "vote";
+  kind: "create-fund" | "contribute" | "vote" | "execute";
   amount: bigint | null;
   token: "wars" | "usdt" | null;
   createdAt: Date;
@@ -72,6 +73,7 @@ export function buildTimeline({
   expenses,
   pending,
   conversionHold = null,
+  warsBalance,
   viewerIsMember,
   now,
 }: {
@@ -93,6 +95,8 @@ export function buildTimeline({
   pending: readonly TimelinePending[];
   /** Why the USDT waiting hasn't been converted yet, or null (read-fund.ts, conversionHold). */
   conversionHold?: ConversionHold | null;
+  /** The wARS the fund holds now: a payment over it can't be executed yet. */
+  warsBalance: bigint;
   viewerIsMember: boolean;
   now: Date;
 }): TimelineItem[] {
@@ -102,6 +106,7 @@ export function buildTimeline({
   const currentWeek = weekAt(now, startTime);
   const spent = new Map<bigint, bigint>();
   const voteOnItsWay = pending.some((operation) => operation.kind === "vote");
+  const executeOnItsWay = pending.some((operation) => operation.kind === "execute");
   let cap = initialWeeklyCap;
 
   for (const event of events) {
@@ -148,13 +153,22 @@ export function buildTimeline({
         const byAgent = isAddressEqual(proposer, agent);
         const state = proposals.get(id);
         let tail = "";
-        let voteAction: TimelineAction | undefined;
+        let proposalAction: TimelineAction | undefined;
         if (state !== undefined) {
+          const hasVotes = state.votes >= votesRequired;
           if (state.executed) tail = " Se aprobó.";
-          else if (state.deadline <= nowSeconds) tail = " Venció sin los votos necesarios.";
-          else {
+          else if (state.deadline <= nowSeconds) tail = hasVotes ? " Venció sin ejecutarse." : " Venció sin los votos necesarios.";
+          else if (hasVotes) {
+            // The vote that completed the count couldn't execute it then (castVote): the fund may still be short.
+            const short = action === ProposalAction.Pay && amount > warsBalance ? amount - warsBalance : 0n;
+            if (short > 0n) tail = ` Tiene los votos, pero al fondo le faltan ${formatPesos(short)} para pagarlo.`;
+            else {
+              tail = " Tiene los votos: falta ejecutarla.";
+              proposalAction = { kind: "execute", proposalId: id, canExecute: viewerIsMember && !executeOnItsWay };
+            }
+          } else {
             tail = ` Lleva ${state.votes} de ${votesRequired} votos.`;
-            voteAction = {
+            proposalAction = {
               kind: "vote",
               proposalId: id,
               votes: state.votes,
@@ -172,7 +186,7 @@ export function buildTimeline({
           actor: byAgent ? { kind: "agent" } : { kind: "member", name: who(proposer) },
           text: `${byAgent ? "Propuse" : `${who(proposer)} propuso`} ${what}.${tail}`,
           detail: byAgent ? `Lo que no puedo devolver por mi cuenta lo tienen que votar: hacen falta ${votesRequired} votos.` : undefined,
-          action: voteAction,
+          action: proposalAction,
         });
         break;
       }
@@ -245,7 +259,9 @@ export function buildTimeline({
     const text =
       operation.kind === "vote"
         ? "Tu voto está en camino."
-        : `Tu aporte de ${operation.token === "usdt" ? formatUsdt(operation.amount ?? 0n) : formatPesos(operation.amount ?? 0n)} está en camino.`;
+        : operation.kind === "execute"
+          ? "Tu ejecución de la propuesta está en camino."
+          : `Tu aporte de ${operation.token === "usdt" ? formatUsdt(operation.amount ?? 0n) : formatPesos(operation.amount ?? 0n)} está en camino.`;
     items.push({ id: `op:${operation.userOpHash}`, at: operation.createdAt, actor: { kind: "member", name: "Vos" }, text, pending: true });
   }
 

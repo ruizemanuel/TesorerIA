@@ -146,7 +146,7 @@ export const operations = pgTable("operations", {
   fund: text("fund"),
   /** For `create-fund`: the draft (a `funds` row) it deploys, so a retried deploy finds the operation already sent. */
   draftId: uuid("draft_id").references(() => funds.id),
-  kind: text("kind", { enum: ["create-fund", "contribute", "vote"] }).notNull(),
+  kind: text("kind", { enum: ["create-fund", "contribute", "vote", "execute"] }).notNull(),
   /** For a contribution: the amount in the token's units. */
   amount: units("amount"),
   token: text("token", { enum: ["wars", "usdt"] }),

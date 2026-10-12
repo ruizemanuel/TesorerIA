@@ -8,7 +8,7 @@ import { addressSchema, hashSchema } from "../../../lib/schemas";
 const Operation = z
   .object({
     userOpHash: hashSchema,
-    kind: z.enum(["create-fund", "contribute", "vote"]),
+    kind: z.enum(["create-fund", "contribute", "vote", "execute"]),
     fund: addressSchema.optional(),
     /** The draft a `create-fund` deploys. */
     draftId: z.uuid().optional(),
