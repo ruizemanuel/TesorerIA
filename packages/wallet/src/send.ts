@@ -7,6 +7,8 @@ export type Call = { to: Address; data?: Hex; value?: bigint };
 export type SendTaggedCallsResult = {
   userOpHash: Hash;
   transactionHash: Hash;
+  /** The block it landed in: what a later read of the chain has to reach to see it (read-your-writes). */
+  blockNumber: bigint;
   success: boolean;
   /** The bundler's revert reason when `success` is false; undefined on success. */
   reason: string | undefined;
@@ -67,6 +69,7 @@ export async function sendTaggedCalls({
   const result: SendTaggedCallsResult = {
     userOpHash,
     transactionHash: receipt.receipt.transactionHash,
+    blockNumber: receipt.receipt.blockNumber,
     success: receipt.success,
     reason: receipt.success ? undefined : receipt.reason,
   };

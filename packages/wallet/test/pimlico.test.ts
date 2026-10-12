@@ -227,6 +227,7 @@ describe("Pimlico bundler client", () => {
     expect(result).toStrictEqual({
       userOpHash: USER_OP_HASH,
       transactionHash: TRANSACTION_HASH,
+      blockNumber: 79_585_718n,
       success: true,
       reason: undefined,
     });
@@ -282,6 +283,7 @@ describe("Pimlico bundler client", () => {
     expect(result).toStrictEqual({
       userOpHash: USER_OP_HASH,
       transactionHash: TRANSACTION_HASH,
+      blockNumber: 79_585_718n,
       success: false,
       reason: REVERT_REASON,
     });

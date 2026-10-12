@@ -5,6 +5,7 @@ import { sendTaggedCalls } from "../src/send";
 
 const USER_OP: Hash = pad("0x01", { size: 32 });
 const TX: Hash = pad("0x02", { size: 32 });
+const BLOCK = 79_925_582n;
 
 /** A bundler that writes down each step; its operations succeed unless `waitFails` says the wait throws. */
 function fakeBundler(steps: string[], waitFails?: Error) {
@@ -13,7 +14,7 @@ function fakeBundler(steps: string[], waitFails?: Error) {
     waitForUserOperationReceipt: async () => {
       steps.push("wait");
       if (waitFails) throw waitFails;
-      return { success: true, receipt: { transactionHash: TX } };
+      return { success: true, receipt: { transactionHash: TX, blockNumber: BLOCK } };
     },
   } as unknown as BundlerClient;
 }
@@ -30,7 +31,7 @@ describe("sendTaggedCalls", () => {
       onSent: (hash) => void steps.push(`sent ${hash}`),
     });
     expect(steps).toEqual(["send", `sent ${USER_OP}`, "wait"]);
-    expect(result).toEqual({ userOpHash: USER_OP, transactionHash: TX, success: true, reason: undefined });
+    expect(result).toEqual({ userOpHash: USER_OP, transactionHash: TX, blockNumber: BLOCK, success: true, reason: undefined });
     expect(result).not.toHaveProperty("unrecorded");
   });
 
@@ -92,7 +93,7 @@ describe("sendTaggedCalls", () => {
     const asked: unknown[] = [];
     const bundlerClient = {
       sendUserOperation: async (parameters: unknown) => (asked.push(parameters), USER_OP),
-      waitForUserOperationReceipt: async () => ({ success: true, receipt: { transactionHash: TX } }),
+      waitForUserOperationReceipt: async () => ({ success: true, receipt: { transactionHash: TX, blockNumber: BLOCK } }),
     } as unknown as BundlerClient;
     await sendTaggedCalls({ bundlerClient, account, calls: [], nonce: 0n });
     await sendTaggedCalls({ bundlerClient, account, calls: [] });
