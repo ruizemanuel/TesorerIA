@@ -59,12 +59,17 @@ test("three friends create a fund, contribute, get the agreed expense back, and 
   await ana.getByRole("button", { name: "Entrar con mi passkey" }).click();
   await expect(ana).toHaveURL(new RegExp(`${fund}$`));
 
-  // 3. Beto contributes 10 USDT; the run after it converts them.
+  // 3. Beto contributes 10 USDT; the run after it converts them. Aportar offers what covers his week (a little over
+  // 6 USDT at the fork's price), and he puts in all 10: what goes over is paid ahead.
   await give(await accountOf(beto), { usdt: 10_000_000n });
   await open(beto, `${fund}?p=aportar`);
+  await expect(onScreen(beto, /Cubre los \$\s10\.000, al precio de ahora\./)).toBeVisible();
+  await beto.getByLabel("Cuánto aportás").fill("10");
+  await expect(onScreen(beto, /Son unos \$\s[\d.]+(,\d{1,2})? al precio de ahora\./)).toBeVisible();
   await beto.getByRole("button", { name: /Aportar 10\sUSDT/ }).click();
   await expect(beto).toHaveURL(/\?aporte=/);
   await expect(beto.getByRole("img", { name: "pagó" })).toHaveCount(1); // Beto's; Ana and Caro still owe
+  await expect(onScreen(beto, /Estás al día, con \$\s[\d.]+(,\d{1,2})? adelantados\./)).toBeVisible();
   await expect(async () => {
     await beto.goto(`${fund}/movimientos`);
     await expect(onScreen(beto, /Pasé a pesos los 10\sUSDT/)).toBeVisible({ timeout: 5_000 });

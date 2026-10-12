@@ -55,6 +55,12 @@ export function parsePesos(input: string): bigint | null {
   return units > 0n ? units : null;
 }
 
+/** An amount typed in USDT, as USDT units, or null: written like pesos (parsePesos), to the cent, with or without "USDT". */
+export function parseUsdt(input: string): bigint | null {
+  const asPesos = parsePesos(input.replace(/\s*USDT\s*$/i, ""));
+  return asPesos === null ? null : asPesos / 10n ** 12n;
+}
+
 function parts(date: Date, options: Intl.DateTimeFormatOptions): Record<string, string> {
   const formatted = new Intl.DateTimeFormat("es-AR", { timeZone: TIME_ZONE, ...options }).formatToParts(date);
   return Object.fromEntries(formatted.map((part) => [part.type, part.value]));

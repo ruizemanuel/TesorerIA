@@ -10,22 +10,29 @@ import { celoBrowserClient, loadMe, sendCalls } from "../lib/client/wallet";
 import {
   MIN_BINANCE_USDT,
   contributeCalls,
+  defaultUsdtAmount,
   defaultWarsAmount,
-  fitUnderCap,
   pesosText,
   rampUrl,
   readPesosAmount,
+  readUsdtAmount,
   roomUnderCap,
+  usdtText,
+  usdtToSend,
+  usdtWorthText,
   weeklyContribution,
 } from "../lib/contribute";
-import { formatPesos, formatUsdt } from "../lib/format";
+import { USDT_UNIT, formatPesos, formatUsdt } from "../lib/format";
 import { DEFAULT_BALANCE_CAP, memberFundAbi } from "../lib/fund-abi";
 import { AddressBox } from "./address-box";
 import { Button, ButtonLink, FIELD } from "./ui";
 
 type Token = "usdt" | "wars";
-/** What the member's account holds. `usdtInWars` is what all that USDT is worth at the fund's rate; null if it couldn't be read. */
-type Held = { usdt: bigint; wars: bigint; usdtInWars: bigint | null };
+/**
+ * What the member's account holds, and `rate`: what one USDT is worth to the fund (quoteUsdtInWars, the pool's
+ * 30-minute average, the price it credits USDT at); null if it couldn't be read.
+ */
+type Held = { usdt: bigint; wars: bigint; rate: bigint | null };
 
 const WATCH_EVERY_MS = 10_000;
 
@@ -56,26 +63,24 @@ export function ContributePanel({
   const [held, setHeld] = useState<Held | null>(null);
   const [lookFailed, setLookFailed] = useState(false);
   const [typed, setTyped] = useState<string | null>(null);
+  const [typedUsdt, setTypedUsdt] = useState<string | null>(null);
   const [step, setStep] = useState<"idle" | "signing" | "sending">("idle");
   const [error, setError] = useState("");
   const [sentNow, setSentNow] = useState(false);
   const busy = useRef(false); // a second click lands before the button re-renders as disabled
 
-  // Every 10 s, what has reached the member's account (spec, 9, pantalla 3).
+  // Every 10 s, what has reached the member's account, and the fund's rate for USDT (spec, 9, pantalla 3).
   useEffect(() => {
     const client = celoBrowserClient();
     let live = true;
     const read = async () => {
-      const [usdt, wars] = await Promise.all([
+      const [usdt, wars, rate] = await Promise.all([
         client.readContract({ address: USDT, abi: erc20Abi, functionName: "balanceOf", args: [account] }),
         client.readContract({ address: WARS, abi: erc20Abi, functionName: "balanceOf", args: [account] }),
+        client.readContract({ address: fund, abi: memberFundAbi, functionName: "quoteUsdtInWars", args: [USDT_UNIT] }).catch(() => null),
       ]);
-      const usdtInWars =
-        usdt === 0n
-          ? 0n
-          : await client.readContract({ address: fund, abi: memberFundAbi, functionName: "quoteUsdtInWars", args: [usdt] }).catch(() => null);
       if (live) {
-        setHeld({ usdt, wars, usdtInWars });
+        setHeld({ usdt, wars, rate: rate === null || rate === 0n ? null : rate });
         setLookFailed(false);
       }
     };
@@ -93,11 +98,18 @@ export function ContributePanel({
 
   const room = roomUnderCap(balance);
   const cap = formatPesos(DEFAULT_BALANCE_CAP);
+  // This week's contribution, in pesos: what both tabs offer, and what the USDT one says how much to send for.
+  const target = weeklyContribution({ owed, weeklyFee, room });
   // Reimbursements land in this same account, so wARS are offered by what the member owes, never by what they hold (F7).
   const warsDefault = defaultWarsAmount({ held: held?.wars ?? 0n, owed, weeklyFee, room });
   const warsReading = readPesosAmount(typed ?? pesosText(warsDefault), { held: held?.wars ?? 0n, room });
-  const usdtOffer = held === null ? 0n : fitUnderCap(held.usdt, held.usdtInWars, room);
-  const amount = tab === "usdt" ? usdtOffer : warsReading.ok ? warsReading.amount : 0n;
+  // USDT too: what covers the week at the fund's rate, which moves, so the default follows it until the member types.
+  const usdtOffer = { held: held?.usdt ?? 0n, rate: held?.rate ?? null, owed, weeklyFee, room };
+  const usdtDefault = defaultUsdtAmount(usdtOffer);
+  const usdtReading = typedUsdt === null ? ({ ok: true, amount: usdtDefault } as const) : readUsdtAmount(typedUsdt, usdtOffer);
+  const toSend = held === null ? null : usdtToSend(usdtOffer);
+  const reading = tab === "usdt" ? usdtReading : warsReading;
+  const amount = reading.ok ? reading.amount : 0n;
   const label = tab === "usdt" ? formatUsdt(amount) : formatPesos(amount);
   const holding = held === null ? 0n : held[tab];
   // Whether the server knows of one (a reopened panel, another tab) or this click just sent one: either way, no second.
@@ -150,14 +162,24 @@ export function ContributePanel({
       <div role="tabpanel" className="grid gap-4">
         {tab === "usdt" ? (
           <p>
-            Mandá USDT a tu cuenta del fondo desde cualquier exchange o wallet. Si lo retirás de Binance, el mínimo es{" "}
-            <span className="money">{formatUsdt(MIN_BINANCE_USDT)}</span>.
+            {toSend !== null && toSend > 0n ? (
+              <>
+                Mandá al menos <span className="money font-semibold">{formatUsdt(toSend)}</span>
+                {held !== null && held.usdt > 0n ? " más" : ""} a tu cuenta del fondo desde Binance o cualquier exchange:{" "}
+                {held !== null && held.usdt > 0n ? "con lo que ya tenés, " : "con eso "}cubrís{" "}
+                <span className="money">{formatPesos(target)}</span> al precio de ahora.
+              </>
+            ) : (
+              "Mandá USDT a tu cuenta del fondo desde Binance o cualquier exchange."
+            )}{" "}
+            Si lo retirás de Binance, el mínimo es <span className="money">{formatUsdt(MIN_BINANCE_USDT)}</span>
+            {toSend !== null && toSend > 0n && toSend < MIN_BINANCE_USDT ? ": lo que sobre queda en tu cuenta para la próxima." : "."}
           </p>
         ) : (
           <div className="grid gap-2">
             <p>En la app de Ripio, retirá wARS por la red Celo a tu cuenta del fondo. O cargalos directo:</p>
             <ButtonLink
-              href={rampUrl(account, weeklyContribution({ owed, weeklyFee, room }))}
+              href={rampUrl(account, target)}
               target="_blank"
               rel="noreferrer"
               variant="secondary"
@@ -176,7 +198,7 @@ export function ContributePanel({
             <p className="text-muted">{lookFailed ? "No pudimos mirar tu cuenta. Probamos de nuevo en unos segundos." : "Mirando tu cuenta…"}</p>
           ) : holding === 0n ? (
             <p className="text-muted">Todavía no llegó nada. Cuando llegue, aparece acá; puede tardar unos minutos.</p>
-          ) : room === 0n || (tab === "usdt" && usdtOffer === 0n) ? (
+          ) : room === 0n || (tab === "usdt" && usdtDefault === 0n) ? (
             <p className="font-semibold text-owe">
               El fondo llegó a su tope de <span className="money">{cap}</span>: no entra más.
             </p>
@@ -185,30 +207,21 @@ export function ContributePanel({
               <p>
                 Tenés <span className="money font-semibold">{tab === "usdt" ? formatUsdt(held.usdt) : formatPesos(held.wars)}</span> en tu cuenta.
               </p>
-              {tab === "usdt" && usdtOffer < held.usdt && (
-                <p className="text-sm text-muted">
-                  El fondo tiene un tope de <span className="money">{cap}</span>, así que ahora le entran <span className="money">{formatUsdt(usdtOffer)}</span>.
-                </p>
-              )}
-              {tab === "wars" && (
-                <div className="grid gap-1">
-                  <label className="grid gap-1">
-                    <span className="font-semibold">Cuánto aportás</span>
-                    <input
-                      className={`${FIELD} money`}
-                      inputMode="decimal"
-                      autoComplete="off"
-                      value={typed ?? pesosText(warsDefault)}
-                      disabled={step !== "idle"}
-                      aria-invalid={!warsReading.ok}
-                      aria-describedby="amount-problem"
-                      onChange={(event) => setTyped(event.target.value)}
-                    />
-                  </label>
-                  <p id="amount-problem" role="alert" className="min-h-5 text-sm text-owe">
-                    {warsReading.ok ? "" : warsReading.error}
-                  </p>
-                </div>
+              {tab === "usdt" ? (
+                <AmountField
+                  value={typedUsdt ?? usdtText(usdtDefault)}
+                  problem={usdtReading.ok ? "" : usdtReading.error}
+                  note={usdtReading.ok && held.rate !== null ? usdtWorthText(usdtReading.amount, held.rate, target) : undefined}
+                  disabled={step !== "idle"}
+                  onChange={setTypedUsdt}
+                />
+              ) : (
+                <AmountField
+                  value={typed ?? pesosText(warsDefault)}
+                  problem={warsReading.ok ? "" : warsReading.error}
+                  disabled={step !== "idle"}
+                  onChange={setTyped}
+                />
               )}
               <Button disabled={step !== "idle" || amount === 0n} onClick={contribute}>
                 {step === "signing" ? "Confirmá con tu huella, tu cara o el PIN" : step === "sending" ? "Enviando…" : `Aportar ${label}`}
@@ -220,6 +233,51 @@ export function ContributePanel({
           </p>
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * The amount field of either tab, with what to fix under it, or else `note` (what the USDT comes to). The note isn't
+ * an alert: it changes with the fund's rate, every 10 s, and a screen reader would read it out each time.
+ */
+function AmountField({
+  value,
+  problem,
+  note,
+  disabled,
+  onChange,
+}: {
+  value: string;
+  problem: string;
+  note?: string;
+  disabled: boolean;
+  onChange: (text: string) => void;
+}) {
+  return (
+    <div className="grid gap-1">
+      <label className="grid gap-1">
+        <span className="font-semibold">Cuánto aportás</span>
+        <input
+          className={`${FIELD} money`}
+          inputMode="decimal"
+          autoComplete="off"
+          value={value}
+          disabled={disabled}
+          aria-invalid={problem !== ""}
+          aria-describedby="amount-problem"
+          onChange={(event) => onChange(event.target.value)}
+        />
+      </label>
+      {problem === "" && note !== undefined ? (
+        <p id="amount-problem" className="min-h-5 text-sm text-muted">
+          {note}
+        </p>
+      ) : (
+        <p id="amount-problem" role="alert" className="min-h-5 text-sm text-owe">
+          {problem}
+        </p>
+      )}
     </div>
   );
 }

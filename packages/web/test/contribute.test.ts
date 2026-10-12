@@ -2,13 +2,21 @@ import { USDT, WARS } from "@tesoreria/agent";
 import { decodeFunctionData, erc20Abi, getAddress } from "viem";
 import { describe, expect, it } from "vitest";
 import {
+  USDT_MARGIN_BPS,
   contributeCalls,
+  defaultUsdtAmount,
   defaultWarsAmount,
   fitUnderCap,
   pesosText,
   rampUrl,
   readPesosAmount,
+  readUsdtAmount,
   roomUnderCap,
+  usdtFor,
+  usdtText,
+  usdtToSend,
+  usdtWorth,
+  usdtWorthText,
   weeklyContribution,
 } from "../src/lib/contribute";
 import { DEFAULT_BALANCE_CAP, memberFundAbi } from "../src/lib/fund-abi";
@@ -126,5 +134,66 @@ describe("readPesosAmount", () => {
       ok: false,
       error: `El fondo llegó a su tope de ${formatPesos(DEFAULT_BALANCE_CAP)}: no entra más.`,
     });
+  });
+});
+
+describe("Aportar in USDT: what covers the week, at the fund's rate", () => {
+  const rate = 1_600n * WARS_UNIT; // what one USDT is worth to the fund (quoteUsdtInWars of 1 USDT)
+  const usdt = (n: number) => BigInt(Math.round(n * 100)) * 10_000n; // n USDT, to the cent
+  const week = { owed: 0n, weeklyFee: pesos(10_000), room: pesos(400_000) };
+
+  it("asks for 0,1 % more than the pesos, rounded up to a USDT cent", () => {
+    expect(USDT_MARGIN_BPS).toBe(10n);
+    expect(usdtFor(pesos(10_000), rate)).toBe(usdt(6.26)); // 10.010 / 1.600 = 6,25625
+    expect(usdtFor(pesos(16_000), rate)).toBe(usdt(10.01)); // 16.016 / 1.600 = 10,01 exactly: not a cent more
+    const cases = [
+      [pesos(10_000), 1_606_846_000_000_000_000_000n],
+      [pesos(7), 1_234_567_890_123_456_789_012n],
+      [pesos(450_000), rate],
+    ] as const;
+    for (const [amount, r] of cases) {
+      const withMargin = amount + (amount * USDT_MARGIN_BPS) / 10_000n;
+      const worth = usdtWorth(usdtFor(amount, r), r);
+      expect(worth).toBeGreaterThanOrEqual(withMargin);
+      expect(worth).toBeLessThanOrEqual(withMargin + usdtWorth(10_000n, r) + 1n); // at most a cent over
+    }
+  });
+
+  it("offers what covers the week, like the pesos' tab, or all you hold when it's less; never over the cap", () => {
+    expect(defaultUsdtAmount({ held: usdt(20), rate, ...week })).toBe(usdt(6.26));
+    expect(defaultUsdtAmount({ held: usdt(5), rate, ...week })).toBe(usdt(5));
+    expect(defaultUsdtAmount({ held: usdt(20), rate, ...week, owed: pesos(15_000) })).toBe(usdt(9.39)); // 15.015 / 1.600 = 9,384…
+    // $ 5.000 left under the cap: the margin can't take it over (20 USDT are $ 32.000; 5.000 of them, 3,125 USDT).
+    expect(defaultUsdtAmount({ held: usdt(20), rate, ...week, room: pesos(5_000) })).toBe(3_125_000n);
+    expect(defaultUsdtAmount({ held: usdt(20), rate: null, ...week })).toBe(usdt(20)); // no rate: all of it, as before
+  });
+
+  it("says how much more to send for the week, to the cent up, and nothing once it's there", () => {
+    expect(usdtToSend({ held: 0n, rate, ...week })).toBe(usdt(6.26));
+    expect(usdtToSend({ held: usdt(5), rate, ...week })).toBe(usdt(1.26));
+    expect(usdtToSend({ held: 6_255_000n, rate, ...week })).toBe(usdt(0.01));
+    expect(usdtToSend({ held: usdt(7), rate, ...week })).toBe(0n);
+    expect(usdtToSend({ held: 0n, rate: null, ...week })).toBeNull();
+  });
+
+  it("reads the USDT typed, and says what to fix", () => {
+    const mine = { held: usdt(20), rate, room: pesos(400_000) };
+    expect(readUsdtAmount("10", mine)).toEqual({ ok: true, amount: usdt(10) });
+    expect(readUsdtAmount("6,26", mine)).toEqual({ ok: true, amount: usdt(6.26) });
+    expect(readUsdtAmount(usdtText(usdt(6.26)), mine)).toEqual({ ok: true, amount: usdt(6.26) }); // round-trips the field
+    expect(readUsdtAmount("6.26", mine)).toEqual({ ok: false, error: "Escribilo como 6 o 6,25." });
+    expect(readUsdtAmount("21", mine)).toEqual({ ok: false, error: `En tu cuenta tenés 20${NBSP}USDT.` });
+    const cap = formatPesos(DEFAULT_BALANCE_CAP);
+    expect(readUsdtAmount("10", { ...mine, room: pesos(8_000) })).toEqual({
+      ok: false,
+      error: `Al fondo le entran hasta 5${NBSP}USDT más, porque tiene un tope de ${cap}.`,
+    });
+    expect(readUsdtAmount("1", { ...mine, room: 0n })).toEqual({ ok: false, error: `El fondo llegó a su tope de ${cap}: no entra más.` });
+  });
+
+  it("says under the field that it covers the week, or what it comes to", () => {
+    expect(usdtWorthText(usdt(6.26), rate, pesos(10_000))).toBe(`Cubre los ${formatPesos(pesos(10_000))}, al precio de ahora.`);
+    expect(usdtWorthText(usdt(10), rate, pesos(10_000))).toBe(`Son unos ${formatPesos(pesos(16_000))} al precio de ahora.`);
+    expect(usdtWorthText(usdt(5), rate, pesos(10_000))).toBe(`Son unos ${formatPesos(pesos(8_000))} al precio de ahora.`);
   });
 });

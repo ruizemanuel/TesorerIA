@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { NBSP, USDT_UNIT, WARS_UNIT, formatPesos, formatUsdt, formatWhen, heldAmounts, initials, parsePesos } from "../src/lib/format";
+import { NBSP, USDT_UNIT, WARS_UNIT, formatPesos, formatUsdt, formatWhen, heldAmounts, initials, parsePesos, parseUsdt } from "../src/lib/format";
 
 describe("formatPesos", () => {
   it("writes pesos the Argentine way, with a space that doesn't break after the sign", () => {
@@ -44,6 +44,18 @@ describe("parsePesos", () => {
     for (const bad of ["10,000.50", "1.0000", "10.5", "10.00", "1000.000", "1,000", "0.500", "0.001", "00.500", "01.000", "10,555", "abc", "", "0", "0,00", "-5", "1e3"]) {
       expect(parsePesos(bad), bad).toBeNull();
     }
+  });
+});
+
+describe("parseUsdt", () => {
+  it("reads USDT written like pesos, to the cent", () => {
+    expect(parseUsdt("6,25")).toBe(6_250_000n);
+    expect(parseUsdt("10")).toBe(10_000_000n);
+    expect(parseUsdt("1.000,5")).toBe(1_000_500_000n);
+    expect(parseUsdt(`6,25${NBSP}USDT`)).toBe(6_250_000n);
+    expect(parseUsdt("6.25")).toBeNull();
+    expect(parseUsdt("6,255")).toBeNull();
+    expect(parseUsdt("0")).toBeNull();
   });
 });
 
