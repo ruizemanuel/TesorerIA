@@ -165,8 +165,22 @@ describe("Aportar in USDT: what covers the week, at the fund's rate", () => {
     expect(defaultUsdtAmount({ held: usdt(5), rate, ...week })).toBe(usdt(5));
     expect(defaultUsdtAmount({ held: usdt(20), rate, ...week, owed: pesos(15_000) })).toBe(usdt(9.39)); // 15.015 / 1.600 = 9,384…
     // $ 5.000 left under the cap: the margin can't take it over (20 USDT are $ 32.000; 5.000 of them, 3,125 USDT).
-    expect(defaultUsdtAmount({ held: usdt(20), rate, ...week, room: pesos(5_000) })).toBe(3_125_000n);
+    // What fits is offered to the cent below, 3,12: the field shows what is sent, and a cent is left to spare.
+    expect(defaultUsdtAmount({ held: usdt(20), rate, ...week, room: pesos(5_000) })).toBe(3_120_000n);
     expect(defaultUsdtAmount({ held: usdt(20), rate: null, ...week })).toBe(usdt(20)); // no rate: all of it, as before
+  });
+
+  it("offers, under the cap, an amount the field shows as it is and the cap still takes with a cent to spare", () => {
+    const capped = { held: usdt(20), rate, ...week, room: pesos(5_000) };
+    const offered = defaultUsdtAmount(capped);
+    expect(offered % 10_000n).toBe(0n); // on the cent grid: "3,12" is what is sent
+    expect(readUsdtAmount(usdtText(offered), capped)).toEqual({ ok: true, amount: offered }); // and what the field says reads back
+    expect(usdtWorth(offered, rate)).toBeLessThan(pesos(5_000)); // below the room: a rate uptick has a cent to cover
+    // Where the cap doesn't bind it changes nothing: all you hold when it's less than the week, even to a fraction of a cent.
+    expect(defaultUsdtAmount({ held: 5_126_000n, rate, ...week })).toBe(5_126_000n);
+    expect(defaultUsdtAmount({ held: 5_126_000n, rate, ...week, room: pesos(400_000) })).toBe(5_126_000n);
+    // Or the week itself when that is less than what fits.
+    expect(defaultUsdtAmount({ held: usdt(20), rate, ...week, weeklyFee: pesos(1_000), room: pesos(5_000) })).toBe(usdt(0.63)); // 1.001 / 1.600 = 0,6256…
   });
 
   it("keeps the last rate when reading it again fails, and takes no rate from a zero", () => {

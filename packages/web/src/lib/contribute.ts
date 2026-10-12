@@ -124,13 +124,15 @@ export type UsdtOffer = { held: bigint; rate: bigint | null; owed: bigint; weekl
 
 /**
  * The USDT Aportar offers by default (spec, 9, pantalla 3): what covers this week's contribution at the fund's rate,
- * like the pesos' tab, or all the member holds when it's less; never more than fits under the cap. Without a rate,
- * all they hold, as before there was one.
+ * like the pesos' tab, or all the member holds when it's less; never more than fits under the cap, and when the cap
+ * is what limits it, to the cent below what fits: that is what the field shows and what readUsdtAmount takes, and
+ * leaves up to a cent for the fund's rate to rise before it lands. Without a rate, all they hold, as before there was one.
  */
 export function defaultUsdtAmount({ held, rate, owed, weeklyFee, room }: UsdtOffer): bigint {
   if (rate === null) return held;
   const fits = fitUnderCap(held, usdtWorth(held, rate), room);
-  return min(usdtFor(weeklyContribution({ owed, weeklyFee, room }), rate), fits);
+  const underCap = fits < held ? centDown(fits) : held; // `fits` is less than `held` only when the cap binds
+  return min(usdtFor(weeklyContribution({ owed, weeklyFee, room }), rate), underCap);
 }
 
 /**
