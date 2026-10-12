@@ -389,7 +389,18 @@ async function markLive(db: Db, fundId: string, { address, block }: Deployed): P
   return { ok: true, address };
 }
 
-/** Marks the draft live with the fund the factory created in `transactionHash` (see `findDeployed`). */
+/**
+ * How long confirmDeploy keeps reading a createFund the browser just saw land, about 17 s: the bundler reports the
+ * receipt as soon as its own node has it, and our node (forno) can be a few seconds behind. The real group's
+ * createFund got "todavía no se confirmó" that way on 11/10, though it had gone through.
+ */
+const CONFIRM_WAIT = { tries: 8, everyMs: 2_500 };
+
+/**
+ * Marks the draft live with the fund the factory created in `transactionHash` (see `findDeployed`). The browser
+ * calls it right after the receipt, so a transaction it can't read yet is read again for a while (`wait`) before
+ * it answers "unconfirmed".
+ */
 export async function confirmDeploy(
   db: Db,
   {
@@ -399,14 +410,28 @@ export async function confirmDeploy(
     client,
     agent,
     factory = FUND_FACTORY,
-  }: { fundId: string; userId: string; transactionHash: Hash; client: ChainReader; agent: Address; factory?: Address },
+    wait = CONFIRM_WAIT,
+  }: {
+    fundId: string;
+    userId: string;
+    transactionHash: Hash;
+    client: ChainReader;
+    agent: Address;
+    factory?: Address;
+    wait?: { tries: number; everyMs: number };
+  },
 ): Promise<FundsResult<{ address: Address }>> {
   const draft = await draftById(db, fundId);
   if (draft === null) return fail(404, NOT_FOUND);
   if (draft.creatorId !== userId) return fail(403, ONLY_CREATOR);
   if (draft.status === "live" && draft.address !== null) return { ok: true, address: draft.address };
   if (draft.status !== "deploying" || draft.votesRequired === null) return fail(409, "Primero hay que crear el fondo.");
-  const found = await findDeployed(draft, draft.votesRequired, { transactionHash, client, agent, factory });
+  const read = () => findDeployed(draft, draft.votesRequired, { transactionHash, client, agent, factory });
+  let found = await read();
+  for (let tried = 1; found === "unconfirmed" && tried < wait.tries; tried++) {
+    await new Promise((resolve) => setTimeout(resolve, wait.everyMs));
+    found = await read();
+  }
   if (found === "unconfirmed") return fail(409, UNCONFIRMED);
   if (found === "mismatch") return fail(409, MISMATCH);
   if (found === "none") return fail(409, "No encontramos el fondo en esa operación.");

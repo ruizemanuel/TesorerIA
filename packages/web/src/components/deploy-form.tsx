@@ -86,7 +86,7 @@ export function DeployForm({ fundId, memberCount, chosenVotes }: { fundId: strin
           }
         }}
       >
-        {step === "signing" ? "Confirmá con tu huella, tu cara o el PIN" : step === "sending" ? "Creando el fondo…" : "Crear fondo"}
+        {step === "signing" ? "Confirmá con tu huella, tu cara o el PIN" : step === "sending" ? "Creando fondo…" : "Crear fondo"}
       </Button>
       <p role="alert" className="text-sm text-owe">
         {error}

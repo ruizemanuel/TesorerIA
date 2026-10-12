@@ -291,6 +291,36 @@ describe("confirmDeploy", () => {
     expect((await draftById(db, other.fundId))?.status).toBe("draft");
     expect((await db.select({ block: funds.createdBlock }).from(funds)).map((f) => f.block)).toContain(79_700_000n);
   });
+
+  it("reads again a transaction the node doesn't have yet, and goes live once it does", async () => {
+    const db = await testDb();
+    const { people, fundId } = await group(db);
+    const members = people.map((p) => getAddress(p.account));
+    await deployCall(db, { fundId, userId: people[0]!.id, votesRequired: 2, agent: AGENT });
+    // The bundler saw it land; our node is two reads behind.
+    const lagging = fakeClient([{ address: FUND_FACTORY, fund: NEW_FUND, creator: members[0]! }], settingsFor(members));
+    lagging.getTransactionReceipt.mockRejectedValueOnce(new Error("receipt not found")).mockRejectedValueOnce(new Error("receipt not found"));
+    const wait = { tries: 5, everyMs: 0 };
+    expect(
+      await confirmDeploy(db, { fundId, userId: people[0]!.id, transactionHash: TX, client: lagging as never, agent: AGENT, factory: FUND_FACTORY, wait }),
+    ).toEqual({ ok: true, address: NEW_FUND });
+    expect(lagging.getTransactionReceipt).toHaveBeenCalledTimes(3);
+    expect(await draftById(db, fundId)).toMatchObject({ status: "live", address: NEW_FUND });
+  });
+
+  it("answers that it isn't confirmed only after its tries, and keeps the draft being created", async () => {
+    const db = await testDb();
+    const { people, fundId } = await group(db);
+    await deployCall(db, { fundId, userId: people[0]!.id, votesRequired: 2, agent: AGENT });
+    const unreachable = fakeClient([], []);
+    unreachable.getTransactionReceipt.mockRejectedValue(new Error("receipt not found"));
+    const wait = { tries: 3, everyMs: 0 };
+    expect(
+      await confirmDeploy(db, { fundId, userId: people[0]!.id, transactionHash: TX, client: unreachable as never, agent: AGENT, factory: FUND_FACTORY, wait }),
+    ).toMatchObject({ ok: false, status: 409, error: "La operación todavía no se confirmó. Probá en un rato." });
+    expect(unreachable.getTransactionReceipt).toHaveBeenCalledTimes(3);
+    expect((await draftById(db, fundId))?.status).toBe("deploying");
+  });
 });
 
 describe("deployStep", () => {
