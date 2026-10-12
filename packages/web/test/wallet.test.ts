@@ -78,6 +78,20 @@ describe("sendCalls", () => {
     expect(passkey.sign).toHaveBeenCalledWith({ hash: "0xdead" });
   });
 
+  it("reports a landed operation done even if its receipt carries no block, instead of failing it after the fact", async () => {
+    // viem types the block as a bigint but reads null from a receipt without one: that mustn't turn a landed operation
+    // into a "probá de nuevo", which would invite a second contribution.
+    wallet.sendTaggedCalls.mockResolvedValue({ ...RECEIPT, blockNumber: null });
+
+    const result = await sendCalls(me, CALLS, INFO);
+
+    expect(result).toEqual({ ...RECEIPT, blockNumber: null });
+    const [path, body] = posted().at(-1)!;
+    expect(path).toBe("/api/operations/done");
+    expect(body).toEqual({ userOpHash: OP, transactionHash: TX, success: true });
+    expect(JSON.stringify(body)).not.toContain("blockNumber"); // what the server reads: the field is optional
+  });
+
   it("refuses a passkey that isn't the account's, before anyone is asked to sign", async () => {
     wallet.createMemberAccount.mockResolvedValue({ address: getAddress("0x6BE3c1eB63A4edbc6C23c281F93F81B14eF3a671") });
     const error = await sendCalls(me, CALLS, INFO).catch((caught) => caught);
@@ -220,6 +234,25 @@ describe("settleOperation", () => {
     await settleOperation(OP);
     expect(requests).toEqual([{ url: "http://localhost:3000/api/bundler", method: "eth_getUserOperationReceipt", params: [OP] }]);
     expect(posted()).toEqual([["/api/operations/done", { userOpHash: OP, transactionHash: TX, blockNumber: "1", success: false }]]);
+  });
+
+  it("records the receipt of an operation even if it carries no block", async () => {
+    bundler({
+      userOpHash: OP,
+      entryPoint: entryPoint07Address,
+      sender: ACCOUNT,
+      nonce: "0x1",
+      actualGasCost: "0x1",
+      actualGasUsed: "0x1",
+      success: true,
+      logs: [],
+      receipt: { transactionHash: TX, logs: [], status: "0x1" },
+    });
+    await expect(settleOperation(OP)).resolves.toBeUndefined();
+    const [path, body] = posted().at(-1)!;
+    expect(path).toBe("/api/operations/done");
+    expect(body).toEqual({ userOpHash: OP, transactionHash: TX, success: true });
+    expect(JSON.stringify(body)).not.toContain("blockNumber");
   });
 
   it("says it's on its way, and records nothing, while the bundler has no receipt for it", async () => {

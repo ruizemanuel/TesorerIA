@@ -96,10 +96,11 @@ export async function sendCalls(
     throw new OnItsWayError({ cause: error });
   }
   if (result.unrecorded !== undefined) await record(result.userOpHash).catch(() => {});
+  // The operation has landed: a receipt without a block (viem reads null, whatever its type says) must not fail it.
   await post("/api/operations/done", {
     userOpHash: result.userOpHash,
     transactionHash: result.transactionHash,
-    blockNumber: result.blockNumber.toString(),
+    blockNumber: result.blockNumber?.toString(),
     success: result.success,
   }).catch(() => {});
   if (!result.success) throw new UserFacingError("La operación no se pudo completar. No se movió plata.");
@@ -129,7 +130,7 @@ export async function settleOperation(userOpHash: Hash): Promise<void> {
   await post("/api/operations/done", {
     userOpHash,
     transactionHash: receipt.receipt.transactionHash,
-    blockNumber: receipt.receipt.blockNumber.toString(),
+    blockNumber: receipt.receipt.blockNumber?.toString(), // null if the receipt has none: the server takes it without
     success: receipt.success,
   });
 }
