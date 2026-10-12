@@ -1,9 +1,9 @@
-import Link from "next/link";
 import type { Address } from "viem";
 import { formatWhen } from "../lib/format";
 import type { TimelineItem } from "../lib/timeline";
 import { Avatar } from "./avatar";
-import { ButtonLink } from "./ui";
+import { PanelLink } from "./panel-link";
+import { buttonClass } from "./ui";
 import { VoteButton } from "./vote-button";
 
 /** The movements, newest first (spec, 9.2): avatar, one sentence, the time, and at most one action. */
@@ -34,9 +34,9 @@ export function TimelineList({
       <div className="grid justify-items-start py-1">
         <p className="py-2 text-muted">Todavía no hay movimientos. El primero puede ser tu aporte.</p>
         {!readOnly && (
-          <ButtonLink href={`${basePath}?p=aportar`} variant="link" scroll={false}>
+          <PanelLink href={`${basePath}?p=aportar`} className={buttonClass("link")}>
             Aportar
-          </ButtonLink>
+          </PanelLink>
         )}
       </div>
     );
@@ -55,13 +55,12 @@ export function TimelineList({
               <p className="mt-0.5 text-xs text-muted">{item.pending ? "En camino" : formatWhen(item.at, now)}</p>
               {item.action?.kind === "receipt" && (
                 // 44 px to tap: the box reaches down to the row's divider instead of making the row taller.
-                <Link
+                <PanelLink
                   href={`${basePath}?p=comprobante&id=${encodeURIComponent(item.id)}`}
-                  scroll={false}
                   className="-mb-3 -mt-1.5 inline-flex min-h-11 items-center text-[13px] font-bold text-primary"
                 >
                   Ver comprobante
-                </Link>
+                </PanelLink>
               )}
               {item.action?.kind === "vote" && !readOnly && !closed && item.action.canVote && (
                 <VoteButton fund={fund} proposalId={item.action.proposalId.toString()} completes={item.action.completes} />

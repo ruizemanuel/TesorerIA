@@ -4,7 +4,8 @@ import type { FundView } from "../lib/fund-view";
 import { AccountHolding } from "./account-holding";
 import { FundNameRow } from "./bars";
 import { CountUp } from "./count-up";
-import { ButtonLink } from "./ui";
+import { PanelLink } from "./panel-link";
+import { buttonClass } from "./ui";
 
 /**
  * The balance, your status, what's in your own account (`account`; never in the public view) and the two actions:
@@ -54,12 +55,12 @@ export function FundHeader({
         {!readOnly && account !== undefined && <AccountHolding key={view.balance.toString()} account={account} />}
         {!readOnly && (
           <div className="mt-4 grid grid-cols-2 gap-2">
-            <ButtonLink href="?p=aportar" scroll={false}>
+            <PanelLink href="?p=aportar" className={buttonClass("primary")}>
               Aportar
-            </ButtonLink>
-            <ButtonLink href="?p=gasto" variant="secondary" scroll={false}>
+            </PanelLink>
+            <PanelLink href="?p=gasto" className={buttonClass("secondary")}>
               Cargar gasto
-            </ButtonLink>
+            </PanelLink>
           </div>
         )}
       </div>

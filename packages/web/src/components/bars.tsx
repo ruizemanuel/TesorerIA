@@ -4,7 +4,7 @@ import { Logo } from "./ui";
 
 /** Your avatar opens "Tu cuenta", which lives on the fund's inicio, wherever you are. */
 function AccountLink({ address, userName }: { address: string; userName: string }) {
-  return <AvatarLink name={userName} label="Tu cuenta" href={`/f/${address}?p=cuenta`} scroll={false} />;
+  return <AvatarLink name={userName} label="Tu cuenta" href={`/f/${address}?p=cuenta`} />;
 }
 
 /** Up to 1023 px: the fund's name, and your avatar at the top right (spec, 9.2). */

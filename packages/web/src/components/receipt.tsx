@@ -1,5 +1,11 @@
+import type { ReactNode } from "react";
 import { formatWhen } from "../lib/format";
 import type { TimelineItem } from "../lib/timeline";
+
+/** Each movement's comprobante, by its id, for the ones the timeline links to (PanelHost). */
+export function receiptPanels(items: readonly TimelineItem[], now: Date): Record<string, ReactNode> {
+  return Object.fromEntries(items.filter((item) => item.action?.kind === "receipt").map((item) => [item.id, <Receipt item={item} now={now} />]));
+}
 
 /** The comprobante (spec, 9.2): what happened, why, and the only link to the chain. */
 export function Receipt({ item, now }: { item: TimelineItem; now: Date }) {

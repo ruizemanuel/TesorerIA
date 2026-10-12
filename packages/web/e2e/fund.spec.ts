@@ -1,5 +1,21 @@
-import { expect, test } from "@playwright/test";
+import { type Page, type Request, expect, test } from "@playwright/test";
 import { accountOf, give, onScreen, open, phone } from "./support";
+
+/** The server renders (React Server Components) a page asks for while `act` runs; a link's prefetch isn't one. */
+async function serverRenders(page: Page, act: () => Promise<void>): Promise<string[]> {
+  const asked: string[] = [];
+  const onRequest = (request: Request) => {
+    const headers = request.headers();
+    if (headers["rsc"] === "1" && headers["next-router-prefetch"] === undefined) asked.push(request.url());
+  };
+  page.on("request", onRequest);
+  try {
+    await act();
+  } finally {
+    page.off("request", onRequest);
+  }
+  return asked;
+}
 
 test("three friends create a fund, contribute, get the agreed expense back and vote on another", async ({ browser }) => {
   const ana = await phone(await browser.newContext());
@@ -54,9 +70,15 @@ test("three friends create a fund, contribute, get the agreed expense back and v
     await expect(onScreen(beto, /Pasé a pesos los 10\sUSDT/)).toBeVisible({ timeout: 5_000 });
   }).toPass({ timeout: 120_000 });
 
-  // 4. Ana contributes $ 10.000 in wARS.
+  // 4. Ana contributes $ 10.000 in wARS. Aportar opens from her inicio without asking the server again.
   await give(await accountOf(ana), { wars: 10_000n * 10n ** 18n });
-  await open(ana, `${fund}?p=aportar`);
+  const openingAportar = await serverRenders(ana, async () => {
+    // The header's (the empty timeline has one too).
+    await ana.getByRole("link", { name: "Aportar" }).first().click();
+    await expect(ana.getByRole("dialog", { name: "Aportar" })).toBeVisible();
+  });
+  expect(openingAportar).toEqual([]);
+  await expect(ana).toHaveURL(/\?p=aportar$/);
   await ana.getByRole("tab", { name: "Tengo pesos en Ripio" }).click();
   // The run after a contribution must end before Ana's expense, which then finds the agent free. The route answers
   // 202 once it ran (or found the agent busy), and 429 when the once-a-minute limit refuses it.
@@ -66,8 +88,23 @@ test("three friends create a fund, contribute, get the agreed expense back and v
   await expect(ana.getByRole("img", { name: "pagó" })).toHaveCount(2);
   expect([202, 429]).toContain((await runAfterContribution).status());
 
-  // 5. Ana enters the pitch: the agent pays it back.
-  await open(ana, `${fund}?p=gasto`);
+  // 5. Ana enters the pitch: the agent pays it back. Its panel closes by its own button and by the browser's back,
+  // and opens again, all without the server.
+  const closingAndOpening = await serverRenders(ana, async () => {
+    const expense = ana.getByRole("dialog", { name: "Cargar un gasto" });
+    await ana.getByRole("link", { name: "Cargar gasto" }).click();
+    await expect(expense).toBeVisible();
+    await ana.getByRole("button", { name: "Volver" }).click();
+    await expect(expense).toBeHidden();
+    await expect(ana).toHaveURL(new RegExp(`${fund}$`));
+    await ana.getByRole("link", { name: "Cargar gasto" }).click();
+    await expect(expense).toBeVisible();
+    await ana.goBack();
+    await expect(expense).toBeHidden();
+    await ana.getByRole("link", { name: "Cargar gasto" }).click();
+    await expect(expense).toBeVisible();
+  });
+  expect(closingAndOpening).toEqual([]);
   await ana.getByLabel("Cuánto pagaste").fill("5.000");
   await ana.getByLabel("Nota (opcional)").fill("la cancha del jueves");
   await ana.getByRole("button", { name: "Cargar el gasto" }).click();

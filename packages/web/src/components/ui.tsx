@@ -18,8 +18,13 @@ export function Button({ variant = "primary", className = "", ...props }: Compon
   return <button type="button" className={`${BUTTON} ${VARIANTS[variant]} ${className}`} {...props} />;
 }
 
+/** A button's classes, for a link that looks like one (ButtonLink, or a PanelLink). */
+export function buttonClass(variant: Variant = "primary", className = ""): string {
+  return `${BUTTON} ${VARIANTS[variant]} ${className}`;
+}
+
 export function ButtonLink({ variant = "primary", className = "", ...props }: ComponentProps<typeof Link> & { variant?: Variant }) {
-  return <Link className={`${BUTTON} ${VARIANTS[variant]} ${className}`} {...props} />;
+  return <Link className={buttonClass(variant, className)} {...props} />;
 }
 
 /** A form field: 48 px tall, the same radius as the buttons. The 16 px text size comes from globals.css. */
