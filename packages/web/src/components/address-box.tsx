@@ -24,8 +24,9 @@ export function AddressBox({ address }: { address: string }) {
       </p>
       {/* The QR is SVG this component generated from the address itself. */}
       <div className="mx-auto size-44 [&>svg]:size-full" aria-hidden="true" dangerouslySetInnerHTML={{ __html: svg }} />
-      {/* No spaces, so it can be copied by hand, and `break-all`: 42 characters don't fit on one line of a phone. */}
-      <p className="break-all rounded-[14px] bg-surface p-3 text-center text-[15px] font-semibold [font-variant-numeric:lining-nums_tabular-nums]">
+      {/* No spaces, so it can be copied by hand. `narrow` fits its 42 characters on one line of a 360 px phone, and
+          `break-all` still breaks it on a narrower one. */}
+      <p className="narrow break-all rounded-[14px] bg-surface p-3 text-center text-[15px] font-semibold [font-variant-numeric:lining-nums_tabular-nums]">
         {address}
       </p>
       <Button

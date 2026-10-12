@@ -1,23 +1,28 @@
+import type { Address } from "viem";
 import { formatPesos } from "../lib/format";
 import type { FundView } from "../lib/fund-view";
+import { AccountHolding } from "./account-holding";
 import { FundNameRow } from "./bars";
 import { CountUp } from "./count-up";
 import { ButtonLink } from "./ui";
 
 /**
- * The balance, your status and the two actions: Aportar and Cargar gasto (spec, 9.2, Inicio 1–2). Up to 1023 px
- * it's the white band under the screen's top, over the 4 px stripe; from 1024 px, a card (the stripe is the top bar's).
+ * The balance, your status, what's in your own account (`account`; never in the public view) and the two actions:
+ * Aportar and Cargar gasto (spec, 9.2, Inicio 1–2). Up to 1023 px it's the white band under the screen's top, over
+ * the 4 px stripe; from 1024 px, a card (the stripe is the top bar's).
  */
 export function FundHeader({
   view,
   readOnly,
   previousBalance,
   userName,
+  account,
 }: {
   view: FundView;
   readOnly: boolean;
   previousBalance?: bigint;
   userName?: string;
+  account?: Address;
 }) {
   const { me } = view;
   return (
@@ -45,6 +50,8 @@ export function FundHeader({
             </>
           )}
         </p>
+        {/* Keyed on the fund's balance: a contribution changes it, and the line reads the account again at once. */}
+        {!readOnly && account !== undefined && <AccountHolding key={view.balance.toString()} account={account} />}
         {!readOnly && (
           <div className="mt-4 grid grid-cols-2 gap-2">
             <ButtonLink href="?p=aportar" scroll={false}>

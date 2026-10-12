@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { NBSP, USDT_UNIT, WARS_UNIT, formatPesos, formatUsdt, formatWhen, initials, parsePesos } from "../src/lib/format";
+import { NBSP, USDT_UNIT, WARS_UNIT, formatPesos, formatUsdt, formatWhen, heldAmounts, initials, parsePesos } from "../src/lib/format";
 
 describe("formatPesos", () => {
   it("writes pesos the Argentine way, with a space that doesn't break after the sign", () => {
@@ -57,6 +57,16 @@ describe("formatWhen", () => {
     expect(formatWhen(new Date("2026-10-10T02:59:00Z"), now)).toBe("Ayer, 23:59");
     expect(formatWhen(new Date("2026-10-05T12:00:00Z"), now)).toBe("Lunes, 9:00");
     expect(formatWhen(new Date("2026-10-03T12:00:00Z"), now)).toBe("3/10");
+  });
+});
+
+describe("heldAmounts", () => {
+  it("says pesos, then USDT, and leaves out what rounds to zero", () => {
+    expect(heldAmounts({ wars: 1_016_100_000_000_000_000_000n, usdt: 0n })).toEqual([`$${NBSP}1.016,10`]);
+    expect(heldAmounts({ wars: 0n, usdt: 5n * USDT_UNIT })).toEqual([`5${NBSP}USDT`]);
+    expect(heldAmounts({ wars: 10_000n * WARS_UNIT, usdt: 5n * USDT_UNIT })).toEqual([`$${NBSP}10.000`, `5${NBSP}USDT`]);
+    expect(heldAmounts({ wars: 4n * 10n ** 15n, usdt: 4_999n })).toEqual([]); // under half a cent of each
+    expect(heldAmounts({ wars: 5n * 10n ** 15n, usdt: 5_000n })).toEqual([`$${NBSP}0,01`, `0,01${NBSP}USDT`]);
   });
 });
 

@@ -33,7 +33,13 @@ export function FundScreenView({
       {publicView && <p className="bg-tint px-4 py-2 text-center text-sm font-semibold">Estás viendo un fondo real, en solo lectura.</p>}
       <main className="grid gap-3 lg:mx-auto lg:max-w-[1120px] lg:grid-cols-[380px_1fr] lg:items-start lg:gap-4 lg:p-7">
         <div className="grid gap-3 lg:gap-4">
-          <FundHeader view={view} readOnly={publicView} previousBalance={previousBalance} userName={userName} />
+          <FundHeader
+            view={view}
+            readOnly={publicView}
+            previousBalance={previousBalance}
+            userName={userName}
+            account={publicView ? undefined : user?.account}
+          />
           <div className="mx-auto grid w-full max-w-[560px] gap-3 px-4 lg:max-w-none lg:gap-4 lg:px-0">
             <WeekList view={view} justPaid={previousBalance !== undefined} />
             <Card className="lg:hidden">

@@ -29,6 +29,17 @@ export function formatUsdt(units: bigint): string {
 }
 
 /**
+ * What a member's own account holds, as the inicio says it ("En tu cuenta tenés …"): pesos, then USDT, leaving out
+ * what rounds to zero, since a speck of either says nothing.
+ */
+export function heldAmounts({ wars, usdt }: { wars: bigint; usdt: bigint }): string[] {
+  const amounts: string[] = [];
+  if (wars >= CENT / 2n) amounts.push(formatPesos(wars));
+  if (usdt >= 5_000n) amounts.push(formatUsdt(usdt));
+  return amounts;
+}
+
+/**
  * An amount typed in pesos, as wARS units, or null. The Argentine way: dots for thousands (in groups of three)
  * and a comma for up to two decimals. A dot that isn't a thousands separator ("10.5") is refused instead of
  * guessed, and so is a group that starts with a zero ("0.500" is not 500), and anything that isn't more than zero.
