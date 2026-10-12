@@ -14,6 +14,8 @@ import { type ProposalState, type TimelineItem, buildTimeline } from "./timeline
 
 export type FundScreen = {
   fundId: string;
+  /** The block everything on the screen was read at. */
+  block: bigint;
   view: FundView;
   timeline: TimelineItem[];
   viewerIsMember: boolean;
@@ -119,7 +121,7 @@ export async function loadFundScreen(
     now: new Date(Number(clock.timestamp) * 1000),
   });
   const contributionOnItsWay = pending.some((operation) => operation.kind === "contribute");
-  return { fundId: fund.id, view, timeline, viewerIsMember, publicView, contributionOnItsWay };
+  return { fundId: fund.id, block: snapshot.block, view, timeline, viewerIsMember, publicView, contributionOnItsWay };
 }
 
 /**

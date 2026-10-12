@@ -2,6 +2,7 @@ import { notFound, redirect } from "next/navigation";
 import { connection } from "next/server";
 import { isAddress } from "viem";
 import { MobileBar, TabBar, TopBar } from "../../../../components/bars";
+import { LiveFund } from "../../../../components/live-fund";
 import { TimelineList } from "../../../../components/timeline-list";
 import { Card, CardTitle } from "../../../../components/ui";
 import { currentUser } from "../../../../lib/current-user";
@@ -37,6 +38,7 @@ export default async function MovementsPage({ params }: { params: Promise<{ addr
         </Card>
       </main>
       <TabBar address={view.address} active="movimientos" />
+      <LiveFund fund={view.address} block={screen.block} />
     </div>
   );
 }

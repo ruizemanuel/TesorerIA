@@ -4,6 +4,7 @@ import type { CurrentUser } from "../lib/current-user";
 import type { FundScreen } from "../lib/read-fund";
 import { TabBar, TopBar } from "./bars";
 import { FundHeader } from "./fund-header";
+import { LiveFund } from "./live-fund";
 import { RulesCard } from "./rules-card";
 import { TimelineList } from "./timeline-list";
 import { Card, CardTitle } from "./ui";
@@ -79,6 +80,7 @@ export function FundScreenView({
         </Card>
       </main>
       {!publicView && <TabBar address={view.address} active="inicio" />}
+      {!publicView && <LiveFund fund={view.address} block={screen.block} />}
       {panel}
     </div>
   );

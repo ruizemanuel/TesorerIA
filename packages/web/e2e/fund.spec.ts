@@ -69,6 +69,11 @@ test("three friends create a fund, contribute, get the agreed expense back and v
     await beto.goto(`${fund}/movimientos`);
     await expect(onScreen(beto, /Pasé a pesos los 10\sUSDT/)).toBeVisible({ timeout: 5_000 });
   }).toPass({ timeout: 120_000 });
+  // Ana's inicio, open all along and never reloaded, catches up by itself (spec, 9.2).
+  await expect(ana.getByRole("img", { name: "pagó" })).toHaveCount(1);
+  await expect(onScreen(ana, /Pasé a pesos los 10\sUSDT/)).toBeVisible();
+  // With nothing new on the chain, it doesn't ask the server again: a look (one every 15 s) reads only the chain.
+  expect(await serverRenders(ana, () => ana.waitForTimeout(20_000))).toEqual([]);
 
   // 4. Ana contributes $ 10.000 in wARS. Aportar opens from her inicio without asking the server again.
   await give(await accountOf(ana), { wars: 10_000n * 10n ** 18n });

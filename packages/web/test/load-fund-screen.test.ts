@@ -124,6 +124,11 @@ describe("loadFundScreen: who sees a fund", () => {
     expect(agent.readFundEvents).toHaveBeenCalledWith(expect.any(Function), address, 79_700_000n, BLOCK);
   });
 
+  it("says which block the screen was read at, so the browser can tell when the chain has moved past it", async () => {
+    const address = await liveFund();
+    expect((await loadFundScreen(address, asViewer(ana)))?.block).toBe(BLOCK);
+  });
+
   it("says it could not read the fund, instead of showing it, when the history misses a reimbursement", async () => {
     const address = await liveFund();
     agent.readFund.mockResolvedValue(snapshot({ address, members: [ana, beto, caro].map((p) => getAddress(p.account)), spentThisWeek: 45_000n * WARS }));
