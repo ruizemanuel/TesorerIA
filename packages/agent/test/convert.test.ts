@@ -39,7 +39,7 @@ describe("planConversion", () => {
     const afterMost = { ...QUIET_DAY, convertedUsdt: LIMITS.maxDailyConvertedUsdt - 100n * USDT_UNIT };
     expect(planConversion(fund, afterMost)).toEqual({ kind: "quote", usdtAmount: 100n * USDT_UNIT });
     const afterAll = { ...QUIET_DAY, convertedUsdt: LIMITS.maxDailyConvertedUsdt - 4n * USDT_UNIT };
-    expect(planConversion(fund, afterAll)).toEqual({ kind: "skip", reason: expect.stringContaining("daily conversion limit") });
+    expect(planConversion(fund, afterAll)).toEqual({ kind: "skip", code: "daily-limit", reason: expect.stringContaining("daily conversion limit") });
   });
 });
 
@@ -56,7 +56,7 @@ describe("decideConversion", () => {
     const at = (age: bigint) =>
       decideConversion({ quote: QUOTE, references: REFERENCES, now: REFERENCES.usdArs.updatedAt + age });
     expect(at(MAX_REFERENCE_AGE).kind).toBe("convert");
-    expect(at(MAX_REFERENCE_AGE + 1n)).toEqual({ kind: "skip", reason: "Chainlink's USD / ARS is 26.0 hours old (26 at most)" });
+    expect(at(MAX_REFERENCE_AGE + 1n)).toEqual({ kind: "skip", code: "price-reference", reason: "Chainlink's USD / ARS is 26.0 hours old (26 at most)" });
   });
 
   it("waits on a stale or broken USDT / USD too", () => {
@@ -65,6 +65,7 @@ describe("decideConversion", () => {
     const broken = { ...REFERENCES, usdtUsd: { ...REFERENCES.usdtUsd, answer: 0n } };
     expect(decideConversion({ quote: QUOTE, references: broken, now: NOW })).toEqual({
       kind: "skip",
+      code: "price-reference",
       reason: "Chainlink's USDT / USD has no valid price",
     });
   });
@@ -75,13 +76,14 @@ describe("decideConversion", () => {
       return decideConversion({ quote: QUOTE, references, now: NOW });
     };
     expect(at(MAX_CLOCK_SKEW).kind).toBe("convert");
-    expect(at(MAX_CLOCK_SKEW + 1n)).toEqual({ kind: "skip", reason: "Chainlink's USD / ARS is dated in the future" });
+    expect(at(MAX_CLOCK_SKEW + 1n)).toEqual({ kind: "skip", code: "price-reference", reason: "Chainlink's USD / ARS is dated in the future" });
   });
 
   it("waits when the pool holds less than 10 times the wARS the conversion takes", () => {
     const shallow = { ...QUOTE, poolWars: QUOTE.quotedWars * 10n - 1n };
     expect(decideConversion({ quote: shallow, references: REFERENCES, now: NOW })).toEqual({
       kind: "skip",
+      code: "pool-depth",
       reason: "The pool holds less than 10 times the wARS this conversion takes",
     });
   });
@@ -91,7 +93,7 @@ describe("decideConversion", () => {
     for (const quotedWars of [470_000n * WARS_UNIT, 492_000n * WARS_UNIT]) {
       const quote = { ...QUOTE, quotedWars, twapWars: quotedWars };
       const decision = decideConversion({ quote, references: REFERENCES, now: NOW });
-      expect(decision).toEqual({ kind: "skip", reason: expect.stringContaining("away from Chainlink's (2% at most)") });
+      expect(decision).toEqual({ kind: "skip", code: "price-gap", reason: expect.stringContaining("away from Chainlink's (2% at most)") });
     }
   });
 
@@ -99,6 +101,7 @@ describe("decideConversion", () => {
     const under = { ...QUOTE, twapWars: (QUOTE.quotedWars * 10_000n) / 9_799n };
     expect(decideConversion({ quote: under, references: REFERENCES, now: NOW })).toEqual({
       kind: "skip",
+      code: "price-floor",
       reason: "The pool pays less than the contract's floor, 2% under its 30-minute TWAP",
     });
     // Quote 0.1% over the floor: 0.5% under the quote would be under the floor, so the floor it is.

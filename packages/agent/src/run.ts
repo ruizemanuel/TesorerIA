@@ -1,5 +1,5 @@
 import { type Address, type Hash, formatUnits, isAddressEqual } from "viem";
-import { MIN_CONVERSION_USDT, decideConversion, planConversion } from "./convert";
+import { MIN_CONVERSION_USDT, type SkipCode, decideConversion, planConversion } from "./convert";
 import { shortMessage } from "./errors";
 import type { FundEvent } from "./events";
 import { type Expense, decideExpense } from "./expense";
@@ -31,6 +31,8 @@ export type Decision = {
   fund?: Address;
   kind: AgentAction["kind"] | "skip" | "wait" | "reject" | "blocked";
   reason: string;
+  /** Why a conversion was skipped, for the web's own words (F8). */
+  code?: SkipCode;
   action?: AgentAction;
   tx?: Hash;
   status?: "success" | "reverted";
@@ -148,14 +150,14 @@ export async function runHeartbeat(ctx: AgentContext): Promise<Decision[]> {
       const plan = planConversion(fund, today);
       if (plan.kind === "none") continue;
       if (plan.kind === "skip") {
-        decisions.push({ fund: address, kind: "skip", reason: plan.reason });
+        decisions.push({ fund: address, kind: "skip", code: plan.code, reason: plan.reason });
         continue;
       }
       references ??= await ctx.chain.references();
       const quote = await ctx.chain.quote(address, plan.usdtAmount);
       const decision = decideConversion({ quote, references, now: ctx.now() });
       if (decision.kind === "skip") {
-        decisions.push({ fund: address, kind: "skip", reason: decision.reason });
+        decisions.push({ fund: address, kind: "skip", code: decision.code, reason: decision.reason });
         continue;
       }
       const { usdtAmount, minWarsOut } = decision;

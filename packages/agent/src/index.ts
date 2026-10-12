@@ -1,6 +1,6 @@
 export { Action, fundAbi, fundFactoryAbi } from "./abi";
 export * from "./chain";
-export { type ConversionDecision, type ConversionPlan, decideConversion, planConversion } from "./convert";
+export { type ConversionDecision, type ConversionPlan, MIN_CONVERSION_USDT, type SkipCode, decideConversion, planConversion } from "./convert";
 export { type ChainReader, type FactoryArtifact, checkPool, factoryDeployData } from "./deploy";
 export { shortMessage } from "./errors";
 export { type FundEvent, type LogReader, RPC_LOG_RANGE, type RawLog, blockscoutLogReader, readFundEvents, rpcLogReader } from "./events";

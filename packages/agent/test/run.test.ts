@@ -174,7 +174,7 @@ describe("runHeartbeat", () => {
     const stale = { ...REFERENCES, usdArs: { ...REFERENCES.usdArs, updatedAt: NOW - 30n * 3_600n } };
     const chain = fakeChain([fundSnapshot({ usdtBalance: 300n * USDT_UNIT })], { references: stale });
     expect(await runHeartbeat(context(chain, signer))).toEqual([
-      { fund: FUND, kind: "skip", reason: "Chainlink's USD / ARS is 30.0 hours old (26 at most)" },
+      { fund: FUND, kind: "skip", code: "price-reference", reason: "Chainlink's USD / ARS is 30.0 hours old (26 at most)" },
     ]);
     expect(sent).toEqual([]);
   });
