@@ -1,6 +1,7 @@
 import { FUND_FACTORY, USDT, WARS, fundFactoryAbi } from "@tesoreria/agent";
 import { ATTRIBUTION_SUFFIX, type Call } from "@tesoreria/wallet";
 import { eq } from "drizzle-orm";
+import { drizzle as drizzleNeon } from "drizzle-orm/neon-http";
 import { type Address, type Hex, concat, decodeFunctionData, encodeFunctionData, erc20Abi, getAddress, numberToHex, parseAbi } from "viem";
 import { entryPoint07Address } from "viem/account-abstraction";
 import { describe, expect, it, vi } from "vitest";
@@ -21,6 +22,7 @@ import {
 } from "../src/lib/bundler-proxy";
 import { contributeCalls } from "../src/lib/contribute";
 import type { Db } from "../src/lib/db/client";
+import * as schema from "../src/lib/db/schema";
 import { createFundNonces, funds, memberships } from "../src/lib/db/schema";
 import { memberFundAbi } from "../src/lib/fund-abi";
 import { cancelDeploy, createDraft, deployCall, frozenCreateFunds, joinFund } from "../src/lib/funds";
@@ -669,9 +671,41 @@ describe("authorizeBundlerRequest", () => {
       expect(await db.$count(createFundNonces)).toBe(0);
     });
 
+    it("takes the one lock every claim shares first in the batch Neon runs, whoever claims (M4)", async () => {
+      // Neon's HTTP driver is faked at the client: what's checked is the batch drizzle builds for it, which PGlite never runs.
+      const batches: { sql: string; params: unknown[] }[][] = [];
+      const client = Object.assign((sql: string, params: unknown[]) => ({ sql, params }), {
+        transaction: async (queries: { sql: string; params: unknown[] }[]) => {
+          batches.push(queries);
+          return queries.map(() => ({ rows: [] }));
+        },
+      });
+      const neon = drizzleNeon({ client: client as never, schema }) as unknown as Db;
+      for (const userId of ["11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222"]) {
+        expect(await claimCreateFundNonce(neon, userId, 0n)).toBe(false); // the fake has no rows to answer with
+      }
+      expect(batches).toHaveLength(2);
+      const [[lock, insert, read], [otherLock]] = batches as [{ sql: string; params: unknown[] }[], { sql: string; params: unknown[] }[]];
+      expect(lock).toEqual({ sql: "select pg_advisory_xact_lock($1)", params: [expect.any(Number)] });
+      expect(otherLock).toEqual(lock); // the same key for another person
+      expect(batches[0]).toHaveLength(3);
+      expect(insert!.sql).toMatch(/^insert into "create_fund_nonces"/);
+      expect(read!.sql).toMatch(/^select .* from "create_fund_nonces"/);
+    });
+
+    it("lets no more than MAX_CREATE_FUND_NONCES_PER_DAY new nonces through from many people claiming at once", async () => {
+      // As below: PGlite serializes transactions, so this guards the counting under concurrent claims (and that they
+      // don't deadlock on the lock) rather than proving the lock.
+      const db = await testDb();
+      const claimers = await Promise.all(Array.from({ length: MAX_CREATE_FUND_NONCES_PER_DAY + 4 }, (_, i) => addUser(db, `Claimer ${i}`)));
+      const claims = await Promise.all(claimers.map((person) => claimCreateFundNonce(db, person.id, 0n)));
+      expect(claims.filter(Boolean)).toHaveLength(MAX_CREATE_FUND_NONCES_PER_DAY);
+      expect(await db.$count(createFundNonces)).toBe(MAX_CREATE_FUND_NONCES_PER_DAY);
+    });
+
     it("lets exactly MAX_CREATE_FUND_NONCES of many claims made at once through", async () => {
       // PGlite runs one transaction at a time anyway, so this guards against a regression rather than proving the
-      // lock: on Neon, the lock on the user's row is what keeps two claims from counting the same rows.
+      // lock: on Neon, the lock every claim takes first is what keeps two claims from counting the same rows.
       const db = await testDb();
       const ana = await addUser(db, "Ana");
       const claims = await Promise.all(Array.from({ length: MAX_CREATE_FUND_NONCES + 2 }, (_, i) => claimCreateFundNonce(db, ana.id, BigInt(i))));

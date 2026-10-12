@@ -225,10 +225,16 @@ export const MAX_CREATE_FUND_NONCES = 3;
 /**
  * The most new createFund nonces the paymaster signs in a day, among everyone (M4). Passkey accounts are free to
  * make, so throwaway ones could each take MAX_CREATE_FUND_NONCES and use up the month's sponsorship, the real
- * groups' contributions and votes with it. A real group creates a fund or two a day. Two people claiming at once may
- * pass it by one: only each person's own row is locked.
+ * groups' contributions and votes with it. A real group creates a fund or two a day. The count is exact, however many
+ * claim at once: every createFund claim takes the same lock (CREATE_FUND_CLAIM_LOCK), and they are rare enough for
+ * queuing them one after another to cost nothing.
  */
 export const MAX_CREATE_FUND_NONCES_PER_DAY = 10;
+/**
+ * The key of the advisory lock every createFund claim takes first, and holds until its transaction ends: any number
+ * works, as long as nothing else locks on it. One for everyone, because the daily cap counts everyone's rows.
+ */
+const CREATE_FUND_CLAIM_LOCK = 4_251_001;
 
 const QUANTITY = /^0x[0-9a-fA-F]{1,64}$/;
 
@@ -276,16 +282,17 @@ function operationNonce(userOp: unknown): bigint | undefined {
 /**
  * Whether the paymaster may sign `userId`'s createFund on `nonce`: it's one they already got signed (re-signing it
  * can't make it land twice), or a new one within MAX_CREATE_FUND_NONCES for them and MAX_CREATE_FUND_NONCES_PER_DAY
- * among everyone, which it then counts. The user's row is locked first, so two claims by one person never count the
+ * among everyone, which it then counts. The lock on CREATE_FUND_CLAIM_LOCK comes first, so two claims never count the
  * same rows: the second waits for the first to commit, and then reads what it left. That relies on READ COMMITTED,
- * Neon's default (db/client.ts): under REPEATABLE READ, the count after the lock would miss the other claim (M1).
+ * Neon's default (db/client.ts): each statement sees what had committed when it began, so the counts, which come after
+ * the lock, see the other claim. Under REPEATABLE READ they would miss it (M1).
  */
 export async function claimCreateFundNonce(db: Db, userId: string, nonce: bigint): Promise<boolean> {
   const [, , [claimed]] = await inTransaction(db, (tx) => {
     const signed = tx.$count(createFundNonces, eq(createFundNonces.userId, userId));
     const signedToday = tx.$count(createFundNonces, sql`${createFundNonces.createdAt} > now() - interval '1 day'`);
     return [
-      tx.select({ id: users.id }).from(users).where(eq(users.id, userId)).for("update"),
+      tx.execute(sql`select pg_advisory_xact_lock(${CREATE_FUND_CLAIM_LOCK})`),
       tx
         .insert(createFundNonces)
         .select((qb) =>
@@ -346,11 +353,12 @@ async function sponsorshipOf(db: Db, userId: string, agent: () => Address): Prom
  * also has to pass `checkSponsoredGas`, with 10M gas for a createFund and 2M for anything else, and if the price can't
  * be read it's refused with 502 rather than signed blind. It's null only on the fork, which has no paymaster to protect.
  *
- * Last, a createFund is signed only on one of the creator's MAX_CREATE_FUND_NONCES nonces (`claimCreateFundNonce`),
- * on the fork too. A nonce lands at most once, so that's at most that many createFunds sponsored per creator, ever,
- * however long a draft stays `deploying` (it's live only once the creator's browser reports the receipt). Counted
- * only there: estimating, stubbing and sending sign nothing, and a request refused for its gas or price doesn't use
- * one up.
+ * Last, a createFund is signed only on one of the creator's MAX_CREATE_FUND_NONCES nonces, and only while fewer than
+ * MAX_CREATE_FUND_NONCES_PER_DAY new ones were signed in the last day among everyone (`claimCreateFundNonce`), on the
+ * fork too. A nonce lands at most once, so that's at most MAX_CREATE_FUND_NONCES createFunds sponsored per creator,
+ * ever, however long a draft stays `deploying` (it's live only once the creator's browser reports the receipt).
+ * Counted only there: estimating, stubbing and sending sign nothing, and a request refused for its gas or price
+ * doesn't use one up.
  */
 export async function authorizeBundlerRequest(
   db: Db,
