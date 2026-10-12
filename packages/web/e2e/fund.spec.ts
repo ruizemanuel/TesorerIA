@@ -28,7 +28,7 @@ test("three friends create a fund, contribute, get the agreed expense back and v
   await give(await accountOf(ana));
   await ana.reload({ waitUntil: "networkidle" });
   await ana.getByLabel(/Votos necesarios/).selectOption("2");
-  await ana.getByRole("button", { name: "Crear el fondo" }).click();
+  await ana.getByRole("button", { name: "Crear fondo" }).click();
   await expect(ana).toHaveURL(/\/f\/0x[0-9a-fA-F]{40}$/);
   await expect(onScreen(ana, /debe/)).toHaveCount(3); // the fund's inicio, with nobody paid yet
   const fund = new URL(ana.url()).pathname;

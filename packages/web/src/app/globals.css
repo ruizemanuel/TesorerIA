@@ -52,6 +52,15 @@ textarea {
   outline-offset: 2px;
 }
 
+/* Tailwind 4 leaves buttons with the arrow: everything clickable shows the hand, and nothing disabled does. */
+@layer base {
+  button:not(:disabled),
+  [role="button"]:not(:disabled),
+  select:not(:disabled) {
+    cursor: pointer;
+  }
+}
+
 /* The panel: a sheet that rises from the bottom on a phone, a 420 px column on the right from 1024 px (spec, 9.2). */
 .panel {
   margin: 0;

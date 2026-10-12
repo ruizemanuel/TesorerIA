@@ -65,7 +65,7 @@ export function CreateFundForm({ loggedIn }: { loggedIn: boolean }) {
         <input className={`${FIELD} money`} name="weeklyCap" required inputMode="decimal" defaultValue="60.000" />
       </label>
       <Button type="submit" disabled={busy}>
-        {busy ? "Creando…" : hasAccount ? "Crear el fondo" : "Crear mi passkey y el fondo"}
+        {busy ? "Creando…" : hasAccount ? "Crear fondo" : "Crear mi passkey y el fondo"}
       </Button>
       <p role="alert" className="text-sm text-owe">
         {error}

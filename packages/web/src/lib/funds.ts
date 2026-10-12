@@ -467,7 +467,7 @@ async function findLanded(
 }
 
 /**
- * What the creator's "Crear el fondo" does next. A createFund is never sent twice (spec, 6): with one already
+ * What the creator's "Crear fondo" does next. A createFund is never sent twice (spec, 6): with one already
  * sent for this draft, a new one is built only once that one is known to have created nothing.
  * - `address`: it's live, or the sent one's transaction has our fund;
  * - `pending`: the sent one has no receipt here yet, so the browser asks the bundler for it first;
