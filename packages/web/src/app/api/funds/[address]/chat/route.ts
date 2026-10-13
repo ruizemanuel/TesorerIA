@@ -1,23 +1,15 @@
-import { MAX_NOTE_LENGTH, shortMessage } from "@tesoreria/agent";
-import {
-  APICallError,
-  InvalidToolInputError,
-  NoSuchToolError,
-  convertToModelMessages,
-  createUIMessageStreamResponse,
-  streamText,
-  toUIMessageStream,
-} from "ai";
+import { shortMessage } from "@tesoreria/agent";
+import { APICallError, type LanguageModel, type ModelMessage, createUIMessageStreamResponse, streamText } from "ai";
 import { isAddress } from "viem";
 import { z } from "zod";
 import { fundBrief } from "../../../../../lib/chat/brief";
 import { chatCall } from "../../../../../lib/chat/call";
+import { toAnswerStream, toModelMessages } from "../../../../../lib/chat/convert";
 import { MAX_CHAT_BODY_BYTES } from "../../../../../lib/chat/limits";
 import { chatEnabled, chatModel } from "../../../../../lib/chat/model";
 import { recordChatUsage, reserveChatMessage } from "../../../../../lib/chat/quota";
 import { readChatRequest } from "../../../../../lib/chat/request";
 import { CHAT_MEMBER_LIMIT, CHAT_NOT_FOUND, CHAT_UNAVAILABLE } from "../../../../../lib/chat/texts";
-import { type ChatMetadata, type ChatUIMessage, chatTools } from "../../../../../lib/chat/tools";
 import { currentUser } from "../../../../../lib/current-user";
 import { getDb } from "../../../../../lib/db/client";
 import { env } from "../../../../../lib/env";
@@ -29,9 +21,6 @@ export const maxDuration = 60;
 
 // What DefaultChatTransport sends; its other fields (id, trigger, messageId) are dropped.
 const ChatBody = z.object({ messages: z.array(z.unknown()).min(1).max(50) });
-
-/** What the model reads when its card was wrong. Fixed text: the card's own input is never echoed back to it or to a log. */
-const BAD_CARD_HINT = `Invalid input: write the amount in pesos, like 45.000 or 45.000,50, above zero, and a note of up to ${MAX_NOTE_LENGTH} characters.`;
 
 /** What an error is, never what it says: a validation error's message carries the model's text (spec, 8.2). */
 function describeError(error: unknown): string {
@@ -57,7 +46,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ add
   const conversation = await readChatRequest(body.value.messages);
   if (!conversation.ok) return jsonError(400, conversation.error);
 
-  // The brief comes before the cap: a read that fails costs the member nothing.
+  // Everything that can fail before the model comes before the cap, so a failure costs the member nothing: the
+  // brief, the history as the model reads it, and the model itself.
   let screen: FundScreen | null;
   try {
     screen = await loadFundScreen(address, user);
@@ -66,6 +56,15 @@ export async function POST(request: Request, { params }: { params: Promise<{ add
     return jsonError(503, CHAT_UNAVAILABLE);
   }
   if (screen === null) return jsonError(404, CHAT_NOT_FOUND);
+  let messages: ModelMessage[];
+  let model: LanguageModel;
+  try {
+    messages = await toModelMessages(conversation.messages);
+    model = await chatModel();
+  } catch (error) {
+    console.error(`The chat could not start for fund ${address}: ${describeError(error)}`);
+    return jsonError(503, CHAT_UNAVAILABLE);
+  }
 
   const db = await getDb();
   const { CHAT_MEMBER_DAILY_LIMIT, CHAT_DAILY_LIMIT } = env();
@@ -78,9 +77,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ add
   if (!reservation.ok) return jsonError(429, reservation.limit === "member" ? CHAT_MEMBER_LIMIT : CHAT_UNAVAILABLE);
 
   const result = streamText({
-    ...chatCall({ model: await chatModel(), brief: fundBrief(screen, user.name, new Date()) }),
-    // A card the member never answered is left out (the panel answers it first): an open tool call would fail the call.
-    messages: await convertToModelMessages(conversation.messages, { tools: chatTools, ignoreIncompleteToolCalls: true }),
+    ...chatCall({ model, brief: fundBrief(screen, user.name, new Date()) }),
+    messages,
     abortSignal: request.signal,
     onEnd: async ({ usage, finishReason, rawFinishReason }) => {
       await recordChatUsage(db, reservation.id, {
@@ -105,22 +103,5 @@ export async function POST(request: Request, { params }: { params: Promise<{ add
     },
   });
 
-  return createUIMessageStreamResponse({
-    stream: toUIMessageStream<typeof chatTools, ChatUIMessage>({
-      stream: result.stream,
-      tools: chatTools,
-      messageMetadata: ({ part }): ChatMetadata | undefined => {
-        if (part.type === "start") return { remaining: reservation.remaining };
-        if (part.type === "finish") {
-          return { remaining: reservation.remaining, finish: part.rawFinishReason === "refusal" ? "refusal" : part.finishReason };
-        }
-        return undefined;
-      },
-      // Only maps: the failure was logged and recorded by streamText's onError. A card the model got wrong, or a tool
-      // it doesn't have, goes back to the model as a hint (the card itself says CHAT_BAD_CARD); a tool's own error
-      // reaches here as a string. Anything else is the member's CHAT_UNAVAILABLE.
-      onError: (error) =>
-        InvalidToolInputError.isInstance(error) || NoSuchToolError.isInstance(error) || typeof error === "string" ? BAD_CARD_HINT : CHAT_UNAVAILABLE,
-    }),
-  });
+  return createUIMessageStreamResponse({ stream: toAnswerStream(result.stream, reservation.remaining) });
 }

@@ -30,7 +30,13 @@ vi.mock("../src/lib/db/client", async (importOriginal) => ({
   getDb: async () => state.db,
 }));
 vi.mock("../src/lib/env", () => ({ env: () => ({ CHAT_MEMBER_DAILY_LIMIT: state.memberLimit, CHAT_DAILY_LIMIT: state.globalLimit }) }));
-vi.mock("../src/lib/chat/model", () => ({ chatEnabled: () => state.enabled, chatModel: async () => state.model }));
+vi.mock("../src/lib/chat/model", () => ({
+  chatEnabled: () => state.enabled,
+  chatModel: async () => {
+    if (state.model instanceof Error) throw state.model;
+    return state.model;
+  },
+}));
 vi.mock("../src/lib/read-fund", () => ({
   loadFundScreen: async () => {
     if (state.screen instanceof Error) throw state.screen;
@@ -190,6 +196,15 @@ describe("POST /api/funds/:address/chat (spec, 8.2)", () => {
     expect(await response.json()).toEqual({ error: CHAT_UNAVAILABLE });
     expect(await db.select().from(chatMessages)).toEqual([]);
     expect(errors.mock.calls).toEqual([[`The chat could not read fund ${FUND}: forno is down`]]);
+  });
+
+  it("answers 503 without counting the message when the model can't be set up, and logs only what failed", async () => {
+    state.model = new Error("the scripted model could not load for ana@example.com");
+    const response = await chat([user("Hola")]);
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ error: CHAT_UNAVAILABLE });
+    expect(await db.select().from(chatMessages)).toEqual([]);
+    expect(errors.mock.calls).toEqual([[`The chat could not start for fund ${FUND}: Error`]]);
   });
 
   it("stops at the member's cap and at everyone's, saying which, and the model never hears of it", async () => {
