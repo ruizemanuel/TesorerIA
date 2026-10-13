@@ -22,6 +22,10 @@ function view(change: Parameters<typeof snapshot>[0] = {}, viewer: Address | nul
 }
 
 describe("buildFundView", () => {
+  it("says the contract's week, counted from 0", () => {
+    expect(view().week).toBe(2n);
+  });
+
   it("lists the members in the contract's order, with what each still owes through this week", () => {
     const { rows, me } = view({ contributed: [30_000n * WARS, 30_000n * WARS, 10_000n * WARS], totalContributed: 70_000n * WARS });
     expect(rows).toEqual([

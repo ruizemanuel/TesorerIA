@@ -23,6 +23,8 @@ export type FundView = {
   spentThisWeek: bigint;
   leftThisWeek: bigint;
   votesRequired: number;
+  /** The contract's week, counted from 0: (timestamp - startTime) / WEEK. */
+  week: bigint;
   rows: MemberRow[];
   /**
    * The viewer's own numbers, when they're a member: what they owe, what they paid ahead of this week (when it's worth
@@ -90,6 +92,7 @@ export function buildFundView({
     spentThisWeek: snapshot.spentThisWeek,
     leftThisWeek: snapshot.weeklyCap > snapshot.spentThisWeek ? snapshot.weeklyCap - snapshot.spentThisWeek : 0n,
     votesRequired: snapshot.votesRequired,
+    week: snapshot.week,
     rows,
     me: mine === undefined ? null : { owed: mine.owed, ahead, share },
   };
