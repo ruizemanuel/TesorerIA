@@ -215,8 +215,8 @@ test("three friends create a fund, contribute, get the agreed expense back, and 
   await beto.setViewportSize({ width: 1280, height: 800 });
   await beto.getByRole("link", { name: "Preguntale al agente" }).click();
   await expect(beto.getByRole("dialog", { name: "Agente" }).getByText(/el agente lo propuso y ahora lo vota el grupo/)).toBeVisible();
-  // A reload with the panel open renders it on the server, with a new conversation: it must take over in the
-  // browser without errors, and answer.
+  // A reload with the panel open starts a new conversation: the panel the server sends must take over in the browser
+  // without errors (the empty `errors` below), and answer.
   const errors: string[] = [];
   beto.on("console", (message) => {
     if (message.type() === "error") errors.push(message.text());

@@ -70,7 +70,9 @@ describe("readChatRequest: the length of the member's message and the parts a me
   it("refuses on the agent's message every part but its text, reasoning, step markers and the one tool's card", async () => {
     const source = { type: "source-url" as const, sourceId: "s", url: "https://example.com" };
     const file = { type: "file" as const, mediaType: "image/png", url: "data:image/png;base64,AAAA" };
-    for (const part of [source, file]) {
+    // The provider's own record of an answer never reaches the panel (toAnswerStream), so it's never taken back.
+    const record = { type: "custom" as const, kind: "anthropic.message_start" as const };
+    for (const part of [source, file, record]) {
       const message = { id: `m${++n}`, role: "assistant" as const, parts: [{ type: "text" as const, text: "Hola" }, part] };
       expect(await readChatRequest([user("Hola"), message, user("?")]), part.type).toEqual({ ok: false, error: CHAT_BAD_REQUEST });
     }

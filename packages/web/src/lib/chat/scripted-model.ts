@@ -7,6 +7,12 @@ export const SCRIPTED_ANSWER = "Soy el agente de prueba: en el fork no hay model
 
 const usage = { inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 }, outputTokens: { total: 1, text: 1, reasoning: 0 } };
 
+/**
+ * How Anthropic, through the AI Gateway, starts every answer: with its own record of the message, a custom part that
+ * must never reach the panel (toAnswerStream), or the member's next message would be refused.
+ */
+const messageStart: LanguageModelV4StreamPart = { type: "custom", kind: "anthropic.message_start", providerMetadata: { anthropic: { id: "scripted" } } };
+
 function lastUserText(prompt: LanguageModelV4CallOptions["prompt"]): string {
   const asked = prompt.findLast((message) => message.role === "user");
   if (asked === undefined || typeof asked.content === "string") return "";
@@ -19,6 +25,7 @@ function script(prompt: LanguageModelV4CallOptions["prompt"]): LanguageModelV4St
     const id = `scripted-${Date.now()}`;
     const input = JSON.stringify({ kind: "other", amount: "5.000", note: "Pelotas nuevas" });
     return [
+      messageStart,
       { type: "tool-input-start", id, toolName: "proposeExpense" },
       { type: "tool-input-delta", id, delta: input },
       { type: "tool-input-end", id },
@@ -27,6 +34,7 @@ function script(prompt: LanguageModelV4CallOptions["prompt"]): LanguageModelV4St
     ];
   }
   return [
+    messageStart,
     { type: "text-start", id: "scripted-text" },
     { type: "text-delta", id: "scripted-text", delta: SCRIPTED_ANSWER },
     { type: "text-end", id: "scripted-text" },
