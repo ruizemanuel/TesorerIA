@@ -64,6 +64,8 @@ Its settings (the production values live in Vercel, never in the repo; see [`pac
 | `HEARTBEAT_SECRET` | Shared with the heartbeat's callers: the Cloudflare Worker (a Worker secret) and GitHub Actions (a repository secret, with `HEARTBEAT_URL` as a repository variable). |
 | `BLOCKSCOUT_API_KEY` | Optional, for reading a fund's history. |
 | `PUBLIC_FUND` | Optional: the fund the home page shows, if its group turned its public view on. |
+| `CHAT_MODEL` | The chat's model on the Vercel AI Gateway (`anthropic/claude-sonnet-5.5`). Without it there is no chat. `mock` is the end-to-end test's scripted model, on the fork only. |
+| `CHAT_MEMBER_DAILY_LIMIT`, `CHAT_DAILY_LIMIT` | The chat's messages in 24 hours: per member (30 by default) and among everyone (150). |
 
 ## On Celo mainnet
 

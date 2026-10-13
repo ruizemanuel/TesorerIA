@@ -78,4 +78,28 @@ describe("parseEnv", () => {
     expect(message).not.toContain(key);
     expect(message).not.toContain(secret);
   });
+
+  it("leaves the chat off without CHAT_MODEL, with its caps at 30 a member and 150 in all (spec, 8.2)", () => {
+    const settings = parseEnv(base);
+    expect(settings.CHAT_MODEL).toBeUndefined();
+    expect(settings).toMatchObject({ CHAT_MEMBER_DAILY_LIMIT: 30, CHAT_DAILY_LIMIT: 150 });
+    expect(parseEnv({ ...base, CHAT_MODEL: "", CHAT_MEMBER_DAILY_LIMIT: "", CHAT_DAILY_LIMIT: "" })).toMatchObject({
+      CHAT_MODEL: undefined,
+      CHAT_MEMBER_DAILY_LIMIT: 30,
+      CHAT_DAILY_LIMIT: 150,
+    });
+  });
+
+  it("reads the chat's model and caps, and refuses a cap that isn't a whole number above zero", () => {
+    expect(
+      parseEnv({ ...base, CHAT_MODEL: "anthropic/claude-sonnet-5.5", CHAT_MEMBER_DAILY_LIMIT: "5", CHAT_DAILY_LIMIT: "40" }),
+    ).toMatchObject({ CHAT_MODEL: "anthropic/claude-sonnet-5.5", CHAT_MEMBER_DAILY_LIMIT: 5, CHAT_DAILY_LIMIT: 40 });
+    expect(problem({ ...base, CHAT_MEMBER_DAILY_LIMIT: "0" })).toMatch(/CHAT_MEMBER_DAILY_LIMIT/);
+    expect(problem({ ...base, CHAT_DAILY_LIMIT: "1.5" })).toMatch(/CHAT_DAILY_LIMIT/);
+  });
+
+  it("takes the scripted model only on the fork: it must never answer on mainnet", () => {
+    expect(problem({ ...base, CHAT_MODEL: "mock" })).toMatch(/CHAT_MODEL/);
+    expect(parseEnv({ ...base, CHAIN_MODE: "fork", CHAT_MODEL: "mock" }).CHAT_MODEL).toBe("mock");
+  });
 });

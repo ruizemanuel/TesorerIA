@@ -31,6 +31,15 @@ const schema = z
         .regex(/^0x[0-9a-fA-F]{40}$/)
         .optional(),
     ),
+    /**
+     * The chat's model on the AI Gateway, as "anthropic/claude-sonnet-5.5" (spec, 8.2). Without it there is no chat:
+     * no tab, no button, and its route answers 404. "mock" answers from a script, for the end-to-end test on the fork.
+     */
+    CHAT_MODEL: blank(z.string().min(1).optional()),
+    /** The messages a member may send the chat in 24 hours (spec, 8.2). */
+    CHAT_MEMBER_DAILY_LIMIT: blank(z.coerce.number().int().positive().default(30)),
+    /** The messages all members together may send the chat in 24 hours (spec, 8.2). */
+    CHAT_DAILY_LIMIT: blank(z.coerce.number().int().positive().default(150)),
     /** Set by Vercel on its builds and deployments: there, the fork (an anvil on this machine) is never right. */
     VERCEL: blank(z.string().optional()),
   })
@@ -41,6 +50,10 @@ const schema = z
   .refine((settings) => settings.CHAIN_MODE !== "fork" || settings.VERCEL === undefined, {
     path: ["CHAIN_MODE"],
     message: "fork is for local runs only, never on a Vercel deployment",
+  })
+  .refine((settings) => settings.CHAT_MODEL !== "mock" || settings.CHAIN_MODE === "fork", {
+    path: ["CHAT_MODEL"],
+    message: "mock is the end-to-end test's scripted model, for the fork only",
   });
 
 export type Env = z.infer<typeof schema>;
