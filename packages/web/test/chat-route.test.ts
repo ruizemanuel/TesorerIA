@@ -1,8 +1,8 @@
 import type { LanguageModelV4StreamPart } from "@ai-sdk/provider";
-import { simulateReadableStream } from "ai";
+import { APICallError, simulateReadableStream } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
 import { getAddress } from "viem";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { type MockInstance, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BRIEF_TAG } from "../src/lib/chat/brief";
 import { CHAT_INSTRUCTIONS } from "../src/lib/chat/instructions";
 import { CHAT_LONG_MESSAGE, CHAT_MEMBER_LIMIT, CHAT_NOT_FOUND, CHAT_UNAVAILABLE } from "../src/lib/chat/texts";
@@ -66,8 +66,27 @@ const proposes = (input: string) =>
     }),
   });
 
+// A model call that has started and never ends: a step of the answer in flight, that a test can abort.
+const hangsAfter = (text: string) =>
+  ({
+    stream: new ReadableStream<LanguageModelV4StreamPart>({
+      start(controller) {
+        controller.enqueue({ type: "text-start", id: "t2" });
+        controller.enqueue({ type: "text-delta", id: "t2", delta: text });
+      },
+    }),
+  }) as const;
+
+/** The UI message chunks of a streamed answer, which arrives as server-sent events. */
+const chunksOf = (body: string): Array<Record<string, unknown>> =>
+  body
+    .split("\n")
+    .filter((line) => line.startsWith("data: ") && line !== "data: [DONE]")
+    .map((line) => JSON.parse(line.slice("data: ".length)) as Record<string, unknown>);
+
 let db: Db;
 let ana: CurrentUser;
+let errors: MockInstance<typeof console.error>;
 let n = 0;
 const user = (text: string) => ({ id: `m${++n}`, role: "user", parts: [{ type: "text", text }] });
 const agent = (text: string) => ({ id: `m${++n}`, role: "assistant", parts: [{ type: "text", text }] });
@@ -82,7 +101,13 @@ const chat = (messages: unknown[], address: string = FUND, init: RequestInit = {
     { params: Promise.resolve({ address }) },
   );
 
+afterEach(() => {
+  errors.mockRestore();
+});
+
 beforeEach(async () => {
+  // What the route logs is part of what it does (spec, 8.2: never the text), so a test reads it and nothing reaches the output.
+  errors = vi.spyOn(console, "error").mockImplementation(() => {});
   db = await testDb();
   state.db = db;
   const anaRow = await addUser(db, "Ana", ANA);
@@ -164,6 +189,7 @@ describe("POST /api/funds/:address/chat (spec, 8.2)", () => {
     expect(response.status).toBe(503);
     expect(await response.json()).toEqual({ error: CHAT_UNAVAILABLE });
     expect(await db.select().from(chatMessages)).toEqual([]);
+    expect(errors.mock.calls).toEqual([[`The chat could not read fund ${FUND}: forno is down`]]);
   });
 
   it("stops at the member's cap and at everyone's, saying which, and the model never hears of it", async () => {
@@ -201,6 +227,7 @@ describe("POST /api/funds/:address/chat (spec, 8.2)", () => {
       const [row] = await db.select().from(chatMessages);
       expect(row).toMatchObject({ userId: ana.id, inputTokens: 2_000, outputTokens: 40, finish: "stop" });
     });
+    expect(errors).not.toHaveBeenCalled();
   });
 
   it("sends the model only the last messages", async () => {
@@ -231,5 +258,65 @@ describe("POST /api/funds/:address/chat (spec, 8.2)", () => {
     state.model = proposes(JSON.stringify({ kind: "other", amount: "mucho", note: "Pelotas" }));
     const bad = await (await chat([user("Pagué mucho de pelotas")])).text();
     expect(bad).toMatch(/tool-(input|output)-error/);
+  });
+
+  it("sends a card the model got wrong back to it as a fixed hint, which is no failure: nothing logged, the row ends as the model ended", async () => {
+    state.model = proposes(JSON.stringify({ kind: "other", amount: "mucho", note: "Pelotas" }));
+    const body = await (await chat([user("Pagué mucho de pelotas")])).text();
+    const cardErrors = chunksOf(body).filter((chunk) => chunk.type === "tool-input-error" || chunk.type === "tool-output-error");
+    expect(cardErrors.length).toBeGreaterThan(0);
+    for (const chunk of cardErrors) {
+      expect(chunk.errorText).toMatch(/^Invalid input: /);
+      expect(chunk.errorText).not.toMatch(/mucho|Pelotas/);
+    }
+    expect(JSON.stringify(errors.mock.calls)).not.toMatch(/mucho|Pelotas/);
+    expect(errors).not.toHaveBeenCalled();
+    await vi.waitFor(async () => {
+      const [row] = await db.select().from(chatMessages);
+      expect(row?.finish).toBe("tool-calls");
+      expect(row?.inputTokens).toBeGreaterThan(0);
+    });
+  });
+
+  it("tells the member the agent can't answer when the model fails, logs what failed and not what it said, and ends the row as an error", async () => {
+    state.model = new MockLanguageModelV4({
+      doStream: async () => {
+        throw new APICallError({ message: "credit balance too low for ana@example.com", url: "https://gateway.test/v1", requestBodyValues: {}, statusCode: 402 });
+      },
+    });
+    const response = await chat([user("Hola")]);
+    expect(response.status).toBe(200);
+    const body = await response.text();
+    expect(chunksOf(body).filter((chunk) => chunk.type === "error")).toEqual([{ type: "error", errorText: CHAT_UNAVAILABLE }]);
+    await vi.waitFor(async () => {
+      const [row] = await db.select().from(chatMessages);
+      expect(row?.finish).toBe("error");
+    });
+    expect(errors.mock.calls).toEqual([[`The chat failed for fund ${FUND}: AI_APICallError 402`]]);
+  });
+
+  it("ends the row as an abort, with the tokens of the steps done, when the member leaves mid-answer", async () => {
+    // A first step the member's session has paid for (a card the model got wrong), then a second that never ends.
+    const step = proposes(JSON.stringify({ kind: "other", amount: "mucho", note: "Pelotas" }));
+    state.model = new MockLanguageModelV4({ doStream: [await step.doStream({} as never), hangsAfter("Beto")] });
+    const leaving = new AbortController();
+    const response = await chat([user("Hola")], FUND, { signal: leaving.signal });
+    expect(response.status).toBe(200);
+    const reader = response.body!.getReader();
+    const decoder = new TextDecoder();
+    let seen = "";
+    while (!seen.includes("Beto")) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      seen += decoder.decode(value, { stream: true });
+    }
+    expect(seen).toContain("Beto");
+    leaving.abort();
+    await vi.waitFor(async () => {
+      const [row] = await db.select().from(chatMessages);
+      expect(row).toMatchObject({ finish: "abort", inputTokens: 2_000, outputTokens: 40 });
+    });
+    await reader.cancel().catch(() => {});
+    expect(errors).not.toHaveBeenCalled();
   });
 });

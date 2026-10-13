@@ -1,5 +1,13 @@
-import { shortMessage } from "@tesoreria/agent";
-import { InvalidToolInputError, convertToModelMessages, createUIMessageStreamResponse, streamText, toUIMessageStream } from "ai";
+import { MAX_NOTE_LENGTH, shortMessage } from "@tesoreria/agent";
+import {
+  APICallError,
+  InvalidToolInputError,
+  NoSuchToolError,
+  convertToModelMessages,
+  createUIMessageStreamResponse,
+  streamText,
+  toUIMessageStream,
+} from "ai";
 import { isAddress } from "viem";
 import { z } from "zod";
 import { fundBrief } from "../../../../../lib/chat/brief";
@@ -21,6 +29,21 @@ export const maxDuration = 60;
 
 // What DefaultChatTransport sends; its other fields (id, trigger, messageId) are dropped.
 const ChatBody = z.object({ messages: z.array(z.unknown()).min(1).max(50) });
+
+/** What the model reads when its card was wrong. Fixed text: the card's own input is never echoed back to it or to a log. */
+const BAD_CARD_HINT = `Invalid input: write the amount in pesos, like 45.000 or 45.000,50, above zero, and a note of up to ${MAX_NOTE_LENGTH} characters.`;
+
+/** What an error is, never what it says: a validation error's message carries the model's text (spec, 8.2). */
+function describeError(error: unknown): string {
+  const name = error instanceof Error ? error.name : "unknown error";
+  return APICallError.isInstance(error) && error.statusCode !== undefined ? `${name} ${error.statusCode}` : name;
+}
+
+/** A step's tokens added up over the steps, or undefined when none of them reports any. */
+function sumTokens(counts: Array<number | undefined>): number | undefined {
+  const known = counts.filter((count): count is number => count !== undefined);
+  return known.length === 0 ? undefined : known.reduce((total, count) => total + count, 0);
+}
 
 /** The chat with the agent (spec, 8.2): one message of a member of a live fund, answered as a stream. */
 export async function POST(request: Request, { params }: { params: Promise<{ address: string }> }) {
@@ -66,6 +89,20 @@ export async function POST(request: Request, { params }: { params: Promise<{ add
         finish: rawFinishReason === "refusal" ? "refusal" : finishReason,
       });
     },
+    // The member left before the end: onEnd doesn't run, so the steps done so far are what the message cost.
+    onAbort: async ({ steps }) => {
+      await recordChatUsage(db, reservation.id, {
+        inputTokens: sumTokens(steps.map((step) => step.usage.inputTokens)),
+        outputTokens: sumTokens(steps.map((step) => step.usage.outputTokens)),
+        finish: "abort",
+      });
+    },
+    // The model or the gateway failed (a card the model got wrong is no failure: it never gets here). One line, with
+    // only what failed; the SDK would log the whole error. It's awaited, so onEnd's write, if any, comes after.
+    onError: async ({ error }) => {
+      console.error(`The chat failed for fund ${address}: ${describeError(error)}`);
+      await recordChatUsage(db, reservation.id, { finish: "error" }).catch(() => {});
+    },
   });
 
   return createUIMessageStreamResponse({
@@ -79,13 +116,11 @@ export async function POST(request: Request, { params }: { params: Promise<{ add
         }
         return undefined;
       },
-      onError: (error) => {
-        // A card the model got wrong goes back to it, which may fix it; the card itself says CHAT_BAD_CARD.
-        if (InvalidToolInputError.isInstance(error)) return `Invalid input: ${shortMessage(error)}`;
-        console.error(`The chat failed for fund ${address}: ${shortMessage(error)}`);
-        void recordChatUsage(db, reservation.id, { finish: "error" }).catch(() => {});
-        return CHAT_UNAVAILABLE;
-      },
+      // Only maps: the failure was logged and recorded by streamText's onError. A card the model got wrong, or a tool
+      // it doesn't have, goes back to the model as a hint (the card itself says CHAT_BAD_CARD); a tool's own error
+      // reaches here as a string. Anything else is the member's CHAT_UNAVAILABLE.
+      onError: (error) =>
+        InvalidToolInputError.isInstance(error) || NoSuchToolError.isInstance(error) || typeof error === "string" ? BAD_CARD_HINT : CHAT_UNAVAILABLE,
     }),
   });
 }
