@@ -3,6 +3,7 @@
 import { useSearchParams } from "next/navigation";
 import type { ReactNode } from "react";
 import { type PanelState, panelKey, readPanel } from "../lib/panel";
+import { Avatar } from "./avatar";
 import { Panel } from "./panel";
 
 type Fixed = Exclude<PanelState["kind"], "comprobante">;
@@ -36,8 +37,10 @@ export function PanelHost({
   if (content === undefined) return null;
   // Keyed by what it shows: going from one comprobante straight to another opens a fresh dialog.
   const key = panelKey(state);
+  // The agent's panel carries its avatar by the title (spec, 9.2).
+  const icon = state.kind === "agente" ? <Avatar kind="agent" /> : undefined;
   return (
-    <Panel key={key} panel={key} title={TITLES[state.kind]} closeHref={closeHref}>
+    <Panel key={key} panel={key} title={TITLES[state.kind]} icon={icon} closeHref={closeHref}>
       {content}
     </Panel>
   );
