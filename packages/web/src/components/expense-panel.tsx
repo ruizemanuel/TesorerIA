@@ -5,20 +5,9 @@ import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 import { post } from "../lib/client/api";
 import { userMessage } from "../lib/client/errors";
+import { expenseOutcome } from "../lib/expense-outcome";
 import { MAX_PESOS, formatPesos, parsePesos } from "../lib/format";
 import { Button, FIELD } from "./ui";
-
-const OUTCOME: Record<string, string> = {
-  reimbursed: "Listo: el agente te devolvió la plata.",
-  proposed: "No entraba sin votación: el agente lo propuso y ahora lo vota el grupo.",
-  waiting: "El fondo todavía no tiene esos pesos: el agente te lo devuelve cuando entren.",
-  rejected: "El agente no puede devolver este gasto.",
-  blocked: "No se pudo procesar ahora. El agente lo vuelve a intentar en un rato.",
-  sending: "El agente ya lo mandó. En un rato aparece en los movimientos.",
-  new: "El agente está ocupado: lo procesa en unos minutos.",
-};
-
-const outcome = (status: string) => OUTCOME[status] ?? OUTCOME.new!;
 
 /** The same kind and amount this person loaded a few minutes ago, maybe from another tab: its status and amount. */
 type Twin = { status: string; amount: bigint };
@@ -63,7 +52,7 @@ export function ExpensePanel({ fund, agreedExpense }: { fund: string; agreedExpe
         sending.current = false;
         return;
       }
-      setMessage(outcome(answer.status));
+      setMessage(expenseOutcome(answer.status));
       router.refresh();
     } catch (caught) {
       setError(userMessage(caught));
@@ -113,7 +102,7 @@ export function ExpensePanel({ fund, agreedExpense }: { fund: string; agreedExpe
           <Button disabled={busy} onClick={() => submit(true)}>
             {busy ? "El agente lo está mirando…" : "Sí, es otro"}
           </Button>
-          <Button variant="link" disabled={busy} onClick={() => setMessage(outcome(twin.status))}>
+          <Button variant="link" disabled={busy} onClick={() => setMessage(expenseOutcome(twin.status))}>
             No, es el mismo
           </Button>
         </div>
