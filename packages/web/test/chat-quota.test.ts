@@ -1,7 +1,9 @@
 import { eq, sql } from "drizzle-orm";
+import { drizzle as drizzleNeon } from "drizzle-orm/neon-http";
 import { beforeEach, describe, expect, it } from "vitest";
-import { recordChatUsage, reserveChatMessage } from "../src/lib/chat/quota";
+import { CHAT_RESERVE_LOCK, recordChatUsage, reserveChatMessage } from "../src/lib/chat/quota";
 import type { Db } from "../src/lib/db/client";
+import * as schema from "../src/lib/db/schema";
 import { chatMessages } from "../src/lib/db/schema";
 import { addLiveFund, addUser, randomAccount, testDb } from "./support/db";
 
@@ -50,11 +52,36 @@ describe("reserveChatMessage: the chat's daily caps (spec, 8.2)", () => {
   });
 
   it("lets only one of two messages sent at once through the last place under the cap", async () => {
+    // PGlite runs one transaction at a time anyway, so this guards against a regression rather than proving the
+    // lock: on Neon, the lock every reservation takes first is what keeps two from counting the same rows (next test).
     await reserve(ana.id, 2);
     const both = await Promise.all([reserve(ana.id, 2), reserve(ana.id, 2)]);
     expect(both.filter((r) => r.ok)).toHaveLength(1);
     expect(both.filter((r) => !r.ok)).toEqual([{ ok: false, limit: "member" }]);
     expect(await db.select().from(chatMessages)).toHaveLength(2);
+  });
+
+  it("takes the one lock every reservation shares first in the batch Neon runs, whoever reserves", async () => {
+    // Neon's HTTP driver is faked at the client: what's checked is the batch drizzle builds for it, which PGlite never runs.
+    const batches: { sql: string; params: unknown[] }[][] = [];
+    const client = Object.assign((sql: string, params: unknown[]) => ({ sql, params }), {
+      transaction: async (queries: { sql: string; params: unknown[] }[]) => {
+        batches.push(queries);
+        return queries.map(() => ({ rows: [] }));
+      },
+    });
+    const neon = drizzleNeon({ client: client as never, schema }) as unknown as Db;
+    for (const userId of [ana.id, beto.id]) {
+      // The fake has no rows to answer with, so nothing is reserved.
+      expect(await reserveChatMessage(neon, { userId, fundId, memberLimit: 3, globalLimit: 100 })).toEqual({ ok: false, limit: "member" });
+    }
+    expect(batches).toHaveLength(2);
+    const [[lock, insert, read], [otherLock]] = batches as [{ sql: string; params: unknown[] }[], { sql: string; params: unknown[] }[]];
+    expect(lock).toEqual({ sql: "select pg_advisory_xact_lock($1)", params: [CHAT_RESERVE_LOCK] });
+    expect(otherLock).toEqual(lock); // the same key for another person
+    expect(batches[0]).toHaveLength(3);
+    expect(insert!.sql).toMatch(/^insert into "chat_messages"/);
+    expect(read!.sql).toMatch(/^select .* from "users"/);
   });
 });
 
