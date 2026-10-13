@@ -215,4 +215,17 @@ test("three friends create a fund, contribute, get the agreed expense back, and 
   await beto.setViewportSize({ width: 1280, height: 800 });
   await beto.getByRole("link", { name: "Preguntale al agente" }).click();
   await expect(beto.getByRole("dialog", { name: "Agente" }).getByText(/el agente lo propuso y ahora lo vota el grupo/)).toBeVisible();
+  // A reload with the panel open renders it on the server, with a new conversation: it must take over in the
+  // browser without errors, and answer.
+  const errors: string[] = [];
+  beto.on("console", (message) => {
+    if (message.type() === "error") errors.push(message.text());
+  });
+  beto.on("pageerror", (error) => errors.push(error.message));
+  await open(beto, `${fund}?p=agente`);
+  const agent = beto.getByRole("dialog", { name: "Agente" });
+  await expect(agent.getByText("Hola, Beto. Preguntame lo que quieras del fondo.")).toBeVisible();
+  await agent.getByRole("button", { name: "¿Quién debe esta semana?" }).click();
+  await expect(agent.getByText("Soy el agente de prueba: en el fork no hay modelo.")).toBeVisible();
+  expect(errors).toEqual([]);
 });
