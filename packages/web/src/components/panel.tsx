@@ -1,17 +1,24 @@
 "use client";
 
 import { type ReactNode, useEffect, useRef } from "react";
+import { namesPanel } from "../lib/panel";
 
 /**
  * Aportar, Cargar gasto, the comprobante and the rest open here (spec, 9.2): a native <dialog>, which traps
  * the focus and closes with Escape. The panel lives in the URL (`?p=…`), so closing it goes to `closeHref`,
  * through the History API like PanelLink: the page under it is already there, and the server isn't asked again.
+ * `panel` is what it shows (panelKey).
  */
-export function Panel({ title, closeHref, children }: { title: string; closeHref: string; children: ReactNode }) {
+export function Panel({ panel, title, closeHref, children }: { panel: string; title: string; closeHref: string; children: ReactNode }) {
   const dialog = useRef<HTMLDialogElement>(null);
+  // After every render, not only the first. While a refresh is in flight the router holds the URL changes behind
+  // it, so a closing and the tap that opens this same panel again can reach the page together: nothing changes for
+  // PanelHost, this dialog stays mounted, closed, and it must open again. The URL is read, not the router's state:
+  // right after Volver it no longer names the panel, while the router can still say it does.
   useEffect(() => {
-    if (!dialog.current?.open) dialog.current?.showModal();
-  }, []);
+    const element = dialog.current;
+    if (element !== null && !element.open && namesPanel(new URLSearchParams(window.location.search), panel)) element.showModal();
+  });
   return (
     <dialog
       ref={dialog}

@@ -26,6 +26,17 @@ export function readPanel(search: { get(name: string): string | null }): PanelSt
   }
 }
 
+/** What a panel shows, as one string: its kind, or a comprobante with its item's id, so two comprobantes differ. */
+export function panelKey(state: PanelState): string {
+  return state.kind === "comprobante" ? `comprobante:${state.id}` : state.kind;
+}
+
+/** Whether the URL (its query) asks for the panel `key` (panelKey) to be open. */
+export function namesPanel(search: { get(name: string): string | null }, key: string): boolean {
+  const state = readPanel(search);
+  return state !== null && panelKey(state) === key;
+}
+
 /** Whether `href`, read from `pathname`, stays on that page: a query-only link, or this page's own path. */
 export function samePage(href: string, pathname: string): boolean {
   // A stand-in origin: a link that resolves to any other one leaves the site.

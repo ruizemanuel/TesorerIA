@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isPlainClick, readPanel, samePage } from "../src/lib/panel";
+import { isPlainClick, namesPanel, panelKey, readPanel, samePage } from "../src/lib/panel";
 
 const search = (query: string) => new URLSearchParams(query);
 
@@ -21,6 +21,33 @@ describe("readPanel: which panel the URL opens (spec, 9.2)", () => {
     expect(readPanel(search(""))).toBeNull();
     expect(readPanel(search("aporte=1000"))).toBeNull();
     expect(readPanel(search("p=chat"))).toBeNull();
+  });
+});
+
+describe("panelKey: what a panel shows, as one string", () => {
+  it("is the kind of a fixed panel, and the item's id with a comprobante", () => {
+    expect(panelKey({ kind: "agente" })).toBe("agente");
+    expect(panelKey({ kind: "aportar" })).toBe("aportar");
+    expect(panelKey({ kind: "comprobante", id: "0xabc-3" })).toBe("comprobante:0xabc-3");
+  });
+
+  it("tells two comprobantes apart, so going from one to the other opens a fresh dialog", () => {
+    expect(panelKey({ kind: "comprobante", id: "0xabc-3" })).not.toBe(panelKey({ kind: "comprobante", id: "0xabc-4" }));
+  });
+});
+
+describe("namesPanel: whether the URL asks for a panel to be open", () => {
+  it("is true while the URL names that very panel", () => {
+    expect(namesPanel(search("p=agente"), "agente")).toBe(true);
+    expect(namesPanel(search("p=comprobante&id=0xabc-3"), "comprobante:0xabc-3")).toBe(true);
+  });
+
+  it("is false once the panel was closed (no `p`), and for another panel or another comprobante", () => {
+    expect(namesPanel(search(""), "agente")).toBe(false);
+    expect(namesPanel(search("aporte=1000"), "agente")).toBe(false);
+    expect(namesPanel(search("p=gasto"), "agente")).toBe(false);
+    expect(namesPanel(search("p=comprobante&id=0xabc-4"), "comprobante:0xabc-3")).toBe(false);
+    expect(namesPanel(search("p=comprobante"), "comprobante:")).toBe(false);
   });
 });
 

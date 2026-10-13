@@ -2,7 +2,7 @@
 
 import { useSearchParams } from "next/navigation";
 import type { ReactNode } from "react";
-import { type PanelState, readPanel } from "../lib/panel";
+import { type PanelState, panelKey, readPanel } from "../lib/panel";
 import { Panel } from "./panel";
 
 type Fixed = Exclude<PanelState["kind"], "comprobante">;
@@ -35,9 +35,9 @@ export function PanelHost({
     state.kind === "comprobante" ? (Object.hasOwn(receipts, state.id) ? receipts[state.id] : undefined) : panels[state.kind];
   if (content === undefined) return null;
   // Keyed by what it shows: going from one comprobante straight to another opens a fresh dialog.
-  const key = state.kind === "comprobante" ? `comprobante:${state.id}` : state.kind;
+  const key = panelKey(state);
   return (
-    <Panel key={key} title={TITLES[state.kind]} closeHref={closeHref}>
+    <Panel key={key} panel={key} title={TITLES[state.kind]} closeHref={closeHref}>
       {content}
     </Panel>
   );

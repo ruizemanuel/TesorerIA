@@ -1,4 +1,4 @@
-import { type Page, type Request, expect, test } from "@playwright/test";
+import { type Page, type Request, type Route, expect, test } from "@playwright/test";
 import { accountOf, give, onScreen, open, phone } from "./support";
 
 /** The server renders (React Server Components) a page asks for while `act` runs; a link's prefetch isn't one. */
@@ -192,14 +192,19 @@ test("three friends create a fund, contribute, get the agreed expense back, and 
   await beto.getByPlaceholder("Escribí tu pregunta").fill("Pagué $ 5.000 de pelotas nuevas");
   await beto.getByRole("button", { name: "Mandar" }).click();
   await expect(beto.getByText("Se vota: necesita 2 de 3 votos.")).toBeVisible();
+  // The card refreshes the page under it. With the server slow to answer that refresh, the router holds the panel's
+  // closing and the tap that opens it again behind it, and applies both at once: the panel must open all the same.
+  const slowServerRenders = async (route: Route) => {
+    if (route.request().headers()["rsc"] === "1") await new Promise((resolve) => setTimeout(resolve, 2_000));
+    await route.continue();
+  };
+  await beto.route("**/*", slowServerRenders);
   await beto.getByRole("button", { name: "Confirmar" }).click();
   await expect(beto.getByText(/el agente lo propuso y ahora lo vota el grupo/)).toBeVisible();
   await beto.getByRole("button", { name: "Volver" }).click();
-  // The card refreshed the page, and the router applies the panel's closing only once that refresh is done: a tap on
-  // Agente before then reaches a panel still mounted, closed, and it never reopens (like step 5 waits for the URL).
-  await expect(beto.locator("dialog")).toHaveCount(0);
   await beto.getByRole("link", { name: "Agente" }).click();
-  await expect(beto.getByText(/el agente lo propuso y ahora lo vota el grupo/)).toBeVisible();
+  await expect(beto.getByRole("dialog", { name: "Agente" }).getByText(/el agente lo propuso y ahora lo vota el grupo/)).toBeVisible();
+  await beto.unroute("**/*", slowServerRenders);
   await open(beto, `${fund}/movimientos`);
   await expect(onScreen(beto, /Pelotas nuevas/)).toBeVisible();
 });
