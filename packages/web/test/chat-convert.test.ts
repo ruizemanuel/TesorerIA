@@ -11,12 +11,19 @@ const usage = { inputTokens: { total: 2_000, noCache: 2_000, cacheRead: 0, cache
 const streamOf = (chunks: LanguageModelV4StreamPart[]) => simulateReadableStream({ chunks, initialDelayInMs: null, chunkDelayInMs: null });
 const signed = { anthropic: { signature: "signed-thinking" } };
 const card = JSON.stringify({ kind: "other", amount: "8.000", note: "Pelotas nuevas" });
+/** What Anthropic, through the AI Gateway, puts first in every answer: its own record of the message, as a custom part. */
+const messageStart: LanguageModelV4StreamPart = {
+  type: "custom",
+  kind: "anthropic.message_start",
+  providerMetadata: { anthropic: { id: "msg_1", model: "claude-sonnet-5-5", usage: { input_tokens: 908, output_tokens: 24 } } },
+};
 
-/** An answer like Anthropic's with its thinking omitted: a signed reasoning part with no text, then the card. */
+/** An answer like Anthropic's with its thinking omitted: its record, a signed reasoning part with no text, then the card. */
 const thinksThenProposes = () =>
   new MockLanguageModelV4({
     doStream: async () => ({
       stream: streamOf([
+        messageStart,
         { type: "reasoning-start", id: "r1" },
         { type: "reasoning-delta", id: "r1", delta: "", providerMetadata: signed },
         { type: "reasoning-end", id: "r1" },
@@ -32,6 +39,7 @@ const answers = (text: string) =>
   new MockLanguageModelV4({
     doStream: async () => ({
       stream: streamOf([
+        messageStart,
         { type: "text-start", id: "t1" },
         { type: "text-delta", id: "t1", delta: text },
         { type: "text-end", id: "t1" },
@@ -97,6 +105,14 @@ describe("the browser's round trip (spec, 8.2): an answer with signed thinking a
       { role: "tool", content: [{ type: "tool-result", toolCallId: "call-1", toolName: "proposeExpense", output: { type: "json", value: { status: "dismissed" } } }] },
       { role: "user", content: [{ type: "text", text: "No, dejá. ¿Cuánto debo?" }] },
     ]);
+  });
+
+  it("keeps the provider's own record of an answer out of the panel, so any second question passes the route's check", async () => {
+    const asked = user("¿Cuánto hay en el fondo?");
+    const answer = await answerAs(answers("Hay $ 30.011,49 en el fondo."), [asked]);
+    expect(answer.parts.map((part) => part.type)).toEqual(["step-start", "text"]);
+    const sent: unknown = JSON.parse(JSON.stringify([asked, answer, user("¿Y cuánto debo?")]));
+    expect((await readChatRequest(sent)).ok).toBe(true);
   });
 
   it("leaves out a card nobody answered, so the next call doesn't fail", async () => {

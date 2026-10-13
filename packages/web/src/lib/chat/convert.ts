@@ -20,11 +20,19 @@ export const BAD_CARD_HINT = `Invalid input: write the amount in pesos, like 45.
  * The answer as the browser reads it, with the member's messages left today (`remaining`) and how it ended. Errors
  * are only mapped: a failure was logged by whoever called the model. A card the model got wrong, or a tool it doesn't
  * have, goes back to the model as a hint (the card itself says CHAT_BAD_CARD); a tool's own error reaches here as a
- * string. Anything else is the member's CHAT_UNAVAILABLE.
+ * string. Anything else is the member's CHAT_UNAVAILABLE. The provider's own record of the answer (a custom part:
+ * Anthropic's message_start, through the AI Gateway, with the message's id and usage) stays here: the panel shows
+ * nothing of it, and readChatRequest takes back only the parts a message may carry.
  */
 export function toAnswerStream(stream: ReadableStream<TextStreamPart<typeof chatTools>>, remaining: number) {
   return toUIMessageStream<typeof chatTools, ChatUIMessage>({
-    stream,
+    stream: stream.pipeThrough(
+      new TransformStream<TextStreamPart<typeof chatTools>, TextStreamPart<typeof chatTools>>({
+        transform: (part, controller) => {
+          if (part.type !== "custom") controller.enqueue(part);
+        },
+      }),
+    ),
     tools: chatTools,
     messageMetadata: ({ part }): ChatMetadata | undefined => {
       if (part.type === "start") return { remaining };
