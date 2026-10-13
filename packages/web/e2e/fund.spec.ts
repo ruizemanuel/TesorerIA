@@ -192,8 +192,9 @@ test("three friends create a fund, contribute, get the agreed expense back, and 
   await beto.getByPlaceholder("Escribí tu pregunta").fill("Pagué $ 5.000 de pelotas nuevas");
   await beto.getByRole("button", { name: "Mandar" }).click();
   await expect(beto.getByText("Se vota: necesita 2 de 3 votos.")).toBeVisible();
-  // The card refreshes the page under it. With the server slow to answer that refresh, the router holds the panel's
-  // closing and the tap that opens it again behind it, and applies both at once: the panel must open all the same.
+  // The card refreshes the page under it. With the server slow to answer that refresh, closing the panel and opening
+  // it again must open it, with the conversation: Next's router, left alone, held both behind the refresh and then
+  // reloaded the page, or kept the panel closed.
   const slowServerRenders = async (route: Route) => {
     if (route.request().headers()["rsc"] === "1") await new Promise((resolve) => setTimeout(resolve, 2_000));
     await route.continue();
