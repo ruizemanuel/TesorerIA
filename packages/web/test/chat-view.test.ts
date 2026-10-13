@@ -6,6 +6,7 @@ import {
   canRetry,
   chatErrorText,
   isRefusal,
+  isShownAnswer,
   lastRemaining,
   pendingCards,
   proposalPreview,
@@ -89,6 +90,25 @@ describe("the panel's small words", () => {
     expect(pendingCards(messages, new Set(["b"]))).toEqual(["c"]);
     expect(pendingCards(messages, new Set(["b", "c"]))).toEqual([]);
     expect(pendingCards(messages, new Set())).toEqual(["b", "c"]);
+  });
+
+  it("shows an answer only once it has something to show: while the agent thinks, the typing row is its only avatar", () => {
+    // What the route's first chunk makes: an answer with its metadata and nothing else.
+    expect(isShownAnswer(answer([], { remaining: 7 }))).toBe(false);
+    expect(isShownAnswer(answer([{ type: "step-start" }, { type: "reasoning", text: "", state: "done" }, { type: "text", text: "" }]))).toBe(false);
+    expect(isShownAnswer(answer([{ type: "step-start" }, { type: "text", text: "Ho" }]))).toBe(true);
+    expect(isShownAnswer(answer([], { finish: "refusal" }))).toBe(true);
+  });
+
+  it("counts a card once it says something: not while its input streams in, nor a call the panel doesn't show", () => {
+    const input = { kind: "other", amount: "5.000", note: "" };
+    const part = (state: string, extra: object = {}) => ({ type: "tool-proposeExpense", toolCallId: "c", state, input, ...extra }) as ChatUIMessage["parts"][number];
+    expect(isShownAnswer(answer([part("input-streaming")]))).toBe(false);
+    expect(isShownAnswer(answer([part("input-available")]))).toBe(true);
+    expect(isShownAnswer(answer([part("output-available", { output: { status: "proposed" } })]))).toBe(true);
+    expect(isShownAnswer(answer([part("output-error", { errorText: "Invalid input" })]))).toBe(true);
+    const unknown = { type: "dynamic-tool", toolName: "proposeExpense", toolCallId: "d", state: "output-error", input: {}, errorText: "Invalid input" };
+    expect(isShownAnswer(answer([unknown as ChatUIMessage["parts"][number]]))).toBe(false);
   });
 
   it("shows the agent typing until the answer's first words", () => {

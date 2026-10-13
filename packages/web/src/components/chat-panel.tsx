@@ -11,6 +11,7 @@ import {
   canRetry,
   chatErrorText,
   isRefusal,
+  isShownAnswer,
   lastRemaining,
   pendingCards,
   remainingText,
@@ -87,7 +88,8 @@ export function ChatPanel({ fund, userName, rules }: { fund: string; userName: s
             </div>
           </li>
         )}
-        {messages.map((message) =>
+        {/* An answer with nothing to show yet waits for its words behind the typing row (isShownAnswer). */}
+        {messages.filter((message) => message.role === "user" || isShownAnswer(message)).map((message) =>
           message.role === "user" ? (
             <li key={message.id} className="ml-10 justify-self-end whitespace-pre-wrap rounded-[14px] bg-primary p-3 text-white">
               {message.parts.map((part) => (part.type === "text" ? part.text : "")).join("")}

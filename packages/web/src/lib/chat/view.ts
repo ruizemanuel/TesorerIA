@@ -67,6 +67,20 @@ export function isRefusal(message: ChatUIMessage): boolean {
   return (finish === "refusal" || finish === "content-filter") && !message.parts.some((part) => part.type === "text" && part.text !== "");
 }
 
+/** The card's states that show something (ExpenseProposalCard): the card itself, its outcome, or CHAT_BAD_CARD. */
+const SHOWN_CARD = new Set(["input-available", "output-available", "output-error"]);
+
+/**
+ * Whether the panel shows an answer: once it has words, a card that says something, or a refusal. The route's first
+ * chunk makes an empty answer at once; until it has one of those, the typing row stands for it, with its own avatar.
+ */
+export function isShownAnswer(message: ChatUIMessage): boolean {
+  return (
+    isRefusal(message) ||
+    message.parts.some((part) => (part.type === "text" && part.text !== "") || (part.type === "tool-proposeExpense" && SHOWN_CARD.has(part.state)))
+  );
+}
+
 /**
  * The tool calls of cards still waiting for the member: the panel answers them "dismissed" before the next message.
  * Not the ones being confirmed right now (`confirming`): their expense is on its way, and the card answers for itself.
