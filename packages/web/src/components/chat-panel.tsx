@@ -1,9 +1,11 @@
 "use client";
 
-import { useChat } from "@ai-sdk/react";
+import { Chat, useChat } from "@ai-sdk/react";
+import { DefaultChatTransport } from "ai";
 import { useState } from "react";
-import { MAX_MESSAGE_CHARS } from "../lib/chat/limits";
+import { MAX_HISTORY_MESSAGES, MAX_MESSAGE_CHARS } from "../lib/chat/limits";
 import { CHAT_REFUSED } from "../lib/chat/texts";
+import type { ChatUIMessage } from "../lib/chat/tools";
 import {
   type ProposalRules,
   canRetry,
@@ -15,11 +17,29 @@ import {
   waitingForText,
 } from "../lib/chat/view";
 import { Avatar } from "./avatar";
-import { useConfirmingCards, useFundChat } from "./chat-provider";
+import { useConfirmingCards, useFundConversation } from "./chat-provider";
 import { ExpenseProposalCard } from "./expense-proposal-card";
 import { Button, FIELD } from "./ui";
 
 const SUGGESTIONS = ["¿Quién debe esta semana?", "¿Cuánto queda del tope de la semana?", "Quiero cargar un gasto"];
+
+/**
+ * The fund's Chat, made the first time its panel opens and kept by ChatProvider from then on (FundConversation).
+ * useChat given this instance never stops it on unmount. Only the last messages are sent: the route keeps no more
+ * (spec, 8.2).
+ */
+function useFundChat(): Chat<ChatUIMessage> {
+  const conversation = useFundConversation();
+  // Made on its first read, like a ref's first value: every later render, and every later panel, gets the same one.
+  conversation.chat ??= new Chat<ChatUIMessage>({
+    id: conversation.fund,
+    transport: new DefaultChatTransport({
+      api: `/api/funds/${conversation.fund}/chat`,
+      prepareSendMessagesRequest: ({ messages }) => ({ body: { messages: messages.slice(-MAX_HISTORY_MESSAGES) } }),
+    }),
+  });
+  return conversation.chat;
+}
 
 /** The chat with the agent (spec, 9.2): plain text both ways, a card to load an expense, and the day's cap. */
 export function ChatPanel({ fund, userName, rules }: { fund: string; userName: string; rules: ProposalRules }) {

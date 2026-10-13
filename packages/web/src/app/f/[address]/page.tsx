@@ -1,7 +1,7 @@
 import { notFound, redirect } from "next/navigation";
 import { connection } from "next/server";
 import { isAddress } from "viem";
-import { ChatPanel } from "../../../components/chat-panel";
+import { AgentPanel } from "../../../components/agent-panel";
 import { ContributePanel } from "../../../components/contribute-panel";
 import { ExpensePanel } from "../../../components/expense-panel";
 import { FundScreenView } from "../../../components/fund-screen";
@@ -53,7 +53,7 @@ export default async function FundPage({ params, searchParams }: { params: Promi
           </div>
         ),
         agente: chat ? (
-          <ChatPanel
+          <AgentPanel
             fund={screen.view.address}
             userName={user.name}
             rules={{

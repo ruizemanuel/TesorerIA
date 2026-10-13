@@ -1,7 +1,10 @@
 import type { ReactNode } from "react";
 import { ChatProvider } from "../../../components/chat-provider";
 
-/** A fund's pages share its chat (spec, 9.2): it lives here, so it outlasts the panel and the move to Movimientos. */
+/**
+ * A fund's pages share its chat (spec, 9.2): it lives here, so it outlasts the panel and the move to Movimientos.
+ * Only its holder does: the AI SDK comes with the Agente panel, the first time it opens (agent-panel.tsx).
+ */
 export default async function FundLayout({ children, params }: { children: ReactNode; params: Promise<{ address: string }> }) {
   const { address } = await params;
   // Keyed by the fund: another fund gets its own conversation.
