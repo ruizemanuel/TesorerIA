@@ -106,6 +106,8 @@ const next = spawn(process.execPath, [nextBin, "dev", "--port", String(WEB_PORT)
     // The kill switch, on: on the fork the agent sends (the deployed default is off).
     AGENT_SEND: "on",
     HEARTBEAT_SECRET: randomBytes(32).toString("hex"),
+    // The chat, with the scripted model: the real one is never asked from a test (spec, 11).
+    CHAT_MODEL: "mock",
   },
 });
 children.push(next);

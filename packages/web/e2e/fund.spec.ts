@@ -181,4 +181,25 @@ test("three friends create a fund, contribute, get the agreed expense back, and 
   await proposal(ana, "las camisetas").getByRole("button", { name: "Ejecutar" }).click();
   await expect(onScreen(ana, /las camisetas\. Se aprobó\./)).toBeVisible();
   await expect(onScreen(ana, /El fondo le pagó \$\s12\.000 a Caro/)).toHaveCount(2);
+
+  // 10. Beto asks the agent (the scripted model on the fork), then tells it he paid for new balls: he confirms the
+  // card, and the agent proposes it. The conversation outlasts closing the panel (spec, 9.2).
+  await open(beto, fund);
+  await beto.getByRole("link", { name: "Agente" }).click();
+  await expect(beto.getByText("Hola, Beto. Preguntame lo que quieras del fondo.")).toBeVisible();
+  await beto.getByRole("button", { name: "¿Quién debe esta semana?" }).click();
+  await expect(beto.getByText("Soy el agente de prueba: en el fork no hay modelo.")).toBeVisible();
+  await beto.getByPlaceholder("Escribí tu pregunta").fill("Pagué $ 5.000 de pelotas nuevas");
+  await beto.getByRole("button", { name: "Mandar" }).click();
+  await expect(beto.getByText("Se vota: necesita 2 de 3 votos.")).toBeVisible();
+  await beto.getByRole("button", { name: "Confirmar" }).click();
+  await expect(beto.getByText(/el agente lo propuso y ahora lo vota el grupo/)).toBeVisible();
+  await beto.getByRole("button", { name: "Volver" }).click();
+  // The card refreshed the page, and the router applies the panel's closing only once that refresh is done: a tap on
+  // Agente before then reaches a panel still mounted, closed, and it never reopens (like step 5 waits for the URL).
+  await expect(beto.locator("dialog")).toHaveCount(0);
+  await beto.getByRole("link", { name: "Agente" }).click();
+  await expect(beto.getByText(/el agente lo propuso y ahora lo vota el grupo/)).toBeVisible();
+  await open(beto, `${fund}/movimientos`);
+  await expect(onScreen(beto, /Pelotas nuevas/)).toBeVisible();
 });
