@@ -1,7 +1,7 @@
 import { notFound, redirect } from "next/navigation";
 import { connection } from "next/server";
 import { isAddress } from "viem";
-import { MobileBar, TabBar, TopBar } from "../../../../components/bars";
+import { AgentButton, MobileBar, TabBar, TopBar } from "../../../../components/bars";
 import { LiveFund } from "../../../../components/live-fund";
 import { TimelineList } from "../../../../components/timeline-list";
 import { Card, CardTitle } from "../../../../components/ui";
@@ -20,6 +20,7 @@ export default async function MovementsPage({ params }: { params: Promise<{ addr
   const screen = await loadFundScreen(address, user);
   if (screen === null) notFound();
   const { view } = screen;
+  const chat = chatEnabled();
   return (
     <div className="min-h-dvh pb-24 lg:pb-0">
       <TopBar fundName={view.name} address={view.address} userName={user.name} />
@@ -38,7 +39,8 @@ export default async function MovementsPage({ params }: { params: Promise<{ addr
           />
         </Card>
       </main>
-      <TabBar address={view.address} active="movimientos" chat={chatEnabled()} />
+      <TabBar address={view.address} active="movimientos" chat={chat} />
+      {chat && <AgentButton address={view.address} />}
       <LiveFund fund={view.address} block={screen.block} />
     </div>
   );

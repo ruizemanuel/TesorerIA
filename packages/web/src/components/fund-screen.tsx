@@ -2,13 +2,12 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import type { CurrentUser } from "../lib/current-user";
 import type { FundScreen } from "../lib/read-fund";
-import { TabBar, TopBar } from "./bars";
+import { AgentButton, TabBar, TopBar } from "./bars";
 import { FundHeader } from "./fund-header";
 import { LiveFund } from "./live-fund";
-import { PanelLink } from "./panel-link";
 import { RulesCard } from "./rules-card";
 import { TimelineList } from "./timeline-list";
-import { Card, CardTitle, buttonClass } from "./ui";
+import { Card, CardTitle } from "./ui";
 import { WeekList } from "./week-list";
 
 /**
@@ -84,15 +83,7 @@ export function FundScreenView({
       </main>
       {!publicView && <TabBar address={view.address} active="inicio" chat={chat} />}
       {!publicView && <LiveFund fund={view.address} block={screen.block} />}
-      {!publicView && chat && (
-        // From 1024 px the chat opens from a floating button (spec, 9.2); below, from the bottom bar. The wrapper
-        // hides it, so the button's own display never fights `hidden`.
-        <div className="fixed bottom-6 right-6 hidden lg:block">
-          <PanelLink href={`/f/${view.address}?p=agente`} className={buttonClass("primary")}>
-            Preguntale al agente
-          </PanelLink>
-        </div>
-      )}
+      {!publicView && chat && <AgentButton address={view.address} />}
       {panel}
     </div>
   );

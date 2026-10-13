@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { AvatarLink } from "./avatar";
 import { PanelLink } from "./panel-link";
-import { Logo } from "./ui";
+import { Logo, buttonClass } from "./ui";
 
 /** Your avatar opens "Tu cuenta", which lives on the fund's inicio, wherever you are. */
 function AccountLink({ address, userName }: { address: string; userName: string }) {
@@ -46,6 +46,21 @@ export function TopBar({ fundName, address, userName }: { fundName: string; addr
         {userName && <AccountLink address={address} userName={userName} />}
       </div>
     </header>
+  );
+}
+
+/**
+ * From 1024 px, with the chat on, it opens from a floating button (spec, 9.2); below, from the bottom bar. Its panel
+ * lives on the inicio: from there it opens at once, from Movimientos it goes there. The wrapper hides it, so the
+ * button's own display never fights `hidden`.
+ */
+export function AgentButton({ address }: { address: string }) {
+  return (
+    <div className="fixed bottom-6 right-6 hidden lg:block">
+      <PanelLink href={`/f/${address}?p=agente`} className={buttonClass("primary")}>
+        Preguntale al agente
+      </PanelLink>
+    </div>
   );
 }
 
