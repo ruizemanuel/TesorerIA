@@ -204,7 +204,14 @@ test("three friends create a fund, contribute, get the agreed expense back, and 
   await beto.getByRole("button", { name: "Volver" }).click();
   await beto.getByRole("link", { name: "Agente" }).click();
   await expect(beto.getByRole("dialog", { name: "Agente" }).getByText(/el agente lo propuso y ahora lo vota el grupo/)).toBeVisible();
-  await beto.unroute("**/*", slowServerRenders);
-  await open(beto, `${fund}/movimientos`);
+  await beto.unrouteAll({ behavior: "wait" }); // a render still held goes on, slowly
+  // It outlasts the move to Movimientos too (spec, 9.2), and on a desktop's width, where the bottom bar hides, the
+  // floating button takes Beto from there back to it.
+  await beto.getByRole("button", { name: "Volver" }).click();
+  await beto.getByRole("link", { name: "Movimientos", exact: true }).click();
+  await expect(beto).toHaveURL(new RegExp(`${fund}/movimientos$`));
   await expect(onScreen(beto, /Pelotas nuevas/)).toBeVisible();
+  await beto.setViewportSize({ width: 1280, height: 800 });
+  await beto.getByRole("link", { name: "Preguntale al agente" }).click();
+  await expect(beto.getByRole("dialog", { name: "Agente" }).getByText(/el agente lo propuso y ahora lo vota el grupo/)).toBeVisible();
 });
