@@ -1,11 +1,11 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { useEffect, useRef } from "react";
 import type { Address } from "viem";
 import { celoBrowserClient } from "../lib/client/wallet";
 import { LOOK_EVERY_MS, checkForNews } from "../lib/live";
 import { readPanel } from "../lib/panel";
+import { useRefresh } from "./refresh-provider";
 
 /**
  * Keeps a fund's screen current (spec, 9.2) without asking the server for nothing. While the page is visible, the
@@ -15,7 +15,7 @@ import { readPanel } from "../lib/panel";
  * mid-use. The first look after it closes catches up. Renders nothing.
  */
 export function LiveFund({ fund, block }: { fund: Address; block: bigint }) {
-  const router = useRouter();
+  const { refresh } = useRefresh();
   const shown = useRef(block);
   useEffect(() => {
     shown.current = block;
@@ -40,7 +40,7 @@ export function LiveFund({ fund, block }: { fund: Address; block: bigint }) {
           latestBlock: () => client.getBlockNumber(),
           logsBetween: (range) => client.getLogs({ address: fund, ...range }),
         });
-        if (news && live) router.refresh();
+        if (news && live) refresh();
       } catch {
         // The next look tries again, and still knows the page came back.
         cameBack ??= cameBackAfterMs;
@@ -66,7 +66,7 @@ export function LiveFund({ fund, block }: { fund: Address; block: bigint }) {
       clearInterval(timer);
       document.removeEventListener("visibilitychange", onVisibility);
     };
-  }, [fund, router]);
+  }, [fund, refresh]);
 
   return null;
 }

@@ -1,11 +1,11 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 import type { Address } from "viem";
 import { isOnItsWay, userMessage } from "../lib/client/errors";
 import { loadMe, sendCalls } from "../lib/client/wallet";
 import { executeCalls } from "../lib/vote";
+import { useRefresh } from "./refresh-provider";
 import { Button } from "./ui";
 
 /**
@@ -13,7 +13,7 @@ import { Button } from "./ui";
  * One operation, confirmed with the passkey; the refreshed page then says "Se aprobó.".
  */
 export function ExecuteButton({ fund, proposalId }: { fund: Address; proposalId: string }) {
-  const router = useRouter();
+  const { refresh } = useRefresh();
   const [step, setStep] = useState<"idle" | "signing" | "sending">("idle");
   const [error, setError] = useState("");
   // Once it's in, or out and may still land, it isn't offered again, whatever the page still shows.
@@ -29,12 +29,12 @@ export function ExecuteButton({ fund, proposalId }: { fund: Address; proposalId:
       const me = await loadMe();
       await sendCalls(me, executeCalls({ fund, proposalId: BigInt(proposalId) }), { kind: "execute", fund }, () => setStep("sending"));
       setOutcome("done");
-      router.refresh();
+      refresh();
     } catch (caught) {
       setError(userMessage(caught));
       if (isOnItsWay(caught)) {
         setOutcome("on its way");
-        router.refresh();
+        refresh();
       } else {
         busy.current = false;
       }

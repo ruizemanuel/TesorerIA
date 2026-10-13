@@ -1,12 +1,12 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 import type { Address } from "viem";
 import { post } from "../lib/client/api";
 import { isOnItsWay, userMessage } from "../lib/client/errors";
 import { loadMe, sendCalls } from "../lib/client/wallet";
 import { castVote } from "../lib/vote";
+import { useRefresh } from "./refresh-provider";
 import { Button } from "./ui";
 
 /**
@@ -14,7 +14,7 @@ import { Button } from "./ui";
  * operation, so the money moves without anyone coming back to the app.
  */
 export function VoteButton({ fund, proposalId, completes }: { fund: Address; proposalId: string; completes: boolean }) {
-  const router = useRouter();
+  const { refresh } = useRefresh();
   const [step, setStep] = useState<"idle" | "signing" | "sending">("idle");
   const [error, setError] = useState("");
   // Once the vote is in, or is out and may still land, the button is not offered again, whatever the page still shows.
@@ -37,13 +37,13 @@ export function VoteButton({ fund, proposalId, completes }: { fund: Address; pro
       );
       post("/api/agent/run").catch(() => {}); // the vote may have made something for the agent to do (spec, 8.3)
       setOutcome("voted");
-      router.refresh();
+      refresh();
     } catch (caught) {
       setError(userMessage(caught));
       if (isOnItsWay(caught)) {
         // It went out and may still land: the button stays off, and the page shows the vote "en camino" meanwhile.
         setOutcome("on its way");
-        router.refresh();
+        refresh();
       } else {
         busy.current = false;
       }

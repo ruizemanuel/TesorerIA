@@ -1,12 +1,12 @@
 "use client";
 
 import { MAX_NOTE_LENGTH } from "@tesoreria/agent";
-import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 import { post } from "../lib/client/api";
 import { userMessage } from "../lib/client/errors";
 import { expenseOutcome } from "../lib/expense-outcome";
 import { MAX_PESOS, formatPesos, parsePesos } from "../lib/format";
+import { useRefresh } from "./refresh-provider";
 import { Button, FIELD } from "./ui";
 
 /** The same kind and amount this person loaded a few minutes ago, maybe from another tab: its status and amount. */
@@ -14,7 +14,7 @@ type Twin = { status: string; amount: bigint };
 
 /** Cargar un gasto (spec, 9, pantalla 6): the agreed expense or another one, the amount and a note. */
 export function ExpensePanel({ fund, agreedExpense }: { fund: string; agreedExpense: string }) {
-  const router = useRouter();
+  const { refresh } = useRefresh();
   // One key per opening: a double click or a retry sends the same one, and the server keeps one expense.
   const [clientKey, setClientKey] = useState(() => crypto.randomUUID());
   const [busy, setBusy] = useState(false);
@@ -53,7 +53,7 @@ export function ExpensePanel({ fund, agreedExpense }: { fund: string; agreedExpe
         return;
       }
       setMessage(expenseOutcome(answer.status));
-      router.refresh();
+      refresh();
     } catch (caught) {
       setError(userMessage(caught));
       setBusy(false);

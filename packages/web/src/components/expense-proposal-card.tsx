@@ -1,6 +1,5 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 import { CHAT_BAD_CARD } from "../lib/chat/texts";
 import type { ChatUIMessage } from "../lib/chat/tools";
@@ -10,6 +9,7 @@ import { userMessage } from "../lib/client/errors";
 import { expenseOutcome } from "../lib/expense-outcome";
 import { formatPesos } from "../lib/format";
 import { useConfirmingCards } from "./chat-provider";
+import { useRefresh } from "./refresh-provider";
 import { Button } from "./ui";
 
 export type ProposalPart = Extract<ChatUIMessage["parts"][number], { type: "tool-proposeExpense" }>;
@@ -30,7 +30,7 @@ export function ExpenseProposalCard({
   rules: ProposalRules;
   onAnswer: (status: string) => Promise<void>;
 }) {
-  const router = useRouter();
+  const { refresh } = useRefresh();
   const confirming = useConfirmingCards();
   const [busy, setBusy] = useState(false);
   const sending = useRef(false);
@@ -75,7 +75,7 @@ export function ExpenseProposalCard({
         return;
       }
       await onAnswer(answer.status);
-      router.refresh();
+      refresh();
     } catch (caught) {
       setError(userMessage(caught));
     } finally {

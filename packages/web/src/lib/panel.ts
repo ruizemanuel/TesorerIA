@@ -37,6 +37,15 @@ export function namesPanel(search: { get(name: string): string | null }, key: st
   return state !== null && panelKey(state) === key;
 }
 
+/** The panel a link to `href` opens (its panelKey), read against the page's URL `current`, or null if it opens none. */
+export function hrefPanel(href: string, current: string): string | null {
+  const state = readPanel(new URL(href, current).searchParams);
+  return state === null ? null : panelKey(state);
+}
+
+/** What a PanelLink sends a Panel (its panelKey as the detail) to open it again with the URL as it is. */
+export const REOPEN_PANEL = "tesoreria:reopen-panel";
+
 /** Whether `href`, read from `pathname`, stays on that page: a query-only link, or this page's own path. */
 export function samePage(href: string, pathname: string): boolean {
   // A stand-in origin: a link that resolves to any other one leaves the site.

@@ -26,6 +26,7 @@ import {
 import { USDT_UNIT, formatPesos, formatUsdt } from "../lib/format";
 import { DEFAULT_BALANCE_CAP, memberFundAbi } from "../lib/fund-abi";
 import { AddressBox } from "./address-box";
+import { useRefresh } from "./refresh-provider";
 import { Button, ButtonLink, FIELD } from "./ui";
 
 type Token = "usdt" | "wars";
@@ -61,6 +62,7 @@ export function ContributePanel({
   contributionOnItsWay: boolean;
 }) {
   const router = useRouter();
+  const { refresh } = useRefresh();
   const [tab, setTab] = useState<Token>("usdt");
   const [held, setHeld] = useState<Held | null>(null);
   const [lookFailed, setLookFailed] = useState(false);
@@ -129,14 +131,14 @@ export function ContributePanel({
       );
       post("/api/agent/run").catch(() => {}); // convert now rather than at the next heartbeat, in either token (spec, 8.3)
       router.replace(`/f/${fund}?aporte=${balance}`, { scroll: false });
-      router.refresh();
+      refresh();
     } catch (caught) {
       setError(userMessage(caught));
       setStep("idle");
       if (isOnItsWay(caught)) {
         // It went out and may still land: the button stays off, and the page shows it "en camino" meanwhile.
         setSentNow(true);
-        router.refresh();
+        refresh();
       } else {
         busy.current = false;
       }

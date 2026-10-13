@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isPlainClick, namesPanel, panelKey, readPanel, samePage } from "../src/lib/panel";
+import { hrefPanel, isPlainClick, namesPanel, panelKey, readPanel, samePage } from "../src/lib/panel";
 
 const search = (query: string) => new URLSearchParams(query);
 
@@ -48,6 +48,21 @@ describe("namesPanel: whether the URL asks for a panel to be open", () => {
     expect(namesPanel(search("p=gasto"), "agente")).toBe(false);
     expect(namesPanel(search("p=comprobante&id=0xabc-4"), "comprobante:0xabc-3")).toBe(false);
     expect(namesPanel(search("p=comprobante"), "comprobante:")).toBe(false);
+  });
+});
+
+describe("hrefPanel: the panel a link opens, read from where the page is", () => {
+  const here = "http://localhost:3000/f/0x9A74F670F3c59Ae4B8450fdD477b0461b89D2dfD";
+
+  it("reads a query-only link and a full one alike", () => {
+    expect(hrefPanel("?p=gasto", here)).toBe("gasto");
+    expect(hrefPanel("/f/0x9A74F670F3c59Ae4B8450fdD477b0461b89D2dfD?p=agente", `${here}?p=agente`)).toBe("agente");
+    expect(hrefPanel("?p=comprobante&id=0xabc-3", here)).toBe("comprobante:0xabc-3");
+  });
+
+  it("is null for a link that opens no panel", () => {
+    expect(hrefPanel("/f/0x9A74F670F3c59Ae4B8450fdD477b0461b89D2dfD/movimientos", here)).toBeNull();
+    expect(hrefPanel("?p=comprobante", here)).toBeNull();
   });
 });
 
