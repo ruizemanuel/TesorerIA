@@ -179,6 +179,25 @@ export const createFundNonces = pgTable(
   (t) => [primaryKey({ columns: [t.userId, t.nonce] })],
 );
 
+/**
+ * One message a member sent the chat (spec, 8.2): what its daily caps count, and the tokens it cost. Never what was
+ * said: conversations aren't kept.
+ */
+export const chatMessages = pgTable("chat_messages", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id")
+    .notNull()
+    .references(() => users.id),
+  fundId: uuid("fund_id")
+    .notNull()
+    .references(() => funds.id),
+  inputTokens: integer("input_tokens"),
+  outputTokens: integer("output_tokens"),
+  /** How the answer ended: the AI SDK's finishReason, "refusal", or "error". Null while it's being written. */
+  finish: text("finish"),
+  createdAt: createdAt(),
+});
+
 export const locks = pgTable("locks", {
   name: text("name").primaryKey(),
   owner: text("owner").notNull(),
