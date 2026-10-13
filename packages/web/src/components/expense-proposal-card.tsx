@@ -9,6 +9,7 @@ import { post } from "../lib/client/api";
 import { userMessage } from "../lib/client/errors";
 import { expenseOutcome } from "../lib/expense-outcome";
 import { formatPesos } from "../lib/format";
+import { useConfirmingCards } from "./chat-provider";
 import { Button } from "./ui";
 
 export type ProposalPart = Extract<ChatUIMessage["parts"][number], { type: "tool-proposeExpense" }>;
@@ -30,6 +31,7 @@ export function ExpenseProposalCard({
   onAnswer: (status: string) => Promise<void>;
 }) {
   const router = useRouter();
+  const confirming = useConfirmingCards();
   const [busy, setBusy] = useState(false);
   const sending = useRef(false);
   const [twin, setTwin] = useState<{ status: string; amount: bigint } | null>(null);
@@ -53,8 +55,10 @@ export function ExpenseProposalCard({
   const input = part.input;
 
   async function confirm(confirmDuplicate: boolean) {
-    if (sending.current) return;
+    // `confirming` outlives the card: a panel closed and reopened mid-request remounts it with `sending` reset.
+    if (sending.current || confirming.has(toolCallId)) return;
     sending.current = true;
+    confirming.add(toolCallId);
     setBusy(true);
     setError("");
     try {
@@ -75,6 +79,7 @@ export function ExpenseProposalCard({
     } catch (caught) {
       setError(userMessage(caught));
     } finally {
+      confirming.delete(toolCallId);
       setBusy(false);
       sending.current = false;
     }

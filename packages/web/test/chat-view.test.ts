@@ -82,6 +82,15 @@ describe("the panel's small words", () => {
     expect(pendingCards([answer([card("a", "output-available"), card("b", "input-available")])])).toEqual(["b"]);
   });
 
+  it("leaves out the cards the member is confirming right now, so a new message doesn't dismiss them", () => {
+    const card = (toolCallId: string) =>
+      ({ type: "tool-proposeExpense", toolCallId, state: "input-available", input: { kind: "other", amount: "5.000", note: "" } }) as ChatUIMessage["parts"][number];
+    const messages = [answer([card("b"), card("c")])];
+    expect(pendingCards(messages, new Set(["b"]))).toEqual(["c"]);
+    expect(pendingCards(messages, new Set(["b", "c"]))).toEqual([]);
+    expect(pendingCards(messages, new Set())).toEqual(["b", "c"]);
+  });
+
   it("shows the agent typing until the answer's first words", () => {
     const asked: ChatUIMessage = { id: "u", role: "user", parts: [{ type: "text", text: "Hola" }] };
     expect(waitingForText([asked], "submitted")).toBe(true);

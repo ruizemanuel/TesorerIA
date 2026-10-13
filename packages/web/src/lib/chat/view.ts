@@ -67,10 +67,15 @@ export function isRefusal(message: ChatUIMessage): boolean {
   return (finish === "refusal" || finish === "content-filter") && !message.parts.some((part) => part.type === "text" && part.text !== "");
 }
 
-/** The tool calls of cards still waiting for the member: the panel answers them "dismissed" before the next message. */
-export function pendingCards(messages: ChatUIMessage[]): string[] {
+/**
+ * The tool calls of cards still waiting for the member: the panel answers them "dismissed" before the next message.
+ * Not the ones being confirmed right now (`confirming`): their expense is on its way, and the card answers for itself.
+ */
+export function pendingCards(messages: ChatUIMessage[], confirming: ReadonlySet<string> = new Set()): string[] {
   return messages.flatMap((message) =>
-    message.parts.flatMap((part) => (part.type === "tool-proposeExpense" && part.state === "input-available" ? [part.toolCallId] : [])),
+    message.parts.flatMap((part) =>
+      part.type === "tool-proposeExpense" && part.state === "input-available" && !confirming.has(part.toolCallId) ? [part.toolCallId] : [],
+    ),
   );
 }
 

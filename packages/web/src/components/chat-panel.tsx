@@ -15,7 +15,7 @@ import {
   waitingForText,
 } from "../lib/chat/view";
 import { Avatar } from "./avatar";
-import { useFundChat } from "./chat-provider";
+import { useConfirmingCards, useFundChat } from "./chat-provider";
 import { ExpenseProposalCard } from "./expense-proposal-card";
 import { Button, FIELD } from "./ui";
 
@@ -24,6 +24,7 @@ const SUGGESTIONS = ["¿Quién debe esta semana?", "¿Cuánto queda del tope de 
 /** The chat with the agent (spec, 9.2): plain text both ways, a card to load an expense, and the day's cap. */
 export function ChatPanel({ fund, userName, rules }: { fund: string; userName: string; rules: ProposalRules }) {
   const chat = useFundChat();
+  const confirming = useConfirmingCards();
   const { messages, sendMessage, status, error, regenerate, addToolOutput, clearError } = useChat({ chat });
   const [text, setText] = useState("");
   const busy = status === "submitted" || status === "streaming";
@@ -40,8 +41,9 @@ export function ChatPanel({ fund, userName, rules }: { fund: string; userName: s
   async function send(question: string) {
     const trimmed = question.trim();
     if (trimmed === "" || busy || done) return;
-    // A card left unanswered would break the next call (spec, 8.2): it's answered as dismissed first.
-    for (const toolCallId of pendingCards(messages)) await answerCard(toolCallId, "dismissed");
+    // A card left unanswered would break the next call (spec, 8.2): it's answered as dismissed first. One being
+    // confirmed is left alone: its expense is on its way, and the card answers for itself when the route does.
+    for (const toolCallId of pendingCards(messages, confirming)) await answerCard(toolCallId, "dismissed");
     setText("");
     clearError();
     await sendMessage({ text: trimmed });
