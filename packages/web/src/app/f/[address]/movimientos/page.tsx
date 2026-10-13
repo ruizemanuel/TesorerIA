@@ -5,6 +5,7 @@ import { MobileBar, TabBar, TopBar } from "../../../../components/bars";
 import { LiveFund } from "../../../../components/live-fund";
 import { TimelineList } from "../../../../components/timeline-list";
 import { Card, CardTitle } from "../../../../components/ui";
+import { chatEnabled } from "../../../../lib/chat/model";
 import { currentUser } from "../../../../lib/current-user";
 import { loadFundScreen } from "../../../../lib/read-fund";
 import { safeNext } from "../../../../lib/safe-next";
@@ -37,7 +38,7 @@ export default async function MovementsPage({ params }: { params: Promise<{ addr
           />
         </Card>
       </main>
-      <TabBar address={view.address} active="movimientos" />
+      <TabBar address={view.address} active="movimientos" chat={chatEnabled()} />
       <LiveFund fund={view.address} block={screen.block} />
     </div>
   );

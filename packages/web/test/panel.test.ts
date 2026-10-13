@@ -4,10 +4,11 @@ import { isPlainClick, readPanel, samePage } from "../src/lib/panel";
 const search = (query: string) => new URLSearchParams(query);
 
 describe("readPanel: which panel the URL opens (spec, 9.2)", () => {
-  it("reads Aportar, Cargar gasto and Tu cuenta from `p`", () => {
+  it("reads Aportar, Cargar gasto, Tu cuenta and Agente from `p`", () => {
     expect(readPanel(search("p=aportar"))).toEqual({ kind: "aportar" });
     expect(readPanel(search("p=gasto"))).toEqual({ kind: "gasto" });
     expect(readPanel(search("p=cuenta"))).toEqual({ kind: "cuenta" });
+    expect(readPanel(search("p=agente"))).toEqual({ kind: "agente" });
   });
 
   it("reads a comprobante with its item's id, and none without one", () => {

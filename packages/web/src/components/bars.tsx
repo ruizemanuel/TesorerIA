@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { AvatarLink } from "./avatar";
+import { PanelLink } from "./panel-link";
 import { Logo } from "./ui";
 
 /** Your avatar opens "Tu cuenta", which lives on the fund's inicio, wherever you are. */
@@ -48,25 +49,30 @@ export function TopBar({ fundName, address, userName }: { fundName: string; addr
   );
 }
 
-/** Up to 1023 px: Inicio and Movimientos at the bottom; Agente comes with the chat (part 2). */
-export function TabBar({ address, active }: { address: string; active: "inicio" | "movimientos" }) {
+/** Up to 1023 px: Inicio, Movimientos and, with the chat on, Agente, which opens its panel over the inicio (spec, 9.2). */
+export function TabBar({ address, active, chat = false }: { address: string; active: "inicio" | "movimientos"; chat?: boolean }) {
+  const look = (on: boolean) => `grid min-h-11 place-items-center gap-1 text-xs font-semibold ${on ? "text-primary" : "text-muted"}`;
+  const icon = (on: boolean) => <span aria-hidden="true" className={`block size-[22px] rounded-[7px] ${on ? "bg-primary" : "bg-line"}`} />;
   const tab = (href: string, label: string, on: boolean) => (
-    <Link
-      href={href}
-      aria-current={on ? "page" : undefined}
-      className={`grid min-h-11 place-items-center gap-1 text-xs font-semibold ${on ? "text-primary" : "text-muted"}`}
-    >
-      <span aria-hidden="true" className={`block size-[22px] rounded-[7px] ${on ? "bg-primary" : "bg-line"}`} />
+    <Link href={href} aria-current={on ? "page" : undefined} className={look(on)}>
+      {icon(on)}
       {label}
     </Link>
   );
   return (
     <nav
       aria-label="Secciones del fondo"
-      className="fixed inset-x-0 bottom-0 grid grid-cols-2 border-t border-line bg-surface pb-[max(10px,env(safe-area-inset-bottom))] pt-2.5 lg:hidden"
+      className={`fixed inset-x-0 bottom-0 grid ${chat ? "grid-cols-3" : "grid-cols-2"} border-t border-line bg-surface pb-[max(10px,env(safe-area-inset-bottom))] pt-2.5 lg:hidden`}
     >
       {tab(`/f/${address}`, "Inicio", active === "inicio")}
       {tab(`/f/${address}/movimientos`, "Movimientos", active === "movimientos")}
+      {chat && (
+        // The chat's panel lives on the inicio: from there it opens at once, from Movimientos it goes there.
+        <PanelLink href={`/f/${address}?p=agente`} className={look(false)}>
+          {icon(false)}
+          Agente
+        </PanelLink>
+      )}
     </nav>
   );
 }

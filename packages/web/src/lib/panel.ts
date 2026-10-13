@@ -1,5 +1,10 @@
 /** The panels a fund's screen opens over itself (spec, 9.2), each one its own `?p=`. */
-export type PanelState = { kind: "aportar" } | { kind: "gasto" } | { kind: "cuenta" } | { kind: "comprobante"; id: string };
+export type PanelState =
+  | { kind: "aportar" }
+  | { kind: "gasto" }
+  | { kind: "cuenta" }
+  | { kind: "agente" }
+  | { kind: "comprobante"; id: string };
 
 /** Which panel the URL opens: none without `p`, with one this screen doesn't know, or with a comprobante and no id. */
 export function readPanel(search: { get(name: string): string | null }): PanelState | null {
@@ -10,6 +15,8 @@ export function readPanel(search: { get(name: string): string | null }): PanelSt
       return { kind: "gasto" };
     case "cuenta":
       return { kind: "cuenta" };
+    case "agente":
+      return { kind: "agente" };
     case "comprobante": {
       const id = search.get("id");
       return id ? { kind: "comprobante", id } : null;
