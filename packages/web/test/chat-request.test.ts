@@ -49,6 +49,73 @@ describe("readChatRequest: what the browser sends is checked (spec, 8.2)", () =>
   });
 });
 
+describe("readChatRequest: the length of the member's message and the parts a message may carry", () => {
+  it("measures the member's message as it is, so padding can't hide a long one", async () => {
+    expect(await readChatRequest([user("a".repeat(500) + " ".repeat(5_000))])).toEqual({ ok: false, error: CHAT_LONG_MESSAGE });
+    expect(await readChatRequest([user(" ".repeat(501) + "a")])).toEqual({ ok: false, error: CHAT_LONG_MESSAGE });
+  });
+
+  it("refuses a file or any other part on the member's message", async () => {
+    const file = { type: "file" as const, mediaType: "image/png", url: "data:image/png;base64,AAAA" };
+    const withFile = { id: "f1", role: "user" as const, parts: [{ type: "text" as const, text: "Mirá" }, file] };
+    expect(await readChatRequest([withFile])).toEqual({ ok: false, error: CHAT_BAD_REQUEST });
+    const withMetadata = {
+      id: "f2",
+      role: "user" as const,
+      parts: [{ type: "text" as const, text: "Hola", providerMetadata: { anthropic: { junk: "x".repeat(20_000) } } }],
+    };
+    expect(await readChatRequest([withMetadata])).toEqual({ ok: false, error: CHAT_BAD_REQUEST });
+  });
+
+  it("refuses on the agent's message every part but its text, reasoning, step markers and the one tool's card", async () => {
+    const source = { type: "source-url" as const, sourceId: "s", url: "https://example.com" };
+    const file = { type: "file" as const, mediaType: "image/png", url: "data:image/png;base64,AAAA" };
+    for (const part of [source, file]) {
+      const message = { id: `m${++n}`, role: "assistant" as const, parts: [{ type: "text" as const, text: "Hola" }, part] };
+      expect(await readChatRequest([user("Hola"), message, user("?")]), part.type).toEqual({ ok: false, error: CHAT_BAD_REQUEST });
+    }
+    const made = {
+      id: `m${++n}`,
+      role: "assistant" as const,
+      parts: [
+        { type: "step-start" as const },
+        { type: "reasoning" as const, text: "Pienso", state: "done" as const },
+        { type: "text" as const, text: "Listo" },
+      ],
+    };
+    expect(await readChatRequest([user("Hola"), made, user("?")])).toMatchObject({ ok: true });
+  });
+
+  it("keeps a giant reasoning part or a giant error from reaching the model", async () => {
+    const reasoning = {
+      id: `m${++n}`,
+      role: "assistant" as const,
+      parts: [{ type: "reasoning" as const, text: "r".repeat(9_000), state: "done" as const }, { type: "text" as const, text: "Hola" }],
+    };
+    const failed = {
+      id: `m${++n}`,
+      role: "assistant" as const,
+      parts: [
+        {
+          type: "tool-proposeExpense",
+          toolCallId: `call-${n}`,
+          state: "output-error",
+          input: { kind: "other", amount: "5.000", note: "Pelotas" },
+          errorText: "e".repeat(9_000),
+        },
+      ],
+    };
+    for (const heavy of [reasoning, failed]) {
+      const result = await readChatRequest([user("Hola"), heavy, user("¿Y ahora?")]);
+      expect(result).toMatchObject({ ok: true });
+      if (result.ok) {
+        expect(result.messages.reduce((sum, m) => sum + messageChars(m), 0)).toBeLessThanOrEqual(MAX_HISTORY_CHARS);
+        expect(result.messages.map((m) => m.id)).not.toContain(heavy.id);
+      }
+    }
+  });
+});
+
 describe("trimHistory: the last 10 messages, up to 8.000 characters, starting with the member's", () => {
   it("keeps the last 10, and drops a leading answer so it starts with the member", () => {
     const conversation = (length: number) => Array.from({ length }, (_, i) => (i % 2 === 0 ? user(`p${i}`) : agent(`r${i}`)));
@@ -72,6 +139,26 @@ describe("trimHistory: the last 10 messages, up to 8.000 characters, starting wi
   it("weighs a card by its input, so a huge one can't slip past the cap", () => {
     const huge = card({ kind: "other", amount: "5.000", note: "x".repeat(9_000) });
     expect(messageChars(huge as never)).toBeGreaterThan(9_000);
+  });
+
+  it("weighs everything but plain text by its whole part: reasoning, an error's text, metadata", () => {
+    const part = (p: object) => ({ id: `m${++n}`, role: "assistant", parts: [p] }) as never;
+    expect(messageChars(part({ type: "reasoning", text: "r".repeat(9_000), state: "done" }))).toBeGreaterThan(9_000);
+    expect(
+      messageChars(part({ type: "tool-proposeExpense", toolCallId: "c", state: "output-error", input: {}, errorText: "e".repeat(9_000) })),
+    ).toBeGreaterThan(9_000);
+    expect(
+      messageChars(part({ type: "tool-proposeExpense", toolCallId: "c", state: "output-error", input: {}, rawInput: "i".repeat(9_000), errorText: "x" })),
+    ).toBeGreaterThan(9_000);
+    expect(messageChars(part({ type: "text", text: "Hola", providerMetadata: { anthropic: { junk: "m".repeat(9_000) } } }))).toBeGreaterThan(9_000);
+    expect(messageChars(agent("Hola"))).toBe(4);
+  });
+
+  it("drops a heavy message to fit, whatever part carries the weight", () => {
+    const reasoning = { id: "h1", role: "assistant" as const, parts: [{ type: "reasoning" as const, text: "r".repeat(9_000), state: "done" as const }] };
+    const kept = trimHistory([user("Hola"), reasoning, user("¿Y?")]);
+    expect(kept.map((m) => m.id)).not.toContain("h1");
+    expect(kept.reduce((sum, m) => sum + messageChars(m), 0)).toBeLessThanOrEqual(MAX_HISTORY_CHARS);
   });
 });
 
