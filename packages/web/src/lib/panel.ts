@@ -3,6 +3,7 @@ export type PanelState =
   | { kind: "aportar" }
   | { kind: "gasto" }
   | { kind: "cuenta" }
+  | { kind: "pesos" }
   | { kind: "agente" }
   | { kind: "comprobante"; id: string };
 
@@ -15,6 +16,8 @@ export function readPanel(search: { get(name: string): string | null }): PanelSt
       return { kind: "gasto" };
     case "cuenta":
       return { kind: "cuenta" };
+    case "pesos":
+      return { kind: "pesos" };
     case "agente":
       return { kind: "agente" };
     case "comprobante": {

@@ -12,6 +12,7 @@ const TITLES: Record<PanelState["kind"], string> = {
   aportar: "Aportar",
   gasto: "Cargar un gasto",
   cuenta: "Tu cuenta",
+  pesos: "Pasar a pesos",
   agente: "Agente",
   comprobante: "Comprobante",
 };
