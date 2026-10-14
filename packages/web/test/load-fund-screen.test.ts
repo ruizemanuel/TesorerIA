@@ -306,3 +306,43 @@ it("says once why the agent hasn't converted the USDT waiting, from its latest d
   agent.readFund.mockResolvedValue(snapshot({ address, members: [ana, beto, caro].map((p) => getAddress(p.account)), usdtBalance: 4n * USDT_UNIT }));
   expect(await holds()).toEqual([]); // under 5 USDT the agent leaves it, and has nothing to explain
 });
+
+it("gives no reason from a decision over half an hour old: it may be about other USDT, and the agent decides again soon", async () => {
+  const address = await liveFund();
+  agent.readFund.mockResolvedValue(snapshot({ address, members: [ana, beto, caro].map((p) => getAddress(p.account)), usdtBalance: 6_230_000n }));
+  const blocked = (minutesAgo: number) =>
+    db.insert(decisions).values({ fund: address, kind: "blocked", reason: "Could not run the fund: RPC Request failed.", createdAt: new Date(Date.now() - minutesAgo * 60_000) });
+  const holds = async () => texts((await loadFundScreen(address, asViewer(ana)))!).filter((text) => text.startsWith("Todavía no pasé a pesos"));
+
+  // 13/10: a heartbeat couldn't read the fund at 01:32, with nothing to convert; USDT that came the next afternoon isn't why.
+  await blocked(13 * 60);
+  expect(await holds()).toEqual([]);
+  await blocked(31);
+  expect(await holds()).toEqual([]);
+  await blocked(29);
+  expect(await holds()).toEqual([expect.stringContaining("no pude hacer la operación")]);
+});
+
+it("explains the USDT waiting only with the agent's conversion decisions on this fund", async () => {
+  const address = await liveFund();
+  agent.readFund.mockResolvedValue(snapshot({ address, members: [ana, beto, caro].map((p) => getAddress(p.account)), usdtBalance: 5n * USDT_UNIT }));
+  const holds = async () => texts((await loadFundScreen(address, asViewer(ana)))!).filter((text) => text.startsWith("Todavía no pasé a pesos"));
+
+  await db.insert(decisions).values({ fund: randomAccount(), kind: "skip", code: "price-gap", reason: "another fund's" });
+  const [fund] = await db.select().from(funds).where(eq(funds.address, address));
+  const expenseId = crypto.randomUUID();
+  await db.insert(expenses).values({
+    id: expenseId,
+    fundId: fund!.id,
+    userId: ana.id,
+    clientKey: "k-hold",
+    kind: "agreed",
+    amount: 5_000n * WARS,
+    note: "cancha",
+    ref: `0x${crypto.randomUUID().replaceAll("-", "").padEnd(64, "0")}`,
+    status: "waiting",
+  });
+  // A reimbursement the agent couldn't send: blocked too, but about the expense, not the USDT.
+  await db.insert(decisions).values({ fund: address, expenseId, kind: "blocked", reason: "The agent holds 0 USDT for gas" });
+  expect(await holds()).toEqual([]);
+});

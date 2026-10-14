@@ -1,5 +1,5 @@
 import { FUND_FACTORY_BLOCK, type FundEvent, type FundSnapshot, MIN_CONVERSION_USDT, joinWeeks, readFund, readFundEvents } from "@tesoreria/agent";
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { type Address, getAddress, zeroAddress } from "viem";
 import { celoClient, logReader } from "./chain";
 import { blockTime, weekAt } from "./chain-time";
@@ -148,7 +148,9 @@ export function loadPublicFundScreen(address: Address): Promise<FundScreen | nul
 /**
  * Why the agent hasn't converted the USDT the fund holds (spec, 8.1, F8): its latest decision on the fund, when it
  * skipped the conversion, was blocked, or sent one that reverted. Null under MIN_CONVERSION_USDT (the agent leaves
- * that much where it is), or when its latest decision was a conversion that went through. Both addresses are
+ * that much where it is), or when its latest decision was a conversion that went through. Only a decision of the
+ * last half hour counts: the heartbeat decides again every 15 minutes while USDT waits, so an older one may be about
+ * other USDT (a run that couldn't read the fund, with nothing to convert, before this USDT came). Both addresses are
  * checksummed: the agent's come from viem's decoding, and this one from getAddress.
  */
 async function conversionHold(db: Db, snapshot: FundSnapshot): Promise<ConversionHold | null> {
@@ -156,7 +158,13 @@ async function conversionHold(db: Db, snapshot: FundSnapshot): Promise<Conversio
   const [latest] = await db
     .select({ kind: decisions.kind, code: decisions.code, status: decisions.status, createdAt: decisions.createdAt })
     .from(decisions)
-    .where(and(eq(decisions.fund, snapshot.address), isNull(decisions.expenseId)))
+    .where(
+      and(
+        eq(decisions.fund, snapshot.address),
+        isNull(decisions.expenseId),
+        sql`${decisions.createdAt} > now() - interval '30 minutes'`,
+      ),
+    )
     .orderBy(desc(decisions.createdAt), desc(decisions.id))
     .limit(1);
   if (latest === undefined) return null;
