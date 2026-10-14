@@ -5,6 +5,10 @@ export const USDT_UNIT = 10n ** 6n;
 /** The most any amount typed in the app may be, $ 1.000.000.000.000: beyond anything real, far below uint256. */
 export const MAX_PESOS = 1_000_000_000_000n * WARS_UNIT;
 const CENT = 10n ** 16n;
+/** Less than half a cent of wARS: it shows as nothing (heldAmounts), and there's nothing in it to pass to pesos. */
+export const WARS_SPECK = CENT / 2n;
+/** Less than half a cent of USDT, which shows as nothing too. */
+export const USDT_SPECK = 5_000n;
 export const TIME_ZONE = "America/Argentina/Buenos_Aires";
 
 function thousands(digits: string): string {
@@ -34,8 +38,8 @@ export function formatUsdt(units: bigint): string {
  */
 export function heldAmounts({ wars, usdt }: { wars: bigint; usdt: bigint }): string[] {
   const amounts: string[] = [];
-  if (wars >= CENT / 2n) amounts.push(formatPesos(wars));
-  if (usdt >= 5_000n) amounts.push(formatUsdt(usdt));
+  if (wars >= WARS_SPECK) amounts.push(formatPesos(wars));
+  if (usdt >= USDT_SPECK) amounts.push(formatUsdt(usdt));
   return amounts;
 }
 
