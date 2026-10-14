@@ -264,6 +264,29 @@ describe("loadFundScreen: the public view", () => {
       expect((await loadFundScreen(address, asViewer(ana), { publicView: true }))!.contributionOnItsWay).toBe(false);
     });
   });
+
+  describe("a pass to pesos on its way (spec, 9.2)", () => {
+    const pass = (userId: string, hash: string) =>
+      recordOperation(db, userId, { userOpHash: `0x${hash.repeat(32)}`, kind: "cash-out", amount: 10_000n * WARS, token: "wars" });
+    const onItsWay = async (address: Address, viewer: Person) => (await loadFundScreen(address, asViewer(viewer)))!.cashOutOnItsWay;
+
+    it("is reported to the member who sent it, in any of their funds, and to no one else; it's not a contribution", async () => {
+      const address = await liveFund();
+      expect(await onItsWay(address, caro)).toBe(false);
+      await pass(caro.id, "d1");
+      expect(await onItsWay(address, caro)).toBe(true);
+      expect(await onItsWay(address, beto)).toBe(false);
+      const screen = (await loadFundScreen(address, asViewer(caro)))!;
+      expect(screen.contributionOnItsWay).toBe(false);
+      expect(texts(screen)).toEqual([]); // not in the fund's timeline
+    });
+
+    it("is never reported on a public view", async () => {
+      const address = await liveFund({ publicView: true });
+      await pass(caro.id, "d2");
+      expect((await loadFundScreen(address, asViewer(caro), { publicView: true }))!.cashOutOnItsWay).toBe(false);
+    });
+  });
 });
 
 describe("loadFundScreen: read-your-writes", () => {

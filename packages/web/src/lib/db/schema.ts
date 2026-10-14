@@ -142,12 +142,12 @@ export const operations = pgTable("operations", {
   userId: uuid("user_id")
     .notNull()
     .references(() => users.id),
-  /** The fund's address; null for createFund. */
+  /** The fund's address; null for createFund and for a pass to pesos (`cash-out`), which leaves the member's own account. */
   fund: text("fund"),
   /** For `create-fund`: the draft (a `funds` row) it deploys, so a retried deploy finds the operation already sent. */
   draftId: uuid("draft_id").references(() => funds.id),
-  kind: text("kind", { enum: ["create-fund", "contribute", "vote", "execute"] }).notNull(),
-  /** For a contribution: the amount in the token's units. */
+  kind: text("kind", { enum: ["create-fund", "contribute", "vote", "execute", "cash-out"] }).notNull(),
+  /** For a contribution or a pass to pesos: the amount in the token's units. */
   amount: units("amount"),
   token: text("token", { enum: ["wars", "usdt"] }),
   /**

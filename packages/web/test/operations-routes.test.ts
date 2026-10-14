@@ -74,6 +74,14 @@ describe("POST /api/operations", () => {
     expect(await db.select().from(operations)).toMatchObject([{ userOpHash: OP, kind: "execute", fund: FUND }]);
   });
 
+  it("keeps a pass to pesos, with its amount and no fund (spec, 9.2)", async () => {
+    const response = await record(post("/api/operations", { userOpHash: OP, kind: "cash-out", amount: "45000000000000000000000", token: "wars" }));
+    expect(response.status).toBe(200);
+    expect(await db.select().from(operations)).toMatchObject([
+      { userOpHash: OP, userId: ana.id, kind: "cash-out", fund: null, amount: 45_000n * 10n ** 18n, token: "wars" },
+    ]);
+  });
+
   it("keeps the draft a create-fund deploys, only if it is the caller's", async () => {
     expect((await record(post("/api/operations", { userOpHash: OP, kind: "create-fund", draftId }))).status).toBe(200);
     expect(await db.select().from(operations)).toMatchObject([{ userOpHash: OP, kind: "create-fund", draftId }]);
@@ -95,6 +103,7 @@ describe("POST /api/operations", () => {
       { userOpHash: OP, kind: "vote", draftId },
       { userOpHash: OP, kind: "vote", fund: FUND, nonce: "-1" },
       { userOpHash: OP, kind: "vote", fund: FUND, nonce: "0x1" },
+      { userOpHash: OP, kind: "cash-out", fund: FUND, amount: "1", token: "wars" },
     ];
     for (const body of bad) expect((await record(post("/api/operations", body))).status, JSON.stringify(body)).toBe(400);
     expect(await db.select().from(operations)).toEqual([]);

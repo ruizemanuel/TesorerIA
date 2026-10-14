@@ -221,4 +221,9 @@ describe("buildTimeline", () => {
     expect(hold("something-new")[0]?.text).toContain(": no pude hacer la operación.");
     expect(timeline({ conversionHold: null })).toEqual([]);
   });
+
+  it("leaves a pass to pesos out: it moves the member's own account, not the fund (spec, 9.2)", () => {
+    const pass = { userOpHash: "0xpass", kind: "cash-out" as const, amount: 5_000n * WARS, token: "wars" as const, createdAt: NOW };
+    expect(timeline({ pending: [pass] })).toEqual([]);
+  });
 });

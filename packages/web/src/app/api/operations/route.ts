@@ -8,7 +8,7 @@ import { addressSchema, hashSchema } from "../../../lib/schemas";
 const Operation = z
   .object({
     userOpHash: hashSchema,
-    kind: z.enum(["create-fund", "contribute", "vote", "execute"]),
+    kind: z.enum(["create-fund", "contribute", "vote", "execute", "cash-out"]),
     fund: addressSchema.optional(),
     /** The draft a `create-fund` deploys. */
     draftId: z.uuid().optional(),
@@ -23,7 +23,9 @@ const Operation = z
       .regex(/^\d{1,78}$/)
       .optional(),
   })
-  .refine(({ draftId, kind }) => draftId === undefined || kind === "create-fund");
+  .refine(({ draftId, kind }) => draftId === undefined || kind === "create-fund")
+  // A pass to pesos leaves the member's own account: it belongs to no fund.
+  .refine(({ fund, kind }) => fund === undefined || kind !== "cash-out");
 
 export async function POST(request: Request) {
   const user = await currentUser();

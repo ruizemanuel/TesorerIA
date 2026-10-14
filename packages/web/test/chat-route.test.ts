@@ -135,7 +135,7 @@ beforeEach(async () => {
     names: new Map([[ANA, "Ana"]]),
     viewer: ANA,
   });
-  state.screen = { fundId: fund.id, block: BLOCK, view, timeline: [], viewerIsMember: true, publicView: false, contributionOnItsWay: false } satisfies FundScreen;
+  state.screen = { fundId: fund.id, block: BLOCK, view, timeline: [], viewerIsMember: true, publicView: false, contributionOnItsWay: false, cashOutOnItsWay: false } satisfies FundScreen;
 });
 
 describe("POST /api/funds/:address/chat (spec, 8.2)", () => {

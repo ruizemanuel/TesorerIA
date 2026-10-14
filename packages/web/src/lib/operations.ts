@@ -5,7 +5,7 @@ import { funds, operations } from "./db/schema";
 
 export type OperationInput = {
   userOpHash: Hash;
-  kind: "create-fund" | "contribute" | "vote" | "execute";
+  kind: "create-fund" | "contribute" | "vote" | "execute" | "cash-out";
   fund?: Address;
   amount?: bigint;
   token?: "wars" | "usdt";
@@ -85,4 +85,24 @@ export async function pendingOperations(db: Db, userId: string, fund: Address, n
       ),
     )
     .orderBy(desc(operations.createdAt));
+}
+
+/**
+ * Whether a pass to pesos of this member's went out within PENDING_FOR_MS and has no receipt yet (spec, 9.2): the
+ * panel offers no second one meanwhile. A pass belongs to no fund, so it shows on any of theirs.
+ */
+export async function cashOutPending(db: Db, userId: string, now = new Date()): Promise<boolean> {
+  const [row] = await db
+    .select({ userOpHash: operations.userOpHash })
+    .from(operations)
+    .where(
+      and(
+        eq(operations.userId, userId),
+        eq(operations.kind, "cash-out"),
+        isNull(operations.transactionHash),
+        gt(operations.createdAt, new Date(now.getTime() - PENDING_FOR_MS)),
+      ),
+    )
+    .limit(1);
+  return row !== undefined;
 }

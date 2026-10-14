@@ -23,7 +23,7 @@ function screen(timeline: TimelineItem[] = [], contributed = [30_000n * WARS, 20
     names,
     viewer: ANA,
   });
-  return { fundId: "fund", block: BLOCK, view, timeline, viewerIsMember: true, publicView: false, contributionOnItsWay: false };
+  return { fundId: "fund", block: BLOCK, view, timeline, viewerIsMember: true, publicView: false, contributionOnItsWay: false, cashOutOnItsWay: false };
 }
 
 const item = (n: number, change: Partial<TimelineItem> = {}): TimelineItem => ({

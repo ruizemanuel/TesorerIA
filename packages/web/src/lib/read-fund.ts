@@ -9,7 +9,7 @@ import { decisions, expenses, funds, memberships, users } from "./db/schema";
 import { memberFundAbi } from "./fund-abi";
 import { type FundView, buildFundView } from "./fund-view";
 import { ttlMemo } from "./memo";
-import { lastOperationBlock, pendingOperations } from "./operations";
+import { cashOutPending, lastOperationBlock, pendingOperations } from "./operations";
 import { waitForBlock } from "./read-your-writes";
 import { type ConversionHold, type ProposalState, type TimelineItem, buildTimeline } from "./timeline";
 
@@ -23,6 +23,8 @@ export type FundScreen = {
   publicView: boolean;
   /** The viewer has a contribution here that went out and has no receipt yet: Aportar must not offer to send another. */
   contributionOnItsWay: boolean;
+  /** The viewer has a pass to pesos that went out and has no receipt yet: Pasar a pesos must not offer to send another. */
+  cashOutOnItsWay: boolean;
 };
 
 /** The history read doesn't add up: some event is missing, so nothing is shown from it. */
@@ -129,7 +131,8 @@ export async function loadFundScreen(
     now: new Date(Number(clock.timestamp) * 1000),
   });
   const contributionOnItsWay = pending.some((operation) => operation.kind === "contribute");
-  return { fundId: fund.id, block: snapshot.block, view, timeline, viewerIsMember, publicView, contributionOnItsWay };
+  const cashOutOnItsWay = !publicView && viewer !== null && viewerIsMember ? await cashOutPending(db, viewer.id) : false;
+  return { fundId: fund.id, block: snapshot.block, view, timeline, viewerIsMember, publicView, contributionOnItsWay, cashOutOnItsWay };
 }
 
 /**

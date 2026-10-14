@@ -1,7 +1,7 @@
 import { type Address, type Hash, getAddress, pad, toHex } from "viem";
 import { describe, expect, it } from "vitest";
 import { funds, operations } from "../src/lib/db/schema";
-import { finishOperation, lastOperationBlock, ownsDraft, pendingOperations, recordOperation } from "../src/lib/operations";
+import { cashOutPending, finishOperation, lastOperationBlock, ownsDraft, pendingOperations, recordOperation } from "../src/lib/operations";
 import { addUser, testDb } from "./support/db";
 
 const FUND = getAddress("0x00000000000000000000000000000000000f00d1");
@@ -90,5 +90,38 @@ describe("lastOperationBlock: what a member's next read must reach (read-your-wr
     expect(await lastOperationBlock(db, ema.id, FUND)).toBe(100n);
     expect(await lastOperationBlock(db, ema.id)).toBe(300n);
     expect(await lastOperationBlock(db, juan.id, OTHER)).toBeNull();
+  });
+});
+
+describe("cashOutPending: a pass to pesos on its way (spec, 9.2)", () => {
+  const PASS: Hash = pad("0x0c", { size: 32 });
+
+  it("is true for the member who sent it until its receipt arrives, and for no one else", async () => {
+    const db = await testDb();
+    const ema = await addUser(db, "Ema");
+    const juan = await addUser(db, "Juan");
+    expect(await cashOutPending(db, ema.id)).toBe(false);
+    await recordOperation(db, ema.id, { userOpHash: PASS, kind: "cash-out", amount: 45_000n * 10n ** 18n, token: "wars" });
+    expect(await cashOutPending(db, ema.id)).toBe(true);
+    expect(await cashOutPending(db, juan.id)).toBe(false);
+    await finishOperation(db, ema.id, { userOpHash: PASS, transactionHash: TX, success: true });
+    expect(await cashOutPending(db, ema.id)).toBe(false);
+  });
+
+  it("is true only within 15 minutes, so a pass that never came back doesn't block the next one for good", async () => {
+    const db = await testDb();
+    const ema = await addUser(db, "Ema");
+    await recordOperation(db, ema.id, { userOpHash: PASS, kind: "cash-out", amount: 1n, token: "wars" });
+    expect(await cashOutPending(db, ema.id, new Date(Date.now() + 14 * 60_000))).toBe(true);
+    expect(await cashOutPending(db, ema.id, new Date(Date.now() + 16 * 60_000))).toBe(false);
+  });
+
+  it("is false for the member's other operations on their way", async () => {
+    const db = await testDb();
+    const ema = await addUser(db, "Ema");
+    await recordOperation(db, ema.id, { userOpHash: OP, kind: "contribute", fund: FUND, amount: 1n, token: "wars" });
+    await recordOperation(db, ema.id, { userOpHash: OP_LATER, kind: "vote", fund: FUND });
+    expect(await cashOutPending(db, ema.id)).toBe(false);
+    expect(await pendingOperations(db, ema.id, FUND)).toHaveLength(2);
   });
 });
