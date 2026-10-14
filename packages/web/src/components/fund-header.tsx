@@ -32,31 +32,32 @@ export function FundHeader({
         <div className="lg:hidden">
           <FundNameRow fundName={view.name} address={view.address} userName={userName} />
         </div>
-        <p className="narrow money mt-1 text-[50px] font-bold leading-none lg:mt-0 lg:text-[52px]">
+        {/* The label first, as wallet apps do, so the balance doesn't read as "$ X en el fondo. Estás al día…" */}
+        <p className="mt-1 text-sm text-muted lg:mt-0">En el fondo</p>
+        <p className="narrow money mt-1 text-[50px] font-bold leading-none lg:text-[52px]">
           {previousBalance === undefined ? formatPesos(view.balance) : <CountUp from={previousBalance} to={view.balance} />}
         </p>
-        <p className="mt-1 text-sm text-muted">
-          en el fondo.{" "}
-          {me !== null &&
-            (me.owed === 0n ? (
-              me.ahead > 0n ? (
+        {me !== null && (
+          <>
+            {/* One idea per line: where you stand, then your share. */}
+            <p className={`mt-2 font-semibold ${me.owed === 0n ? "text-ink" : "text-owe"}`}>
+              {me.owed > 0n ? (
                 <>
-                  Estás al día, con <span className="money">{formatPesos(me.ahead)}</span> adelantados.{" "}
+                  Debés <span className="money">{formatPesos(me.owed)}</span>.
+                </>
+              ) : me.ahead > 0n ? (
+                <>
+                  Estás al día, con <span className="money">{formatPesos(me.ahead)}</span> adelantados.
                 </>
               ) : (
-                "Estás al día. "
-              )
-            ) : (
-              <span className="font-semibold text-owe">
-                Debés <span className="money">{formatPesos(me.owed)}</span>.{" "}
-              </span>
-            ))}
-          {me !== null && (
-            <>
+                "Estás al día."
+              )}
+            </p>
+            <p className="mt-0.5 text-sm text-muted">
               Si se cerrara hoy, te tocan <span className="money">{formatPesos(me.share)}</span>.
-            </>
-          )}
-        </p>
+            </p>
+          </>
+        )}
         {/* Keyed on the fund's balance: a contribution changes it, and the line reads the account again at once. */}
         {!readOnly && account !== undefined && <AccountHolding key={view.balance.toString()} account={account} />}
         {!readOnly && (
