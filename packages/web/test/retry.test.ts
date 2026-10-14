@@ -11,6 +11,12 @@ describe("nextRetryDelay: the error page tries again by itself (spec, 9.2)", () 
     expect(nextRetryDelay([now - 60_000, now - 40_000, now - 5_000], now)).toBeNull();
   });
 
+  it("leaves it to the person when the node hangs: each try takes about 41 s to fail, and all three still count", () => {
+    // The page failed at 0 s; it tried at 2 s (failed at 43 s), at 51 s (failed at 92 s) and at 122 s (failed at 163 s).
+    const failedFirst = now - 163_000;
+    expect(nextRetryDelay([failedFirst + 2_000, failedFirst + 51_000, failedFirst + 122_000], now)).toBeNull();
+  });
+
   it("starts over once its earlier tries are old: a page that fails again much later", () => {
     expect(nextRetryDelay([now - RETRY_WINDOW_MS - 1, now - RETRY_WINDOW_MS, now - 1_000], now)).toBe(RETRY_DELAYS_MS[1]);
   });

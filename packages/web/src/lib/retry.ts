@@ -1,7 +1,10 @@
 /** How long the error page waits before each try of its own: a few seconds first, then longer (spec, 9.2). */
 export const RETRY_DELAYS_MS = [2_000, 8_000, 30_000] as const;
-/** Tries older than this don't count: a page that fails again a while later starts over. */
-export const RETRY_WINDOW_MS = 120_000;
+/**
+ * Tries older than this don't count: a page that fails again a while later starts over. Long enough for all three
+ * to count when the node hangs: each try then takes about 41 s to fail, and the third ends some 160 s after the first.
+ */
+export const RETRY_WINDOW_MS = 600_000;
 
 /**
  * When the error page asks the server for the page again by itself, given when it last did (`tries`, epoch ms):
