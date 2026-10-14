@@ -1,6 +1,6 @@
 import { FUND_FACTORY, USDT, WARS, shortMessage } from "@tesoreria/agent";
 import { ATTRIBUTION_SUFFIX } from "@tesoreria/wallet";
-import { and, eq, isNotNull, sql } from "drizzle-orm";
+import { and, eq, isNotNull } from "drizzle-orm";
 import {
   type Abi,
   type Address,
@@ -20,8 +20,9 @@ import {
   slice,
 } from "viem";
 import { entryPoint07Address } from "viem/account-abstraction";
-import { type Db, inTransaction } from "./db/client";
-import { createFundNonces, funds, memberships, users } from "./db/schema";
+import { MAX_CREATE_FUND_NONCES, claimCreateFundNonce } from "./create-fund-cap";
+import type { Db } from "./db/client";
+import { funds, memberships } from "./db/schema";
 import { memberFundAbi } from "./fund-abi";
 import { frozenCreateFunds } from "./funds";
 
@@ -216,25 +217,6 @@ export const MAX_CREATE_FUND_GAS = 10_000_000n;
  * about three times that leaves room for Pimlico's estimate, and keeps what one operation can take small.
  */
 export const MAX_OPERATION_GAS = 2_000_000n;
-/**
- * The most createFund nonces the paymaster signs for one person, ever. A nonce lands at most once, so a creator gets
- * at most 3 createFunds sponsored: a legit one uses one per fund, and one more for each createFund that reverted
- * (retrying after a cancelled passkey prompt, or resending one that never came back, reuses the same nonce).
- */
-export const MAX_CREATE_FUND_NONCES = 3;
-/**
- * The most new createFund nonces the paymaster signs in a day, among everyone (M4). Passkey accounts are free to
- * make, so throwaway ones could each take MAX_CREATE_FUND_NONCES and use up the month's sponsorship, the real
- * groups' contributions and votes with it. A real group creates a fund or two a day. The count is exact, however many
- * claim at once: every createFund claim takes the same lock (CREATE_FUND_CLAIM_LOCK), and they are rare enough for
- * queuing them one after another to cost nothing.
- */
-export const MAX_CREATE_FUND_NONCES_PER_DAY = 10;
-/**
- * The key of the advisory lock every createFund claim takes first, and holds until its transaction ends: any number
- * works, as long as nothing else locks on it. One for everyone, because the daily cap counts everyone's rows.
- */
-const CREATE_FUND_CLAIM_LOCK = 4_251_001;
 
 const QUANTITY = /^0x[0-9a-fA-F]{1,64}$/;
 
@@ -280,44 +262,6 @@ function operationNonce(userOp: unknown): bigint | undefined {
 }
 
 /**
- * Whether the paymaster may sign `userId`'s createFund on `nonce`: it's one they already got signed (re-signing it
- * can't make it land twice), or a new one within MAX_CREATE_FUND_NONCES for them and MAX_CREATE_FUND_NONCES_PER_DAY
- * among everyone, which it then counts. The lock on CREATE_FUND_CLAIM_LOCK comes first, so two claims never count the
- * same rows: the second waits for the first to commit, and then reads what it left. That relies on READ COMMITTED,
- * Neon's default (db/client.ts): each statement sees what had committed when it began, so the counts, which come after
- * the lock, see the other claim. Under REPEATABLE READ they would miss it (M1).
- */
-export async function claimCreateFundNonce(db: Db, userId: string, nonce: bigint): Promise<boolean> {
-  const [, , [claimed]] = await inTransaction(db, (tx) => {
-    const signed = tx.$count(createFundNonces, eq(createFundNonces.userId, userId));
-    const signedToday = tx.$count(createFundNonces, sql`${createFundNonces.createdAt} > now() - interval '1 day'`);
-    return [
-      tx.execute(sql`select pg_advisory_xact_lock(${CREATE_FUND_CLAIM_LOCK})`),
-      tx
-        .insert(createFundNonces)
-        .select((qb) =>
-          qb
-            .select({ userId: users.id, nonce: sql<bigint>`${nonce.toString()}::numeric`.as("nonce"), createdAt: sql<Date>`now()`.as("created_at") })
-            .from(users)
-            .where(
-              and(
-                eq(users.id, userId),
-                sql`${signed} < ${MAX_CREATE_FUND_NONCES}`,
-                sql`${signedToday} < ${MAX_CREATE_FUND_NONCES_PER_DAY}`,
-              ),
-            ),
-        )
-        .onConflictDoNothing(),
-      tx
-        .select({ nonce: createFundNonces.nonce })
-        .from(createFundNonces)
-        .where(and(eq(createFundNonces.userId, userId), eq(createFundNonces.nonce, nonce))),
-    ];
-  });
-  return claimed !== undefined;
-}
-
-/**
  * The live funds `userId` is a member of, and the createFund of each draft they created that is being created,
  * naming `agent()`, which is called only if there's one.
  */
@@ -354,11 +298,11 @@ async function sponsorshipOf(db: Db, userId: string, agent: () => Address): Prom
  * be read it's refused with 502 rather than signed blind. It's null only on the fork, which has no paymaster to protect.
  *
  * Last, a createFund is signed only on one of the creator's MAX_CREATE_FUND_NONCES nonces, and only while fewer than
- * MAX_CREATE_FUND_NONCES_PER_DAY new ones were signed in the last day among everyone (`claimCreateFundNonce`), on the
- * fork too. A nonce lands at most once, so that's at most MAX_CREATE_FUND_NONCES createFunds sponsored per creator,
- * ever, however long a draft stays `deploying` (it's live only once the creator's browser reports the receipt).
- * Counted only there: estimating, stubbing and sending sign nothing, and a request refused for its gas or price
- * doesn't use one up.
+ * `createFundDailyLimit` (CREATE_FUND_DAILY_LIMIT) new ones were signed in the last day among everyone
+ * (`claimCreateFundNonce`), on the fork too. A nonce lands at most once, so that's at most MAX_CREATE_FUND_NONCES
+ * createFunds sponsored per creator, ever, however long a draft stays `deploying` (it's live only once the creator's
+ * browser reports the receipt). Counted only there: estimating, stubbing and sending sign nothing, and a request
+ * refused for its gas or price doesn't use one up.
  */
 export async function authorizeBundlerRequest(
   db: Db,
@@ -367,6 +311,7 @@ export async function authorizeBundlerRequest(
   sponsorshipPolicyId: string,
   fastMaxFeePerGas: (() => Promise<bigint>) | null,
   agent: () => Address,
+  createFundDailyLimit: number,
 ): Promise<BundlerCheck> {
   const check = checkBundlerRequest(body, user?.account ?? null, sponsorshipPolicyId);
   if (!check.ok || user === null) return check; // without a user the check never passes
@@ -399,11 +344,11 @@ export async function authorizeBundlerRequest(
     const gas = checkSponsoredGas(params[0], price, allowed.createsFund ? MAX_CREATE_FUND_GAS : MAX_OPERATION_GAS);
     if (!gas.ok) return gas;
   }
-  if (nonce !== undefined && !(await claimCreateFundNonce(db, user.id, nonce))) {
+  if (nonce !== undefined && !(await claimCreateFundNonce(db, user.id, nonce, createFundDailyLimit))) {
     return {
       ok: false,
       status: 403,
-      error: `No more createFunds are sponsored for this account (${MAX_CREATE_FUND_NONCES} at most, ever) or today (${MAX_CREATE_FUND_NONCES_PER_DAY} at most, among everyone)`,
+      error: `No more createFunds are sponsored for this account (${MAX_CREATE_FUND_NONCES} at most, ever) or today (${createFundDailyLimit} at most, among everyone)`,
     };
   }
   return check;

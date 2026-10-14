@@ -4,6 +4,7 @@ import { generatePrivateKey, privateKeyToAddress } from "viem/accounts";
 import { describe, expect, it, vi } from "vitest";
 import { agentAddress } from "../src/lib/agent-address";
 import type { UserOperationFinder } from "../src/lib/chain";
+import { claimCreateFundNonce } from "../src/lib/create-fund-cap";
 import type { Db } from "../src/lib/db/client";
 import { funds, memberships, operations } from "../src/lib/db/schema";
 import { MAX_PESOS } from "../src/lib/format";
@@ -330,8 +331,8 @@ describe("deployStep", () => {
     const members = people.map((p) => getAddress(p.account));
     /** The chain's log search for UserOperationEvents: by default, it finds nothing. */
     const findOperation = vi.fn<UserOperationFinder>(async () => null);
-    const step = (client: ReturnType<typeof fakeClient>, votesRequired = 2) =>
-      deployStep(db, { fundId, userId: ana, votesRequired, agent: AGENT, client: client as never, findOperation, factory: FUND_FACTORY });
+    const step = (client: ReturnType<typeof fakeClient>, votesRequired = 2, createFundDailyLimit = 10) =>
+      deployStep(db, { fundId, userId: ana, votesRequired, agent: AGENT, client: client as never, findOperation, createFundDailyLimit, factory: FUND_FACTORY });
     /** Ana's createFund for the draft went out with nonce 5, and its receipt says `success` (none yet if undefined). */
     const sent = async (success?: boolean) => {
       await recordOperation(db, ana, { userOpHash: OP, kind: "create-fund", draftId: fundId, nonce: 5n });
@@ -567,6 +568,53 @@ describe("deployStep", () => {
     // With the votes it's frozen with, so only this check (not the votes one) can stop the build.
     expect(await step(fakeClient([], []), 2)).toEqual({ ok: false, status: 409, error: "El fondo se está creando en este momento. Probá en un rato." });
     expect(await draftById(db, fundId)).toMatchObject({ status: "deploying", votesRequired: 2 });
+  });
+
+  describe("the paymaster's createFund caps, checked before anything is frozen (M5)", () => {
+    it("says the creator used up their 3 tries on the nonce the chain has now, and leaves the draft open", async () => {
+      const db = await testDb();
+      const { ana, fundId, creator, step, chainAt } = await deploying(db);
+      await step(chainAt(0n)); // an earlier click froze it, and its page closed before sending anything
+      expect(await draftById(db, fundId)).toMatchObject({ status: "deploying" });
+      for (const nonce of [0n, 1n, 2n]) await claimCreateFundNonce(db, ana, nonce, 10);
+      const chain = chainAt(3n);
+      expect(await step(chain)).toEqual({
+        ok: false,
+        status: 429,
+        error: "Tu cuenta ya usó los 3 intentos de crear un fondo que paga TesorerIA. Escribinos y lo destrabamos.",
+      });
+      expect(chain.readContract).toHaveBeenCalledWith(expect.objectContaining({ functionName: "getNonce", args: [creator, 0n] }));
+      expect(await draftById(db, fundId)).toMatchObject({ status: "draft" });
+    });
+
+    it("says the day's createFunds ran out, under the limit it's given, and leaves the draft open", async () => {
+      const db = await testDb();
+      const { fundId, step, chainAt } = await deploying(db);
+      for (const name of ["Eli", "Fede"]) await claimCreateFundNonce(db, (await addUser(db, name)).id, 0n, 2);
+      expect(await step(chainAt(0n), 2, 2)).toEqual({
+        ok: false,
+        status: 429,
+        error: "Hoy ya se crearon muchos fondos en TesorerIA. Probá de nuevo mañana.",
+      });
+      expect(await draftById(db, fundId)).toMatchObject({ status: "draft" });
+      expect(await step(chainAt(0n), 2, 3)).toMatchObject({ ok: true, call: { to: FUND_FACTORY } }); // a higher limit, at once
+    });
+
+    it("still builds the call on a nonce the paymaster already signed for the creator: it can't land twice", async () => {
+      const db = await testDb();
+      const { ana, step, chainAt } = await deploying(db);
+      for (const nonce of [0n, 1n, 2n]) await claimCreateFundNonce(db, ana, nonce, 10);
+      expect(await step(chainAt(2n))).toMatchObject({ ok: true, call: { to: FUND_FACTORY } });
+    });
+
+    it("builds the call when the chain's nonce can't be read: the paymaster still holds the caps", async () => {
+      const db = await testDb();
+      const { ana, step } = await deploying(db);
+      for (const nonce of [0n, 1n, 2n]) await claimCreateFundNonce(db, ana, nonce, 10);
+      const down = fakeClient([], []);
+      down.readContract.mockRejectedValue(new Error("RPC Request failed."));
+      expect(await step(down)).toMatchObject({ ok: true, call: { to: FUND_FACTORY } });
+    });
   });
 });
 

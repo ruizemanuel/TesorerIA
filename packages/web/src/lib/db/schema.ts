@@ -165,7 +165,7 @@ export const operations = pgTable("operations", {
 
 /**
  * Each EntryPoint nonce (key 0) the paymaster signed a person's createFund on: at most MAX_CREATE_FUND_NONCES each
- * (bundler-proxy.ts). A nonce lands at most once, so this bounds the createFunds one person gets sponsored, ever.
+ * (create-fund-cap.ts). A nonce lands at most once, so this bounds the createFunds one person gets sponsored, ever.
  */
 export const createFundNonces = pgTable(
   "create_fund_nonces",

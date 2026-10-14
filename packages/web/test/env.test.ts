@@ -98,6 +98,14 @@ describe("parseEnv", () => {
     expect(problem({ ...base, CHAT_DAILY_LIMIT: "1.5" })).toMatch(/CHAT_DAILY_LIMIT/);
   });
 
+  it("caps the createFunds sponsored in 24 hours among everyone at 10 unless told otherwise, as a whole number above zero (M4)", () => {
+    expect(parseEnv(base).CREATE_FUND_DAILY_LIMIT).toBe(10);
+    expect(parseEnv({ ...base, CREATE_FUND_DAILY_LIMIT: "" }).CREATE_FUND_DAILY_LIMIT).toBe(10);
+    expect(parseEnv({ ...base, CREATE_FUND_DAILY_LIMIT: "40" }).CREATE_FUND_DAILY_LIMIT).toBe(40);
+    expect(problem({ ...base, CREATE_FUND_DAILY_LIMIT: "0" })).toMatch(/CREATE_FUND_DAILY_LIMIT/);
+    expect(problem({ ...base, CREATE_FUND_DAILY_LIMIT: "2.5" })).toMatch(/CREATE_FUND_DAILY_LIMIT/);
+  });
+
   it("takes the scripted model only on the fork: it must never answer on mainnet", () => {
     expect(problem({ ...base, CHAT_MODEL: "mock" })).toMatch(/CHAT_MODEL/);
     expect(parseEnv({ ...base, CHAIN_MODE: "fork", CHAT_MODEL: "mock" }).CHAT_MODEL).toBe("mock");

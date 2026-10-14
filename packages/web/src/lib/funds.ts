@@ -16,6 +16,7 @@ import { entryPoint07Abi, entryPoint07Address } from "viem/account-abstraction";
 import { z } from "zod";
 import type { UserOperationFinder } from "./chain";
 import { type DraftSettings, draftProblem } from "./checks";
+import { MAX_CREATE_FUND_NONCES, createFundRoom } from "./create-fund-cap";
 import { type Db, inTransaction } from "./db/client";
 import { funds, memberships, operations, users } from "./db/schema";
 import { DEFAULT_BALANCE_CAP, memberFundAbi } from "./fund-abi";
@@ -35,6 +36,8 @@ const BEING_CREATED = "El fondo se está creando en este momento. Probá en un r
 const UNCONFIRMED = "La operación todavía no se confirmó. Probá en un rato.";
 const FULL = "El fondo ya tiene 10 personas, que es el máximo.";
 const MISMATCH = "Ya se creó un fondo desde tu cuenta, pero con otros datos. No lo crees de nuevo: tendrías dos.";
+const ACCOUNT_CAP = `Tu cuenta ya usó los ${MAX_CREATE_FUND_NONCES} intentos de crear un fondo que paga TesorerIA. Escribinos y lo destrabamos.`;
+const DAY_CAP = "Hoy ya se crearon muchos fondos en TesorerIA. Probá de nuevo mañana.";
 
 export type DraftSummary = {
   id: string;
@@ -452,16 +455,36 @@ export type DeployStep = { address: Address } | { pending: Hash } | { call: { to
 async function nonceState(client: ChainReader, account: Address, nonce: bigint, sentAt: Date): Promise<"recent" | "unspent" | "spent" | "unknown"> {
   if (Date.now() - sentAt.getTime() < PENDING_FOR_MS) return "recent";
   try {
-    const current = await client.readContract({
-      address: entryPoint07Address,
-      abi: entryPoint07Abi,
-      functionName: "getNonce",
-      args: [account, 0n],
-    });
-    return current === nonce ? "unspent" : "spent";
+    return (await keyZeroNonce(client, account)) === nonce ? "unspent" : "spent";
   } catch {
     return "unknown";
   }
+}
+
+/** The account's EntryPoint nonce now, with key 0: the one a createFund from it goes on (client/wallet.ts). */
+function keyZeroNonce(client: ChainReader, account: Address): Promise<bigint> {
+  return client.readContract({ address: entryPoint07Address, abi: entryPoint07Abi, functionName: "getNonce", args: [account, 0n] });
+}
+
+/**
+ * The paymaster's caps, asked before a new createFund is built and its draft frozen (M5): a creator who reached one
+ * reads why, instead of the paymaster's refusal after the freeze, which only shows as a generic failure. It asks about
+ * the nonce the browser will send it on, the chain's now: one the paymaster already signed for them is signed again.
+ * Null when there's room, or when the nonce can't be read: the paymaster still holds the caps.
+ */
+async function createFundCapped(
+  db: Db,
+  { userId, account, client, dailyLimit }: { userId: string; account: Address | undefined; client: ChainReader; dailyLimit: number },
+): Promise<ReturnType<typeof fail> | null> {
+  if (account === undefined) return null;
+  let nonce: bigint;
+  try {
+    nonce = await keyZeroNonce(client, account);
+  } catch {
+    return null;
+  }
+  const room = await createFundRoom(db, userId, nonce, dailyLimit);
+  return room === "ok" ? null : fail(429, room === "account" ? ACCOUNT_CAP : DAY_CAP);
 }
 
 /**
@@ -501,7 +524,9 @@ async function findLanded(
  * - `call`: nothing was sent, or what was sent failed (its nonce is spent), and the draft opened again first.
  *   `votesRequired` only counts here: a sent one keeps its own;
  * - 409: the sent one created a fund for the creator with other settings (a real fund, so never another), or the
- *   draft can't open again because another createFund for it is on its way.
+ *   draft can't open again because another createFund for it is on its way;
+ * - 429: a new one wouldn't be sponsored, the creator's or the day's cap is reached (`createFundCapped`, M5). The
+ *   draft is left open.
  * A sent one whose receipt never came back but whose nonce the chain spent is looked for on the chain
  * (`findOperation`), and then goes on as if its receipt had come.
  */
@@ -514,6 +539,7 @@ export async function deployStep(
     agent,
     client,
     findOperation,
+    createFundDailyLimit,
     factory = FUND_FACTORY,
   }: {
     fundId: string;
@@ -522,6 +548,8 @@ export async function deployStep(
     agent: Address;
     client: ChainReader;
     findOperation: UserOperationFinder;
+    /** CREATE_FUND_DAILY_LIMIT: the day's cap the paymaster holds, asked before a new one is built. */
+    createFundDailyLimit: number;
     factory?: Address;
   },
 ): Promise<FundsResult<DeployStep>> {
@@ -529,6 +557,7 @@ export async function deployStep(
   if (draft === null) return fail(404, NOT_FOUND);
   if (draft.creatorId !== userId) return fail(403, ONLY_CREATOR);
   if (draft.status === "live" && draft.address !== null) return { ok: true, address: draft.address };
+  const creator = draft.members.find((m) => m.userId === draft.creatorId)?.account;
   const [sent] = await db
     .select({
       userOpHash: operations.userOpHash,
@@ -544,7 +573,6 @@ export async function deployStep(
     let transactionHash = sent.transactionHash as Hash | null;
     if (transactionHash === null) {
       const { nonce } = sent;
-      const creator = draft.members.find((m) => m.userId === draft.creatorId)?.account;
       const state = nonce === null || creator === undefined ? "unknown" : await nonceState(client, creator, nonce, sent.createdAt);
       if (state === "unspent") {
         // The same call again, with the votes it was frozen with, pinned to its nonce: whichever of the two lands
@@ -562,6 +590,11 @@ export async function deployStep(
     // It failed, and its nonce is spent: open the draft again, so the new call takes the votes chosen now. If it
     // can't open (another createFund for it is on its way or went through), nothing new is built.
     if (!(await reopen(db, fundId)) && draft.status === "deploying") return fail(409, BEING_CREATED);
+  }
+  const capped = await createFundCapped(db, { userId, account: creator, client, dailyLimit: createFundDailyLimit });
+  if (capped !== null) {
+    await reopen(db, fundId); // frozen by an earlier click that sent nothing: people can join again meanwhile
+    return capped;
   }
   return deployCall(db, { fundId, userId, votesRequired, agent });
 }

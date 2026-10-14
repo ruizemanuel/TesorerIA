@@ -51,7 +51,7 @@ async function fastMaxFeePerGas(): Promise<bigint> {
 export async function POST(request: Request) {
   const user = await currentUser();
   const body: unknown = await request.json().catch(() => undefined);
-  const { CHAIN_MODE, PIMLICO_SPONSORSHIP_POLICY_ID } = env();
+  const { CHAIN_MODE, PIMLICO_SPONSORSHIP_POLICY_ID, CREATE_FUND_DAILY_LIMIT } = env();
   const check = await authorizeBundlerRequest(
     await getDb(),
     user,
@@ -61,6 +61,7 @@ export async function POST(request: Request) {
     // The agent deployCall names: a createFund that names another isn't sponsored. Passed uncalled: it throws when
     // AGENT_PRIVATE_KEY is wrong, and only a creator's request needs it.
     agentAddress,
+    CREATE_FUND_DAILY_LIMIT,
   );
   if (!check.ok) return rpcError((body as { id?: unknown } | undefined)?.id, check.status, check.error);
   let answer: Answer;

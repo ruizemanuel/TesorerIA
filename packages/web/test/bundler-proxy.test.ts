@@ -7,8 +7,6 @@ import { entryPoint07Address } from "viem/account-abstraction";
 import { describe, expect, it, vi } from "vitest";
 import {
   MAX_CREATE_FUND_GAS,
-  MAX_CREATE_FUND_NONCES,
-  MAX_CREATE_FUND_NONCES_PER_DAY,
   MAX_FEE_MULTIPLE,
   MAX_OPERATION_GAS,
   type OperationCall,
@@ -17,10 +15,10 @@ import {
   checkBundlerRequest,
   checkCalls,
   checkSponsoredGas,
-  claimCreateFundNonce,
   operationCalls,
 } from "../src/lib/bundler-proxy";
 import { contributeCalls } from "../src/lib/contribute";
+import { MAX_CREATE_FUND_NONCES, claimCreateFundNonce } from "../src/lib/create-fund-cap";
 import type { Db } from "../src/lib/db/client";
 import * as schema from "../src/lib/db/schema";
 import { createFundNonces, funds, memberships } from "../src/lib/db/schema";
@@ -36,6 +34,8 @@ const OTHER = getAddress("0x6BE3c1eB63A4edbc6C23c281F93F81B14eF3a671");
 const FUND = getAddress("0x00000000000000000000000000000000000F00D5");
 const CELO = numberToHex(42220);
 const POLICY = "sp_server";
+/** The new createFund nonces the paymaster signs in a day among everyone: CREATE_FUND_DAILY_LIMIT's default. */
+const DAILY_LIMIT = 10;
 const rpc = (method: string, params: unknown[] = []) => ({ jsonrpc: "2.0", id: 1, method, params });
 const SPONSORED = ["pm_getPaymasterStubData", "eth_estimateUserOperationGas", "pm_getPaymasterData", "eth_sendUserOperation"];
 
@@ -318,19 +318,19 @@ describe("authorizeBundlerRequest", () => {
     for (const method of SPONSORED) {
       const juanOp = request(method, sponsored(juan.account));
       const anaOp = request(method, sponsored(ana.account, {}, MAX_OPERATION_GAS, safeCallData([anaCreate])));
-      expect(await authorizeBundlerRequest(db, asUser(juan), juanOp, POLICY, price, agent), method).toMatchObject({ ok: true });
-      expect(await authorizeBundlerRequest(db, asUser(ana), anaOp, POLICY, price, agent), method).toMatchObject({ ok: true });
+      expect(await authorizeBundlerRequest(db, asUser(juan), juanOp, POLICY, price, agent, DAILY_LIMIT), method).toMatchObject({ ok: true });
+      expect(await authorizeBundlerRequest(db, asUser(ana), anaOp, POLICY, price, agent, DAILY_LIMIT), method).toMatchObject({ ok: true });
       for (const person of [stranger, founder]) {
-        const refused = await authorizeBundlerRequest(db, asUser(person), request(method, sponsored(person.account)), POLICY, price, agent);
+        const refused = await authorizeBundlerRequest(db, asUser(person), request(method, sponsored(person.account)), POLICY, price, agent, DAILY_LIMIT);
         expect(refused, `${method}: ${person.name}`).toMatchObject({ ok: false, status: 403 });
       }
     }
     // Reading the chain or a receipt costs the paymaster nothing: anyone in a fund, draft or live, may.
     for (const person of [founder, juan, ana]) {
-      expect(await authorizeBundlerRequest(db, asUser(person), rpc("eth_getUserOperationReceipt", ["0x01"]), POLICY, price, agent), person.name).toMatchObject({ ok: true });
+      expect(await authorizeBundlerRequest(db, asUser(person), rpc("eth_getUserOperationReceipt", ["0x01"]), POLICY, price, agent, DAILY_LIMIT), person.name).toMatchObject({ ok: true });
     }
-    expect(await authorizeBundlerRequest(db, asUser(stranger), rpc("eth_chainId"), POLICY, price, agent)).toMatchObject({ ok: false, status: 403 });
-    expect(await authorizeBundlerRequest(db, null, rpc("eth_chainId"), POLICY, price, agent)).toMatchObject({ ok: false, status: 401 });
+    expect(await authorizeBundlerRequest(db, asUser(stranger), rpc("eth_chainId"), POLICY, price, agent, DAILY_LIMIT)).toMatchObject({ ok: false, status: 403 });
+    expect(await authorizeBundlerRequest(db, null, rpc("eth_chainId"), POLICY, price, agent, DAILY_LIMIT)).toMatchObject({ ok: false, status: 401 });
   });
 
   it("refuses calls off the list before reading any price, whoever asks", async () => {
@@ -346,7 +346,7 @@ describe("authorizeBundlerRequest", () => {
     ];
     for (const [person, callData] of cases) {
       for (const method of SPONSORED) {
-        const refused = await authorizeBundlerRequest(db, asUser(person), request(method, sponsored(person.account, {}, MAX_OPERATION_GAS, callData)), POLICY, reads, agent);
+        const refused = await authorizeBundlerRequest(db, asUser(person), request(method, sponsored(person.account, {}, MAX_OPERATION_GAS, callData)), POLICY, reads, agent, DAILY_LIMIT);
         expect(refused, `${person.name}, ${method}: ${callData.slice(0, 74)}`).toMatchObject({ ok: false, status: 403 });
       }
     }
@@ -356,7 +356,7 @@ describe("authorizeBundlerRequest", () => {
   it("gives the creator's createFund a ceiling of 10M gas, and every other operation one of 2M", async () => {
     const { db, juan, ana, anaCreate } = await people();
     const sign = (person: typeof ana, total: bigint, callData: Hex) =>
-      authorizeBundlerRequest(db, asUser(person), request("pm_getPaymasterData", sponsored(person.account, {}, total, callData)), POLICY, price, agent);
+      authorizeBundlerRequest(db, asUser(person), request("pm_getPaymasterData", sponsored(person.account, {}, total, callData)), POLICY, price, agent, DAILY_LIMIT);
     const create = safeCallData([anaCreate]);
     expect(await sign(ana, MAX_CREATE_FUND_GAS, create)).toMatchObject({ ok: true });
     expect(await sign(ana, MAX_CREATE_FUND_GAS + 1n, create)).toMatchObject({ ok: false, status: 400, error: "Gas limits too high" });
@@ -373,19 +373,19 @@ describe("authorizeBundlerRequest", () => {
     const reads = vi.fn(price);
     const sponsor = (change: Record<string, unknown> = {}) => request("pm_getPaymasterData", sponsored(juan.account, change));
 
-    const ok = await authorizeBundlerRequest(db, asUser(juan), sponsor(), POLICY, reads, agent);
+    const ok = await authorizeBundlerRequest(db, asUser(juan), sponsor(), POLICY, reads, agent, DAILY_LIMIT);
     expect(ok).toMatchObject({ ok: true, request: { params: [sponsored(juan.account), entryPoint07Address, CELO, { sponsorshipPolicyId: POLICY }] } });
     expect(reads).toHaveBeenCalledTimes(1);
     const high = { maxFeePerGas: hex(MAX_FEE_MULTIPLE * FAST + 1n) };
-    expect(await authorizeBundlerRequest(db, asUser(juan), sponsor(high), POLICY, reads, agent)).toMatchObject({ ok: false, status: 400 });
+    expect(await authorizeBundlerRequest(db, asUser(juan), sponsor(high), POLICY, reads, agent, DAILY_LIMIT)).toMatchObject({ ok: false, status: 400 });
 
     reads.mockClear();
     const answers = await Promise.all([
-      authorizeBundlerRequest(db, null, sponsor(), POLICY, reads, agent), // logged out
-      authorizeBundlerRequest(db, asUser(juan), request("pm_getPaymasterData", sponsored(OTHER)), POLICY, reads, agent), // someone else's operation
-      authorizeBundlerRequest(db, asUser(juan), rpc("eth_chainId"), POLICY, reads, agent), // nothing is sponsored
+      authorizeBundlerRequest(db, null, sponsor(), POLICY, reads, agent, DAILY_LIMIT), // logged out
+      authorizeBundlerRequest(db, asUser(juan), request("pm_getPaymasterData", sponsored(OTHER)), POLICY, reads, agent, DAILY_LIMIT), // someone else's operation
+      authorizeBundlerRequest(db, asUser(juan), rpc("eth_chainId"), POLICY, reads, agent, DAILY_LIMIT), // nothing is sponsored
       // The send itself isn't what the paymaster signs: its fees are fixed by then (and checked when it signed).
-      authorizeBundlerRequest(db, asUser(juan), request("eth_sendUserOperation", sponsored(juan.account, high)), POLICY, reads, agent),
+      authorizeBundlerRequest(db, asUser(juan), request("eth_sendUserOperation", sponsored(juan.account, high)), POLICY, reads, agent, DAILY_LIMIT),
     ]);
     expect(answers.map((answer) => answer.ok)).toEqual([false, false, true, true]);
     expect(reads).not.toHaveBeenCalled();
@@ -396,7 +396,7 @@ describe("authorizeBundlerRequest", () => {
     const broken = vi.fn(async (): Promise<bigint> => {
       throw new Error("Pimlico is down");
     });
-    expect(await authorizeBundlerRequest(db, asUser(juan), request("pm_getPaymasterData", sponsored(juan.account)), POLICY, broken, agent)).toMatchObject({
+    expect(await authorizeBundlerRequest(db, asUser(juan), request("pm_getPaymasterData", sponsored(juan.account)), POLICY, broken, agent, DAILY_LIMIT)).toMatchObject({
       ok: false,
       status: 502,
     });
@@ -405,10 +405,10 @@ describe("authorizeBundlerRequest", () => {
   it("doesn't look at fees or gas without a price, as on the fork, which has no paymaster, but still at who and what", async () => {
     const { db, juan, founder, anaCreate } = await people();
     const heavy = { maxFeePerGas: hex(1000n * FAST), callGasLimit: hex(8_000_000n), verificationGasLimit: hex(2_000_000n) };
-    expect(await authorizeBundlerRequest(db, asUser(juan), request("pm_getPaymasterData", sponsored(juan.account, heavy)), POLICY, null, agent)).toMatchObject({ ok: true });
+    expect(await authorizeBundlerRequest(db, asUser(juan), request("pm_getPaymasterData", sponsored(juan.account, heavy)), POLICY, null, agent, DAILY_LIMIT)).toMatchObject({ ok: true });
     const createFund = sponsored(juan.account, heavy, MAX_OPERATION_GAS, safeCallData([anaCreate]));
-    expect(await authorizeBundlerRequest(db, asUser(juan), request("pm_getPaymasterData", createFund), POLICY, null, agent)).toMatchObject({ ok: false, status: 403 });
-    expect(await authorizeBundlerRequest(db, asUser(founder), request("pm_getPaymasterData", sponsored(founder.account)), POLICY, null, agent)).toMatchObject({
+    expect(await authorizeBundlerRequest(db, asUser(juan), request("pm_getPaymasterData", createFund), POLICY, null, agent, DAILY_LIMIT)).toMatchObject({ ok: false, status: 403 });
+    expect(await authorizeBundlerRequest(db, asUser(founder), request("pm_getPaymasterData", sponsored(founder.account)), POLICY, null, agent, DAILY_LIMIT)).toMatchObject({
       ok: false,
       status: 403,
     });
@@ -420,16 +420,16 @@ describe("authorizeBundlerRequest", () => {
       throw new Error("bad key");
     });
     const contribution = request("pm_getPaymasterData", sponsored(juan.account));
-    expect(await authorizeBundlerRequest(db, asUser(juan), contribution, POLICY, price, badKey)).toMatchObject({ ok: true });
+    expect(await authorizeBundlerRequest(db, asUser(juan), contribution, POLICY, price, badKey, DAILY_LIMIT)).toMatchObject({ ok: true });
     for (const person of [founder, juan, ana]) {
-      const reading = await authorizeBundlerRequest(db, asUser(person), rpc("eth_getUserOperationReceipt", ["0x01"]), POLICY, price, badKey);
+      const reading = await authorizeBundlerRequest(db, asUser(person), rpc("eth_getUserOperationReceipt", ["0x01"]), POLICY, price, badKey, DAILY_LIMIT);
       expect(reading, person.name).toMatchObject({ ok: true });
     }
     expect(badKey).not.toHaveBeenCalled();
     // Ana's createFund names the agent, so it can't be checked without it: it's refused, and the error is logged (M3).
     const logged = vi.spyOn(console, "error").mockImplementation(() => {});
     const create = request("pm_getPaymasterStubData", sponsored(ana.account, {}, MAX_OPERATION_GAS, safeCallData([anaCreate])));
-    expect(await authorizeBundlerRequest(db, asUser(ana), create, POLICY, price, badKey)).toMatchObject({ ok: false, status: 403 });
+    expect(await authorizeBundlerRequest(db, asUser(ana), create, POLICY, price, badKey, DAILY_LIMIT)).toMatchObject({ ok: false, status: 403 });
     expect(logged).toHaveBeenCalled();
     logged.mockRestore();
   });
@@ -439,7 +439,7 @@ describe("authorizeBundlerRequest", () => {
     const answers = (db: Db, person: { id: string; account: string }, calls: Call[], server: () => Address = agent) =>
       Promise.all(
         SPONSORED.map((method) =>
-          authorizeBundlerRequest(db, asUser(person), request(method, sponsored(person.account, {}, MAX_CREATE_FUND_GAS, safeCallData(calls))), POLICY, price, server),
+          authorizeBundlerRequest(db, asUser(person), request(method, sponsored(person.account, {}, MAX_CREATE_FUND_GAS, safeCallData(calls))), POLICY, price, server, DAILY_LIMIT),
         ),
       );
     const allowed = { ok: true };
@@ -534,20 +534,20 @@ describe("authorizeBundlerRequest", () => {
     /** `method` with `person`'s createFund `call` on EntryPoint nonce `nonce`, a quantity or whatever a browser could send. */
     const createFund = (method: string, person: { account: string }, call: Call, nonce: unknown) =>
       request(method, sponsored(person.account, { nonce: typeof nonce === "bigint" ? hex(nonce) : nonce }, MAX_CREATE_FUND_GAS, safeCallData([call])));
-    const sign = (db: Db, { person, call }: Awaited<ReturnType<typeof creator>>, nonce: bigint, fast: typeof price | null = price) =>
-      authorizeBundlerRequest(db, asUser(person), createFund("pm_getPaymasterData", person, call, nonce), POLICY, fast, agent);
+    const sign = (db: Db, { person, call }: Awaited<ReturnType<typeof creator>>, nonce: bigint, fast: typeof price | null = price, limit = DAILY_LIMIT) =>
+      authorizeBundlerRequest(db, asUser(person), createFund("pm_getPaymasterData", person, call, nonce), POLICY, fast, agent, limit);
     const signed = { ok: true };
-    const capped = {
+    const capped = (limit = DAILY_LIMIT) => ({
       ok: false,
       status: 403,
-      error: `No more createFunds are sponsored for this account (${MAX_CREATE_FUND_NONCES} at most, ever) or today (${MAX_CREATE_FUND_NONCES_PER_DAY} at most, among everyone)`,
-    };
+      error: `No more createFunds are sponsored for this account (3 at most, ever) or today (${limit} at most, among everyone)`,
+    });
 
     it("signs nonces 0, 1 and 2, refuses a fourth, and still signs one it already signed, which can't land twice", async () => {
       const db = await testDb();
       const ana = await creator(db, "Ana");
       for (const nonce of [0n, 1n, 2n]) expect(await sign(db, ana, nonce), `nonce ${nonce}`).toMatchObject(signed);
-      expect(await sign(db, ana, 3n)).toEqual(capped);
+      expect(await sign(db, ana, 3n)).toEqual(capped());
       expect(await sign(db, ana, 0n)).toMatchObject(signed);
       expect(MAX_CREATE_FUND_NONCES).toBe(3);
     });
@@ -556,7 +556,7 @@ describe("authorizeBundlerRequest", () => {
       const db = await testDb();
       const ana = await creator(db, "Ana");
       for (const nonce of [0n, 0n, 1n, 2n]) expect(await sign(db, ana, nonce), `nonce ${nonce}`).toMatchObject(signed);
-      expect(await sign(db, ana, 3n)).toEqual(capped);
+      expect(await sign(db, ana, 3n)).toEqual(capped());
     });
 
     it("counts only what the paymaster signs: not estimates, stubs or sends, nor a signature refused for its gas or price", async () => {
@@ -564,14 +564,14 @@ describe("authorizeBundlerRequest", () => {
       const ana = await creator(db, "Ana");
       for (const method of ["eth_estimateUserOperationGas", "pm_getPaymasterStubData", "eth_sendUserOperation"]) {
         for (const nonce of [5n, 6n, 7n, 8n, 9n]) {
-          const answer = await authorizeBundlerRequest(db, asUser(ana.person), createFund(method, ana.person, ana.call, nonce), POLICY, price, agent);
+          const answer = await authorizeBundlerRequest(db, asUser(ana.person), createFund(method, ana.person, ana.call, nonce), POLICY, price, agent, DAILY_LIMIT);
           expect(answer, `${method}, nonce ${nonce}`).toMatchObject(signed);
         }
       }
       const greedy = (nonce: bigint) =>
         request("pm_getPaymasterData", sponsored(ana.person.account, { nonce: hex(nonce) }, MAX_CREATE_FUND_GAS + 1n, safeCallData([ana.call])));
       for (const nonce of [10n, 11n, 12n]) {
-        expect(await authorizeBundlerRequest(db, asUser(ana.person), greedy(nonce), POLICY, price, agent)).toMatchObject({ ok: false, status: 400 });
+        expect(await authorizeBundlerRequest(db, asUser(ana.person), greedy(nonce), POLICY, price, agent, DAILY_LIMIT)).toMatchObject({ ok: false, status: 400 });
       }
       const down = async (): Promise<bigint> => {
         throw new Error("Pimlico is down");
@@ -584,7 +584,7 @@ describe("authorizeBundlerRequest", () => {
       const db = await testDb();
       const ana = await creator(db, "Ana");
       const ask = (method: string, nonce: unknown) =>
-        authorizeBundlerRequest(db, asUser(ana.person), createFund(method, ana.person, ana.call, nonce), POLICY, price, agent);
+        authorizeBundlerRequest(db, asUser(ana.person), createFund(method, ana.person, ana.call, nonce), POLICY, price, agent, DAILY_LIMIT);
       for (const method of SPONSORED) {
         for (const nonce of [1n << 64n, (1n << 64n) + 1n, ((1n << 192n) - 1n) << 64n]) {
           expect(await ask(method, nonce), `${method}: ${hex(nonce)}`).toMatchObject({ ok: false, status: 403, error: expect.stringContaining("key 0") });
@@ -601,7 +601,7 @@ describe("authorizeBundlerRequest", () => {
       const ana = await creator(db, "Ana");
       const bea = await creator(db, "Bea");
       for (const nonce of [0n, 1n, 2n]) expect(await sign(db, ana, nonce), `nonce ${nonce}`).toMatchObject(signed);
-      expect(await sign(db, ana, 3n)).toEqual(capped);
+      expect(await sign(db, ana, 3n)).toEqual(capped());
       expect(await sign(db, bea, 0n)).toMatchObject(signed);
     });
 
@@ -609,27 +609,35 @@ describe("authorizeBundlerRequest", () => {
       const db = await testDb();
       const ana = await creator(db, "Ana");
       for (const nonce of [0n, 1n, 2n]) expect(await sign(db, ana, nonce, null), `nonce ${nonce}`).toMatchObject(signed);
-      expect(await sign(db, ana, 3n, null)).toEqual(capped);
+      expect(await sign(db, ana, 3n, null)).toEqual(capped());
     });
 
-    it("signs at most MAX_CREATE_FUND_NONCES_PER_DAY new nonces a day among everyone, and one already signed again (M4)", async () => {
+    it("signs at most the day's limit of new nonces among everyone, and one already signed again (M4)", async () => {
       const db = await testDb();
       const creators = [await creator(db, "Ana"), await creator(db, "Bea"), await creator(db, "Ceci"), await creator(db, "Dani")];
       let claimed = 0;
       for (const person of creators) {
         for (const nonce of [0n, 1n, 2n]) {
-          if (claimed === MAX_CREATE_FUND_NONCES_PER_DAY) break;
+          if (claimed === 10) break;
           expect(await sign(db, person, nonce), `${claimed}`).toMatchObject(signed);
           claimed++;
         }
       }
       const late = await creator(db, "Eli");
-      expect(await sign(db, late, 0n)).toEqual(capped);
+      expect(await sign(db, late, 0n)).toEqual(capped());
       expect(await sign(db, creators[0]!, 0n)).toMatchObject(signed); // already signed: it can't land twice
       // A day later, the day's count starts over.
       await db.update(createFundNonces).set({ createdAt: new Date(Date.now() - 86_400_000 - 60_000) });
       expect(await sign(db, late, 0n)).toMatchObject(signed);
-      expect(MAX_CREATE_FUND_NONCES_PER_DAY).toBe(10);
+    });
+
+    it("takes the day's limit it's given (CREATE_FUND_DAILY_LIMIT): raising it lets the next one through at once", async () => {
+      const db = await testDb();
+      const [ana, bea, ceci] = [await creator(db, "Ana"), await creator(db, "Bea"), await creator(db, "Ceci")];
+      expect(await sign(db, ana, 0n, price, 2)).toMatchObject(signed);
+      expect(await sign(db, bea, 0n, price, 2)).toMatchObject(signed);
+      expect(await sign(db, ceci, 0n, price, 2)).toEqual(capped(2));
+      expect(await sign(db, ceci, 0n, price, 3)).toMatchObject(signed);
     });
 
     it("still signs a creator's contribution to their live fund when the agent's address can't be read, but not their createFund (M3)", async () => {
@@ -644,9 +652,9 @@ describe("authorizeBundlerRequest", () => {
         "pm_getPaymasterData",
         sponsored(ana.person.account, { nonce: hex(1n << 64n) }, MAX_OPERATION_GAS, safeCallData(contribute(FUND))),
       );
-      expect(await authorizeBundlerRequest(db, asUser(ana.person), contribution, POLICY, price, wrongKey)).toMatchObject(signed);
+      expect(await authorizeBundlerRequest(db, asUser(ana.person), contribution, POLICY, price, wrongKey, DAILY_LIMIT)).toMatchObject(signed);
       const theirCreateFund = createFund("pm_getPaymasterData", ana.person, ana.call, 0n);
-      expect(await authorizeBundlerRequest(db, asUser(ana.person), theirCreateFund, POLICY, price, wrongKey)).toMatchObject({ ok: false, status: 403 });
+      expect(await authorizeBundlerRequest(db, asUser(ana.person), theirCreateFund, POLICY, price, wrongKey, DAILY_LIMIT)).toMatchObject({ ok: false, status: 403 });
       expect(logged).toHaveBeenCalled();
       logged.mockRestore();
     });
@@ -665,6 +673,7 @@ describe("authorizeBundlerRequest", () => {
           POLICY,
           price,
           agent,
+          DAILY_LIMIT,
         );
         expect(answer, hex(nonce)).toMatchObject(signed);
       }
@@ -682,7 +691,7 @@ describe("authorizeBundlerRequest", () => {
       });
       const neon = drizzleNeon({ client: client as never, schema }) as unknown as Db;
       for (const userId of ["11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222"]) {
-        expect(await claimCreateFundNonce(neon, userId, 0n)).toBe(false); // the fake has no rows to answer with
+        expect(await claimCreateFundNonce(neon, userId, 0n, DAILY_LIMIT)).toBe(false); // the fake has no rows to answer with
       }
       expect(batches).toHaveLength(2);
       const [[lock, insert, read], [otherLock]] = batches as [{ sql: string; params: unknown[] }[], { sql: string; params: unknown[] }[]];
@@ -693,14 +702,14 @@ describe("authorizeBundlerRequest", () => {
       expect(read!.sql).toMatch(/^select .* from "create_fund_nonces"/);
     });
 
-    it("lets no more than MAX_CREATE_FUND_NONCES_PER_DAY new nonces through from many people claiming at once", async () => {
+    it("lets no more than the day's limit of new nonces through from many people claiming at once", async () => {
       // As below: PGlite serializes transactions, so this guards the counting under concurrent claims (and that they
       // don't deadlock on the lock) rather than proving the lock.
       const db = await testDb();
-      const claimers = await Promise.all(Array.from({ length: MAX_CREATE_FUND_NONCES_PER_DAY + 4 }, (_, i) => addUser(db, `Claimer ${i}`)));
-      const claims = await Promise.all(claimers.map((person) => claimCreateFundNonce(db, person.id, 0n)));
-      expect(claims.filter(Boolean)).toHaveLength(MAX_CREATE_FUND_NONCES_PER_DAY);
-      expect(await db.$count(createFundNonces)).toBe(MAX_CREATE_FUND_NONCES_PER_DAY);
+      const claimers = await Promise.all(Array.from({ length: DAILY_LIMIT + 4 }, (_, i) => addUser(db, `Claimer ${i}`)));
+      const claims = await Promise.all(claimers.map((person) => claimCreateFundNonce(db, person.id, 0n, DAILY_LIMIT)));
+      expect(claims.filter(Boolean)).toHaveLength(DAILY_LIMIT);
+      expect(await db.$count(createFundNonces)).toBe(DAILY_LIMIT);
     });
 
     it("lets exactly MAX_CREATE_FUND_NONCES of many claims made at once through", async () => {
@@ -708,7 +717,7 @@ describe("authorizeBundlerRequest", () => {
       // lock: on Neon, the lock every claim takes first is what keeps two claims from counting the same rows.
       const db = await testDb();
       const ana = await addUser(db, "Ana");
-      const claims = await Promise.all(Array.from({ length: MAX_CREATE_FUND_NONCES + 2 }, (_, i) => claimCreateFundNonce(db, ana.id, BigInt(i))));
+      const claims = await Promise.all(Array.from({ length: MAX_CREATE_FUND_NONCES + 2 }, (_, i) => claimCreateFundNonce(db, ana.id, BigInt(i), DAILY_LIMIT)));
       expect(claims.filter(Boolean)).toHaveLength(MAX_CREATE_FUND_NONCES);
     });
   });

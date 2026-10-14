@@ -40,6 +40,11 @@ const schema = z
     CHAT_MEMBER_DAILY_LIMIT: blank(z.coerce.number().int().positive().default(30)),
     /** The messages all members together may send the chat in 24 hours (spec, 8.2). */
     CHAT_DAILY_LIMIT: blank(z.coerce.number().int().positive().default(150)),
+    /**
+     * The new createFunds the paymaster signs in 24 hours among everyone (spec, 6, M4). A real group creates a fund
+     * or two a day; raise it when many people will create one at once, like the judges on judging day.
+     */
+    CREATE_FUND_DAILY_LIMIT: blank(z.coerce.number().int().positive().default(10)),
     /** Set by Vercel on its builds and deployments: there, the fork (an anvil on this machine) is never right. */
     VERCEL: blank(z.string().optional()),
   })
