@@ -41,6 +41,15 @@ function reads(client: BalanceClient) {
   return { seen, reader: accountReader(client, ACCOUNT, (read) => seen.push(read)) };
 }
 
+/** A wait the test opens when it wants: a `sleep` for accountReader.changed that returns once `open()` is called. */
+function gate() {
+  let open!: () => void;
+  const opened = new Promise<void>((resolve) => {
+    open = resolve;
+  });
+  return { open, sleep: () => opened };
+}
+
 describe("accountReader: what a member's own account holds (spec, 9.2)", () => {
   it("hands each read over, and null when one fails, so whoever shows it keeps the last", async () => {
     const { state, client } = node({ wars: 5_000n, usdt: 3n, head: 10n });
@@ -77,6 +86,24 @@ describe("accountReader: what a member's own account holds (spec, 9.2)", () => {
     await after;
     expect(sleeps).toEqual([1_000, 1_000]);
     expect(seen).toEqual([{ wars: 3_000n, usdt: 0n }]);
+  });
+
+  it("lets the newest of two overlapping changes take over: the older one reads nothing and doesn't bring the looks back", async () => {
+    const { state, client } = node({ wars: 5_000n, usdt: 0n, head: 10n });
+    const { seen, reader } = reads(client);
+    const olderWait = gate();
+    const newerWait = gate();
+    const older = reader.changed(12n, olderWait.sleep);
+    const newer = reader.changed(13n, newerWait.sleep);
+    Object.assign(state, { head: 12n, wars: 3_000n }); // the node reaches the older change's block, not the newer's
+    olderWait.open();
+    await older;
+    await reader.look(); // the newer change is still awaited: no routine look, so nothing is read
+    expect(seen).toEqual([]);
+    Object.assign(state, { head: 13n, wars: 2_000n });
+    newerWait.open();
+    await newer;
+    expect(seen).toEqual([{ wars: 2_000n, usdt: 0n }]);
   });
 
   it("reads anyway when the receipt had no block, or the node is too far behind to wait for", async () => {

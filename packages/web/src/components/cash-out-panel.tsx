@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { type Address, getAddress } from "viem";
-import { ACCOUNT_CHANGED, type Balances } from "../lib/account-reader";
+import { ACCOUNT_CHANGED } from "../lib/account-reader";
 import { browserStorage, cashOutCalls, cashOutProblem, readCashOutAmount, rememberRipioAddress, rememberedRipioAddress } from "../lib/cash-out";
 import { useAccountBalances } from "../lib/client/account";
 import { isOnItsWay, userMessage } from "../lib/client/errors";
@@ -21,12 +21,13 @@ const ADDRESS = "narrow break-all rounded-[14px] bg-surface p-3 text-center text
  * Pasar a pesos (spec, 9, pantalla 8, and 9.2): the member's wARS, sent from their own account to their Ripio
  * deposit address on Celo, where Ripio's app sells them 1:1 for pesos. The address is remembered by this browser
  * only, after a pass that went well. The amount is all the account holds until the member types another; after a
- * pass, nothing is offered until a read made after it (useAccountBalances waits for the pass's block), so the old
- * balance is never offered again.
+ * pass, nothing is offered until a read made after it (useAccountBalances says when, and waits for the pass's
+ * block), so the old balance is never offered again.
  */
 export function CashOutPanel({ fund, account, cashOutOnItsWay }: { fund: Address; account: Address; cashOutOnItsWay: boolean }) {
   const { refresh } = useRefresh();
-  const { balances, failed } = useAccountBalances(account, LOOK_EVERY_MS);
+  // `stale`: right after a pass, until the account is read again, the balances are the old ones.
+  const { balances, failed, changing: stale } = useAccountBalances(account, LOOK_EVERY_MS);
   // Undefined until this browser was asked, after the first render: the server can't know it.
   const [saved, setSaved] = useState<Address | null | undefined>(undefined);
   const [changing, setChanging] = useState(false);
@@ -35,22 +36,15 @@ export function CashOutPanel({ fund, account, cashOutOnItsWay }: { fund: Address
   const [step, setStep] = useState<"idle" | "signing" | "sending">("idle");
   const [error, setError] = useState("");
   const [passed, setPassed] = useState<bigint | null>(null);
-  // The read the panel had when a pass landed: until a newer one comes, what it said is gone.
-  const [stale, setStale] = useState<Balances | null>(null);
-  // The latest read, not the one the click's render saw: a routine look may land while the passkey is up.
-  const latest = useRef<Balances | null>(null);
   const [sentNow, setSentNow] = useState(false);
   const busy = useRef(false); // a second click lands before the button re-renders as disabled
 
   useEffect(() => setSaved(rememberedRipioAddress(browserStorage(), account)), [account]);
-  useEffect(() => {
-    latest.current = balances;
-  }, [balances]);
 
   const asking = saved === null || changing;
   const destination = asking ? pasted.trim() : (saved ?? "");
   const addressProblem = destination === "" ? null : cashOutProblem(destination, { account, fund });
-  const fresh = balances !== null && balances !== stale ? balances : null;
+  const fresh = balances !== null && !stale ? balances : null;
   const reading = fresh === null ? null : readCashOutAmount(typed, fresh.wars);
   const onItsWay = cashOutOnItsWay || sentNow;
   const amount = reading?.ok ? reading.amount : null;
@@ -71,8 +65,8 @@ export function CashOutPanel({ fund, account, cashOutOnItsWay }: { fund: Address
       setPasted("");
       setTyped(null);
       setPassed(amount);
-      setStale(latest.current);
-      // The panel and the inicio's line read the account again, once the node has the pass's block.
+      // The panel and the inicio's line read the account again, once the node has the pass's block. The hook marks
+      // the balances as old in the same batch that ends this step, so no render offers them again.
       window.dispatchEvent(new CustomEvent(ACCOUNT_CHANGED, { detail: result.blockNumber ?? undefined }));
       setStep("idle");
       busy.current = false;
