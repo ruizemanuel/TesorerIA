@@ -68,11 +68,24 @@ export function Panel({
         <header className="flex items-center gap-3 border-b border-line bg-surface px-4 py-3">
           <button
             type="button"
-            className="grid size-11 place-items-center rounded-full text-xl text-primary"
+            className="grid size-11 place-items-center rounded-full text-primary"
             aria-label="Volver"
             onClick={() => dialog.current?.close()}
           >
-            ←
+            {/* An SVG, not the "←" character: a glyph sits where its font puts it (3 px below the button's centre in
+                Encode Sans), while a drawing is centred exactly. */}
+            <svg
+              aria-hidden="true"
+              viewBox="0 0 24 24"
+              className="size-5"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={2}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M19 12H5M12 19l-7-7 7-7" />
+            </svg>
           </button>
           {icon}
           <h2 id="panel-title" className="text-lg font-bold [font-stretch:87%]">
