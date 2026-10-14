@@ -10,6 +10,7 @@ import {
   MAX_FEE_MULTIPLE,
   MAX_OPERATION_GAS,
   type OperationCall,
+  type Sponsorship,
   authorizeBundlerRequest,
   checkBundlerAnswer,
   checkBundlerRequest,
@@ -17,6 +18,7 @@ import {
   checkSponsoredGas,
   operationCalls,
 } from "../src/lib/bundler-proxy";
+import { cashOutCalls } from "../src/lib/cash-out";
 import { contributeCalls } from "../src/lib/contribute";
 import { MAX_CREATE_FUND_NONCES, claimCreateFundNonce } from "../src/lib/create-fund-cap";
 import type { Db } from "../src/lib/db/client";
@@ -184,6 +186,31 @@ describe("checkCalls", () => {
       "createFund, by someone who isn't creating a fund": asRead([createFundCall()]),
     };
     for (const [why, calls] of Object.entries(cases)) expect(checkCalls(calls, member), why).toMatchObject({ ok: false, status: 403 });
+  });
+
+  const transfer = (token: Address, to: Address, amount: bigint) =>
+    fundCall(token, encodeFunctionData({ abi: erc20Abi, functionName: "transfer", args: [to, amount] }));
+
+  it("lets a live fund's member pass their own wARS to any address, alone: Pasar a pesos (spec, 6)", () => {
+    expect(checkCalls(asRead(cashOutCalls({ to: OTHER, amount: 10n ** 18n })), member)).toEqual({ ok: true, createsFund: false });
+    expect(checkCalls([transfer(WARS, randomAccount(), 1n)], member)).toEqual({ ok: true, createsFund: false });
+  });
+
+  it("refuses any other way of moving tokens out, and a pass from someone with no live fund", () => {
+    const pass = transfer(WARS, OTHER, 10n ** 18n);
+    const cases: Record<string, [OperationCall[], Sponsorship]> = {
+      "a pass from the creator of a fund being created, with no live fund": [[pass], creator],
+      "a pass from someone with nothing": [[pass], { liveFunds: [], createFundCalls: [] }],
+      "a transfer of USDT": [[transfer(USDT, OTHER, 1n)], member],
+      "two passes in a batch": [[pass, pass], member],
+      "a pass in a batch with calls sponsored alone": [[pass, ...asRead(contribute(FUND))], member],
+      "a pass with value": [[{ ...pass, value: 1n }], member],
+      "a pass of nothing": [[transfer(WARS, OTHER, 0n)], member],
+      "a transferFrom of wARS": [[fundCall(WARS, encodeFunctionData({ abi: erc20Abi, functionName: "transferFrom", args: [ME, OTHER, 1n] }))], member],
+    };
+    for (const [why, [calls, sponsorship]] of Object.entries(cases)) {
+      expect(checkCalls(calls, sponsorship), why).toMatchObject({ ok: false, status: 403 });
+    }
   });
 
   it("lets only the creator of a fund being created send createFund, alone, and says it's one", () => {
@@ -366,6 +393,29 @@ describe("authorizeBundlerRequest", () => {
     }
     expect(MAX_OPERATION_GAS).toBe(2_000_000n);
     expect(MAX_CREATE_FUND_GAS).toBe(10_000_000n);
+  });
+
+  it("sponsors a live member's pass to pesos, within the 2M ceiling, and nobody else's (spec, 6)", async () => {
+    const { db, stranger, founder, juan, ana } = await people();
+    const pass = safeCallData(cashOutCalls({ to: OTHER, amount: 10n ** 18n }));
+    for (const method of SPONSORED) {
+      const juanPass = request(method, sponsored(juan.account, {}, MAX_OPERATION_GAS, pass));
+      expect(await authorizeBundlerRequest(db, asUser(juan), juanPass, POLICY, price, agent, DAILY_LIMIT), method).toMatchObject({ ok: true });
+      // Ana is creating a fund but has no live one; the founder is only in a draft.
+      for (const person of [stranger, founder, ana]) {
+        const theirs = request(method, sponsored(person.account, {}, MAX_OPERATION_GAS, pass));
+        expect(await authorizeBundlerRequest(db, asUser(person), theirs, POLICY, price, agent, DAILY_LIMIT), `${method}: ${person.name}`).toMatchObject({
+          ok: false,
+          status: 403,
+        });
+      }
+    }
+    const tooMuch = request("pm_getPaymasterData", sponsored(juan.account, {}, MAX_OPERATION_GAS + 1n, pass));
+    expect(await authorizeBundlerRequest(db, asUser(juan), tooMuch, POLICY, price, agent, DAILY_LIMIT)).toMatchObject({
+      ok: false,
+      status: 400,
+      error: "Gas limits too high",
+    });
   });
 
   it("holds a sponsoring request to the current price, which it reads only when it has to", async () => {

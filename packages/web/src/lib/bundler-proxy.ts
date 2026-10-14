@@ -179,11 +179,25 @@ function memberCall({ to, data }: OperationCall, isLive: (address: Address) => b
 }
 
 /**
+ * Pasar a pesos (spec, 6): one `transfer` of the member's own wARS, to any address and for more than nothing. Alone:
+ * in a batch, the other calls would ride on it unchecked. The destination isn't checked: this decides what the
+ * paymaster pays for, and the browser checks the address for the person (`cashOutProblem`).
+ */
+function isCashOut(calls: OperationCall[]): boolean {
+  const [only] = calls;
+  if (calls.length !== 1 || only === undefined || !isAddressEqual(only.to, WARS)) return false;
+  const decoded = decodeExactly(erc20Abi, only.data);
+  return decoded?.functionName === "transfer" && decoded.args[1] > 0n;
+}
+
+/**
  * The calls the paymaster pays for, and nothing else (spec, 6: no open sponsored bundler), all with no value:
  * - FundFactory.createFund, alone, from the creator of a fund being created, and only with the exact calldata
  *   deployCall built for that frozen draft (`createFundCalls`): its members in order, its votes, the server's agent;
  * - approve(fund, x) on wARS or USDT, and contributeWars, contributeUsdt, vote and execute on the fund, for a
  *   live fund the person is a member of.
+ * - one transfer of the person's own wARS, alone, to any address and for more than nothing, for a member of any live
+ *   fund: Pasar a pesos (isCashOut).
  * `createsFund` says which: it gets the larger gas ceiling.
  */
 export function checkCalls(
@@ -197,6 +211,9 @@ export function checkCalls(
     const data = only.data.toLowerCase();
     if (createFundCalls.some((frozen) => frozen.toLowerCase() === data)) return { ok: true, createsFund: true };
     return refuse("Only the createFund of a draft you are creating, exactly as it was frozen, is sponsored on the factory");
+  }
+  if (isCashOut(calls)) {
+    return liveFunds.length > 0 ? { ok: true, createsFund: false } : refuse("Only a live fund's member is sponsored to pass their wARS out");
   }
   const isLive = (address: Address) => liveFunds.some((fund) => isAddressEqual(fund, address));
   const refused = calls.find((call) => !memberCall(call, isLive));
