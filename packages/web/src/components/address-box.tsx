@@ -4,6 +4,15 @@ import QRCode from "qrcode";
 import { useEffect, useState } from "react";
 import { Button } from "./ui";
 
+/** The warning that goes with an address on Celo, wherever money is sent to one (spec, 9.2). */
+export function NetworkWarning() {
+  return (
+    <p className="rounded-[14px] border-2 border-owe bg-owe-tint p-3 text-[15px] font-bold text-owe">
+      Elegí la red CELO. Si elegís otra, la plata se pierde.
+    </p>
+  );
+}
+
 /** Your account's address, only here (spec, 9.2): whole, as wallets show it, with its QR, "Copiar" and the network warning. */
 export function AddressBox({ address }: { address: string }) {
   const [svg, setSvg] = useState("");
@@ -19,9 +28,7 @@ export function AddressBox({ address }: { address: string }) {
   }, [address]);
   return (
     <div className="grid gap-3">
-      <p className="rounded-[14px] border-2 border-owe bg-owe-tint p-3 text-[15px] font-bold text-owe">
-        Elegí la red CELO. Si elegís otra, la plata se pierde.
-      </p>
+      <NetworkWarning />
       {/* The QR is SVG this component generated from the address itself. */}
       <div className="mx-auto size-44 [&>svg]:size-full" aria-hidden="true" dangerouslySetInnerHTML={{ __html: svg }} />
       {/* No spaces, so it can be copied by hand. `narrow` fits its 42 characters on one line of a 360 px phone, and

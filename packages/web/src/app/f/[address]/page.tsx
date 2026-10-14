@@ -3,6 +3,7 @@ import { connection } from "next/server";
 import { isAddress } from "viem";
 import { AccountPanel } from "../../../components/account-panel";
 import { AgentPanel } from "../../../components/agent-panel";
+import { CashOutPanel } from "../../../components/cash-out-panel";
 import { ContributePanel } from "../../../components/contribute-panel";
 import { ExpensePanel } from "../../../components/expense-panel";
 import { FundScreenView } from "../../../components/fund-screen";
@@ -47,6 +48,7 @@ export default async function FundPage({ params, searchParams }: { params: Promi
         ),
         gasto: <ExpensePanel fund={screen.view.address} agreedExpense={screen.view.agreedExpense} />,
         cuenta: <AccountPanel userName={user.name} account={user.account} />,
+        pesos: <CashOutPanel fund={screen.view.address} account={user.account} cashOutOnItsWay={screen.cashOutOnItsWay} />,
         agente: chat ? (
           <AgentPanel
             fund={screen.view.address}

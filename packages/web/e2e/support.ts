@@ -71,3 +71,8 @@ export async function give(account: Address, { usdt = 0n, wars = 0n }: { usdt?: 
   }
   await test.stopImpersonatingAccount({ address: POOL });
 }
+
+/** The wARS `account` holds on the fork. */
+export async function warsOf(account: Address): Promise<bigint> {
+  return client.readContract({ address: WARS, abi: erc20Abi, functionName: "balanceOf", args: [account] });
+}

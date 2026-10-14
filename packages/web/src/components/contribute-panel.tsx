@@ -26,8 +26,9 @@ import {
 import { USDT_UNIT, formatPesos, formatUsdt } from "../lib/format";
 import { DEFAULT_BALANCE_CAP, memberFundAbi } from "../lib/fund-abi";
 import { AddressBox } from "./address-box";
+import { AmountField } from "./amount-field";
 import { useRefresh } from "./refresh-provider";
-import { Button, ButtonLink, FIELD } from "./ui";
+import { Button, ButtonLink } from "./ui";
 
 type Token = "usdt" | "wars";
 /**
@@ -213,6 +214,7 @@ export function ContributePanel({
               </p>
               {tab === "usdt" ? (
                 <AmountField
+                  label="Cuánto aportás"
                   value={typedUsdt ?? usdtText(usdtDefault)}
                   problem={usdtReading.ok ? "" : usdtReading.error}
                   note={usdtReading.ok && held.rate !== null ? usdtWorthText(usdtReading.amount, held.rate, target) : undefined}
@@ -221,6 +223,7 @@ export function ContributePanel({
                 />
               ) : (
                 <AmountField
+                  label="Cuánto aportás"
                   value={typed ?? pesosText(warsDefault)}
                   problem={warsReading.ok ? "" : warsReading.error}
                   disabled={step !== "idle"}
@@ -237,51 +240,6 @@ export function ContributePanel({
           </p>
         </div>
       </div>
-    </div>
-  );
-}
-
-/**
- * The amount field of either tab, with what to fix under it, or else `note` (what the USDT comes to). The note isn't
- * an alert: it changes with the fund's rate, every 10 s, and a screen reader would read it out each time.
- */
-function AmountField({
-  value,
-  problem,
-  note,
-  disabled,
-  onChange,
-}: {
-  value: string;
-  problem: string;
-  note?: string;
-  disabled: boolean;
-  onChange: (text: string) => void;
-}) {
-  return (
-    <div className="grid gap-1">
-      <label className="grid gap-1">
-        <span className="font-semibold">Cuánto aportás</span>
-        <input
-          className={`${FIELD} money`}
-          inputMode="decimal"
-          autoComplete="off"
-          value={value}
-          disabled={disabled}
-          aria-invalid={problem !== ""}
-          aria-describedby="amount-problem"
-          onChange={(event) => onChange(event.target.value)}
-        />
-      </label>
-      {problem === "" && note !== undefined ? (
-        <p id="amount-problem" className="min-h-5 text-sm text-muted">
-          {note}
-        </p>
-      ) : (
-        <p id="amount-problem" role="alert" className="min-h-5 text-sm text-owe">
-          {problem}
-        </p>
-      )}
     </div>
   );
 }

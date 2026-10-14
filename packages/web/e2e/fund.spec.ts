@@ -1,5 +1,6 @@
 import { type Page, type Request, type Route, expect, test } from "@playwright/test";
-import { accountOf, give, onScreen, open, phone } from "./support";
+import { generatePrivateKey, privateKeyToAddress } from "viem/accounts";
+import { accountOf, give, onScreen, open, phone, warsOf } from "./support";
 
 /** The server renders (React Server Components) a page asks for while `act` runs; a link's prefetch isn't one. */
 async function serverRenders(page: Page, act: () => Promise<void>): Promise<string[]> {
@@ -17,7 +18,7 @@ async function serverRenders(page: Page, act: () => Promise<void>): Promise<stri
   return asked;
 }
 
-test("three friends create a fund, contribute, get the agreed expense back, and vote on and execute others", async ({ browser }) => {
+test("three friends create a fund, contribute, get the agreed expense back, and vote on and execute others, and pass what they got back on to Ripio", async ({ browser }) => {
   const ana = await phone(await browser.newContext());
   const beto = await phone(await browser.newContext());
   const caro = await phone(await browser.newContext());
@@ -228,4 +229,35 @@ test("three friends create a fund, contribute, get the agreed expense back, and 
   await agent.getByRole("button", { name: "¿Quién debe esta semana?" }).click();
   await expect(agent.getByText("Soy el agente de prueba: en el fork no hay modelo.")).toBeVisible();
   expect(errors).toEqual([]);
+
+  // 11. Ana passes the $ 5.000 the agent paid her back (step 5) on to Ripio (spec, 9.2): part of it from "Tu cuenta",
+  // pasting the address with the spaces a copy brings; the rest from the inicio's line, after a reload, to the
+  // address her browser remembered. A fresh address stands in for her Ripio one. The passes go through /api/bundler
+  // like any operation, so the server's check runs too.
+  const ripio = privateKeyToAddress(generatePrivateKey());
+  await open(ana, fund);
+  await ana.getByRole("link", { name: "Tu cuenta" }).click();
+  const account = ana.getByRole("dialog", { name: "Tu cuenta" });
+  await expect(account.getByText(/\$\s5\.000/)).toBeVisible();
+  await account.getByRole("link", { name: "Pasar a pesos con Ripio" }).click();
+  const pesos = ana.getByRole("dialog", { name: "Pasar a pesos" });
+  await pesos.getByLabel("Tu dirección de Ripio").fill(`  ${ripio} `);
+  await pesos.getByLabel("Cuánto pasás").fill("2.000");
+  await pesos.getByRole("button", { name: /Pasar \$\s2\.000 a Ripio/ }).click();
+  await expect(pesos.getByText(/Pasaste \$\s2\.000 a Ripio/)).toBeVisible();
+  expect(await warsOf(ripio)).toBe(2_000n * 10n ** 18n);
+  // It reads the account again after the pass: it offers the $ 3.000 left, never the $ 5.000 it had.
+  await expect(pesos.getByRole("button", { name: /Pasar \$\s3\.000 a Ripio/ })).toBeVisible();
+  await expect(pesos.getByText(ripio)).toBeVisible();
+  await pesos.getByRole("button", { name: "Volver" }).click();
+  await expect(onScreen(ana, /En tu cuenta tenés \$\s3\.000/)).toBeVisible();
+  await open(ana, fund);
+  await ana.getByRole("link", { name: "Pasar a pesos", exact: true }).click();
+  await expect(pesos.getByText("A tu cuenta de Ripio")).toBeVisible();
+  await expect(pesos.getByText(ripio)).toBeVisible();
+  await pesos.getByRole("button", { name: /Pasar \$\s3\.000 a Ripio/ }).click();
+  await expect(pesos.getByText(/Pasaste \$\s3\.000 a Ripio/)).toBeVisible();
+  expect(await warsOf(ripio)).toBe(5_000n * 10n ** 18n);
+  expect(await warsOf(await accountOf(ana))).toBe(0n); // all of it, to the last unit
+  await expect(pesos.getByText("No tenés pesos en tu cuenta para pasar.")).toBeVisible();
 });
