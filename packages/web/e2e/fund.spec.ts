@@ -246,7 +246,9 @@ test("three friends create a fund, contribute, get the agreed expense back, and 
   await pesos.getByRole("button", { name: /Pasar \$\s2\.000 a Ripio/ }).click();
   await expect(pesos.getByText(/Pasaste \$\s2\.000 a Ripio/)).toBeVisible();
   expect(await warsOf(ripio)).toBe(2_000n * 10n ** 18n);
-  // It reads the account again after the pass: it offers the $ 3.000 left, never the $ 5.000 it had.
+  // After the pass the panel reads the account again and offers the $ 3.000 left. The race that could show the old
+  // balance needs a node that lags behind the pass's block, which a single anvil node can't produce:
+  // test/account-reader.test.ts covers it.
   await expect(pesos.getByRole("button", { name: /Pasar \$\s3\.000 a Ripio/ })).toBeVisible();
   await expect(pesos.getByText(ripio)).toBeVisible();
   await pesos.getByRole("button", { name: "Volver" }).click();

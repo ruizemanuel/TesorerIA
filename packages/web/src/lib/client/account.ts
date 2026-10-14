@@ -6,7 +6,8 @@ import { celoBrowserClient } from "./wallet";
 /**
  * What the member's own account holds, read from the browser every `everyMs`, and again after a pass to pesos
  * (ACCOUNT_CHANGED, accountReader). `balances` is null until a first read; a read that fails keeps the last one and
- * sets `failed`.
+ * sets `failed`, which a good read clears, and so does the announcement of a pass: a failure from before it says
+ * nothing about the read that is now awaited.
  *
  * `changing` is true from the moment the pass is announced until a read made after it comes in, and `balances` is
  * then the one from before the pass: whoever offers an amount must not offer it. The hook can say it because it
@@ -33,6 +34,7 @@ export function useAccountBalances(account: Address, everyMs: number): { balance
     const onChange = (event: Event) => {
       const block = (event as CustomEvent<unknown>).detail;
       setChanging(true); // before anything else: the next render must already know the balances are old
+      setFailed(false); // an old failed look says nothing about the read now awaited; if that one fails, onRead(null) sets it
       void reader.changed(typeof block === "bigint" ? block : undefined);
     };
     window.addEventListener(ACCOUNT_CHANGED, onChange);

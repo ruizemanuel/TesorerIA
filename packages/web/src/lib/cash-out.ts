@@ -14,8 +14,9 @@ export function cashOutCalls({ to, amount }: { to: Address; amount: bigint }): C
 /**
  * What's wrong with the address pasted as the member's Ripio one, in Spanish, or null. Strict: an address with
  * capitals must carry its checksum, so a mistyped letter shows; one from Tron or Bitcoin isn't an address at all. The
- * member's own account, the fund and the two tokens are TesorerIA's: wARS sent to the fund without Aportar credit
- * nobody. The paymaster doesn't look at the destination (spec, 6): this is the only check, for the person's sake.
+ * member's own account, the fund and the two tokens are TesorerIA's: wARS sent straight to the fund, without
+ * contributeWars, are credited to nobody. The paymaster doesn't look at the destination (spec, 6): this is the only
+ * check, for the person's sake.
  */
 export function cashOutProblem(text: string, { account, fund }: { account: Address; fund: Address }): string | null {
   const address = text.trim();

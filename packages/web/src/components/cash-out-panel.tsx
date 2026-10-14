@@ -26,11 +26,11 @@ const ADDRESS = "narrow break-all rounded-[14px] bg-surface p-3 text-center text
  */
 export function CashOutPanel({ fund, account, cashOutOnItsWay }: { fund: Address; account: Address; cashOutOnItsWay: boolean }) {
   const { refresh } = useRefresh();
-  // `stale`: right after a pass, until the account is read again, the balances are the old ones.
-  const { balances, failed, changing: stale } = useAccountBalances(account, LOOK_EVERY_MS);
+  // `changing`: right after a pass, until the account is read again, the balances are the old ones.
+  const { balances, failed, changing } = useAccountBalances(account, LOOK_EVERY_MS);
   // Undefined until this browser was asked, after the first render: the server can't know it.
   const [saved, setSaved] = useState<Address | null | undefined>(undefined);
-  const [changing, setChanging] = useState(false);
+  const [editingAddress, setEditingAddress] = useState(false);
   const [pasted, setPasted] = useState("");
   const [typed, setTyped] = useState<string | null>(null);
   const [step, setStep] = useState<"idle" | "signing" | "sending">("idle");
@@ -41,10 +41,10 @@ export function CashOutPanel({ fund, account, cashOutOnItsWay }: { fund: Address
 
   useEffect(() => setSaved(rememberedRipioAddress(browserStorage(), account)), [account]);
 
-  const asking = saved === null || changing;
+  const asking = saved === null || editingAddress;
   const destination = asking ? pasted.trim() : (saved ?? "");
   const addressProblem = destination === "" ? null : cashOutProblem(destination, { account, fund });
-  const fresh = balances !== null && !stale ? balances : null;
+  const fresh = balances !== null && !changing ? balances : null;
   const reading = fresh === null ? null : readCashOutAmount(typed, fresh.wars);
   const onItsWay = cashOutOnItsWay || sentNow;
   const amount = reading?.ok ? reading.amount : null;
@@ -61,7 +61,7 @@ export function CashOutPanel({ fund, account, cashOutOnItsWay }: { fund: Address
       const result = await sendCalls(me, cashOutCalls({ to, amount }), { kind: "cash-out", amount, token: "wars" }, () => setStep("sending"));
       rememberRipioAddress(browserStorage(), account, to);
       setSaved(to);
-      setChanging(false);
+      setEditingAddress(false);
       setPasted("");
       setTyped(null);
       setPassed(amount);
@@ -123,7 +123,7 @@ export function CashOutPanel({ fund, account, cashOutOnItsWay }: { fund: Address
               {addressProblem}
             </p>
           )}
-          <Button variant="link" disabled={step !== "idle"} onClick={() => setChanging(true)}>
+          <Button variant="link" disabled={step !== "idle"} onClick={() => setEditingAddress(true)}>
             Cambiar
           </Button>
         </div>
