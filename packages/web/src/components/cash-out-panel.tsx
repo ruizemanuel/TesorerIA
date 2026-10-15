@@ -9,7 +9,7 @@ import { isOnItsWay, userMessage } from "../lib/client/errors";
 import { loadMe, sendCalls } from "../lib/client/wallet";
 import { pesosText } from "../lib/contribute";
 import { WARS_SPECK, formatPesos } from "../lib/format";
-import { useMessages } from "../lib/i18n/client";
+import { useLocale, useMessages } from "../lib/i18n/client";
 import { NetworkWarning } from "./address-box";
 import { AmountField } from "./amount-field";
 import { useRefresh } from "./refresh-provider";
@@ -27,6 +27,7 @@ const ADDRESS = "narrow break-all rounded-[14px] bg-surface p-3 text-center text
  */
 export function CashOutPanel({ fund, account, cashOutOnItsWay }: { fund: Address; account: Address; cashOutOnItsWay: boolean }) {
   const m = useMessages();
+  const locale = useLocale();
   const { refresh } = useRefresh();
   // `changing`: right after a pass, until the account is read again, the balances are the old ones.
   const { balances, failed, changing } = useAccountBalances(account, LOOK_EVERY_MS);
@@ -45,9 +46,9 @@ export function CashOutPanel({ fund, account, cashOutOnItsWay }: { fund: Address
 
   const asking = saved === null || editingAddress;
   const destination = asking ? pasted.trim() : (saved ?? "");
-  const addressProblem = destination === "" ? null : cashOutProblem(destination, { account, fund });
+  const addressProblem = destination === "" ? null : cashOutProblem(destination, { account, fund }, m);
   const fresh = balances !== null && !changing ? balances : null;
-  const reading = fresh === null ? null : readCashOutAmount(typed, fresh.wars);
+  const reading = fresh === null ? null : readCashOutAmount(typed, fresh.wars, m);
   const onItsWay = cashOutOnItsWay || sentNow;
   const amount = reading?.ok ? reading.amount : null;
   const ready = step === "idle" && !onItsWay && amount !== null && destination !== "" && addressProblem === null;
@@ -88,17 +89,16 @@ export function CashOutPanel({ fund, account, cashOutOnItsWay }: { fund: Address
     <div className="grid gap-4">
       {passed !== null && (
         <p role="status" className="rounded-[14px] bg-surface p-4 font-semibold">
-          Pasaste <span className="money">{formatPesos(passed)}</span> a Ripio. En un minuto lo ves en la app: ahí lo vendés 1:1 a pesos y lo
-          pasás a tu banco.
+          {m.cashOut.passed(<span className="money">{formatPesos(passed, locale)}</span>)}
         </p>
       )}
 
       {saved === undefined ? null : asking ? (
         <div className="grid gap-3">
-          <p>En la app de Ripio tocá Depositar, elegí wARS y la red Celo, y copiá la dirección.</p>
+          <p>{m.cashOut.depositInstructions}</p>
           <NetworkWarning />
           <label className="grid gap-1">
-            <span className="font-semibold">Tu dirección de Ripio</span>
+            <span className="font-semibold">{m.cashOut.addressLabel}</span>
             <input
               className={`${FIELD} narrow`}
               autoComplete="off"
@@ -118,7 +118,7 @@ export function CashOutPanel({ fund, account, cashOutOnItsWay }: { fund: Address
         </div>
       ) : (
         <div className="grid gap-2">
-          <p>A tu cuenta de Ripio</p>
+          <p>{m.cashOut.savedAddress}</p>
           <p className={ADDRESS}>{saved}</p>
           {addressProblem !== null && (
             <p role="alert" className="text-sm text-owe">
@@ -126,38 +126,36 @@ export function CashOutPanel({ fund, account, cashOutOnItsWay }: { fund: Address
             </p>
           )}
           <Button variant="link" disabled={step !== "idle"} onClick={() => setEditingAddress(true)}>
-            Cambiar
+            {m.cashOut.change}
           </Button>
         </div>
       )}
 
       <div className="grid gap-3 rounded-[14px] bg-surface p-4">
         {onItsWay ? (
-          !sentNow && <p className="font-semibold">Tu pase a pesos está en camino.</p>
+          !sentNow && <p className="font-semibold">{m.cashOut.onItsWay}</p>
         ) : fresh === null ? (
-          <p className="text-muted">{failed ? "No pudimos mirar tu cuenta. Probamos de nuevo en unos segundos." : "Mirando tu cuenta…"}</p>
+          <p className="text-muted">{failed ? m.account.readFailed : m.account.reading}</p>
         ) : fresh.wars < WARS_SPECK ? (
-          <p className="text-muted">No tenés pesos en tu cuenta para pasar.</p>
+          <p className="text-muted">{m.cashOut.nothingToPass}</p>
         ) : (
           <>
-            <p>
-              Tenés <span className="money font-semibold">{formatPesos(fresh.wars)}</span> en tu cuenta.
-            </p>
+            <p>{m.account.youHave(<span className="money font-semibold">{formatPesos(fresh.wars, locale)}</span>)}</p>
             <AmountField
-              label="Cuánto pasás"
-              value={typed ?? pesosText(fresh.wars)}
+              label={m.cashOut.amountLabel}
+              value={typed ?? pesosText(fresh.wars, locale)}
               problem={reading?.ok === false ? reading.error : ""}
               disabled={step !== "idle"}
               onChange={setTyped}
             />
             <Button disabled={!ready} onClick={cashOut}>
               {step === "signing"
-                ? "Confirmá con tu huella, tu cara o el PIN"
+                ? m.common.confirm
                 : step === "sending"
-                  ? "Enviando…"
+                  ? m.common.sending
                   : amount === null
-                    ? "Pasar a Ripio"
-                    : `Pasar ${formatPesos(amount)} a Ripio`}
+                    ? m.cashOut.submit
+                    : m.cashOut.submitAmount(formatPesos(amount, locale))}
             </Button>
           </>
         )}

@@ -3,6 +3,8 @@ import type { Call } from "@tesoreria/wallet";
 import { type Address, encodeFunctionData, erc20Abi } from "viem";
 import { MAX_PESOS, USDT_UNIT, formatPesos, formatUsdt, parsePesos, parseUsdt } from "./format";
 import { DEFAULT_BALANCE_CAP, memberFundAbi } from "./fund-abi";
+import type { Locale } from "./i18n/locales";
+import type { Messages } from "./i18n/messages";
 
 /** Binance's minimum USDT withdrawal on Celo (spec, 10). */
 export const MIN_BINANCE_USDT = 5_000_000n;
@@ -64,26 +66,26 @@ export function defaultWarsAmount({ held, owed, weeklyFee, room }: { held: bigin
   return min(held, weeklyContribution({ owed, weeklyFee, room }));
 }
 
-/** An amount of pesos as the field shows it, without the sign: "10.000". */
-export function pesosText(units: bigint): string {
-  return formatPesos(units).replace(/^\$\s/, "");
+/** An amount of pesos as the field shows it, without the sign: "10.000", or "10,000" in English. */
+export function pesosText(units: bigint, locale: Locale): string {
+  return formatPesos(units, locale).replace(/^(\$|ARS)\s/, "");
 }
 
 export type PesosReading = { ok: true; amount: bigint } | { ok: false; error: string };
 
 /** What a member reads when what they typed doesn't fit under the fund's cap; `roomText` is the room in their tab's unit. */
-function overCap(room: bigint, roomText: string): string {
-  const cap = formatPesos(DEFAULT_BALANCE_CAP);
-  return room === 0n ? `El fondo llegó a su tope de ${cap}: no entra más.` : `Al fondo le entran hasta ${roomText} más, porque tiene un tope de ${cap}.`;
+function overCap(room: bigint, roomText: string, m: Messages): string {
+  const cap = formatPesos(DEFAULT_BALANCE_CAP, m.locale);
+  return room === 0n ? m.contribute.capReached(cap) : m.contribute.roomLeft(roomText, cap);
 }
 
-/** What a member typed in the amount field, or a Spanish sentence that says what to fix. */
-export function readPesosAmount(text: string, { held, room }: { held: bigint; room: bigint | null }): PesosReading {
-  const amount = parsePesos(text);
-  if (amount === null) return { ok: false, error: "Escribilo como 10.000 o 10.000,50." };
-  if (amount > MAX_PESOS) return { ok: false, error: `No puede pasar de ${formatPesos(MAX_PESOS)}.` };
-  if (amount > held) return { ok: false, error: `En tu cuenta tenés ${formatPesos(held)}.` };
-  if (room !== null && amount > room) return { ok: false, error: overCap(room, formatPesos(room)) };
+/** What a member typed in the amount field, or a sentence in the page's language that says what to fix. */
+export function readPesosAmount(text: string, { held, room }: { held: bigint; room: bigint | null }, m: Messages): PesosReading {
+  const amount = parsePesos(text, m.locale);
+  if (amount === null) return { ok: false, error: m.errors.amountFormat };
+  if (amount > MAX_PESOS) return { ok: false, error: m.errors.amountTooBig(formatPesos(MAX_PESOS, m.locale)) };
+  if (amount > held) return { ok: false, error: m.contribute.accountHolds(formatPesos(held, m.locale)) };
+  if (room !== null && amount > room) return { ok: false, error: overCap(room, formatPesos(room, m.locale), m) };
   return { ok: true, amount };
 }
 
@@ -145,23 +147,25 @@ export function usdtToSend({ held, rate, owed, weeklyFee, room }: UsdtOffer): bi
   return needed > held ? centUp(needed - held) : 0n;
 }
 
-/** An amount of USDT as the field shows it, without the unit: "6,26". */
-export function usdtText(units: bigint): string {
-  return formatUsdt(units).replace(/\sUSDT$/, "");
+/** An amount of USDT as the field shows it, without the unit: "6,26", or "6.26" in English. */
+export function usdtText(units: bigint, locale: Locale): string {
+  return formatUsdt(units, locale).replace(/\sUSDT$/, "");
 }
 
 export type UsdtReading = { ok: true; amount: bigint } | { ok: false; error: string };
 
-/** What a member typed in the USDT field, or a Spanish sentence that says what to fix. */
+/** What a member typed in the USDT field, or a sentence in the page's language that says what to fix. */
 export function readUsdtAmount(
   text: string,
   { held, rate, room }: { held: bigint; rate: bigint | null; room: bigint | null },
+  m: Messages,
 ): UsdtReading {
-  const amount = parseUsdt(text);
-  if (amount === null) return { ok: false, error: "Escribilo como 6 o 6,25." };
-  if (amount > held) return { ok: false, error: `En tu cuenta tenés ${formatUsdt(held)}.` };
+  const amount = parseUsdt(text, m.locale);
+  if (amount === null) return { ok: false, error: m.contribute.usdtFormat };
+  if (amount > held) return { ok: false, error: m.contribute.accountHolds(formatUsdt(held, m.locale)) };
   if (rate !== null && room !== null && usdtWorth(amount, rate) > room) {
-    return { ok: false, error: overCap(room, formatUsdt(centDown(fitUnderCap(held, usdtWorth(held, rate), room)))) };
+    const fits = formatUsdt(centDown(fitUnderCap(held, usdtWorth(held, rate), room)), m.locale);
+    return { ok: false, error: overCap(room, fits, m) };
   }
   return { ok: true, amount };
 }
@@ -170,9 +174,9 @@ export function readUsdtAmount(
  * What an amount of USDT comes to, as the panel says it under the field: that it covers `target` (this week's
  * contribution) when it's that plus at most 1 % and a cent, the margin's doing, or what it's worth otherwise.
  */
-export function usdtWorthText(amount: bigint, rate: bigint, target: bigint): string {
+export function usdtWorthText(amount: bigint, rate: bigint, target: bigint, m: Messages): string {
   const worth = usdtWorth(amount, rate);
   return worth >= target && worth - target <= target / 100n + usdtWorth(USDT_CENT, rate)
-    ? `Cubre los ${formatPesos(target)}, al precio de ahora.`
-    : `Son unos ${formatPesos(worth)} al precio de ahora.`;
+    ? m.contribute.covers(formatPesos(target, m.locale))
+    : m.contribute.worth(formatPesos(worth, m.locale));
 }

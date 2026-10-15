@@ -49,7 +49,7 @@ export function ExecuteButton({ fund, proposalId }: { fund: Address; proposalId:
   return (
     <div className="mt-2 grid justify-items-start gap-1">
       <Button variant="secondary" className="py-2" disabled={step !== "idle" || outcome !== "open"} onClick={execute}>
-        {step === "signing" ? "Confirmá con tu huella, tu cara o el PIN" : step === "sending" ? "Enviando…" : "Ejecutar"}
+        {step === "signing" ? m.common.confirm : step === "sending" ? m.common.sending : m.execute.button}
       </Button>
       {error && (
         <p role="alert" className="text-sm text-owe">

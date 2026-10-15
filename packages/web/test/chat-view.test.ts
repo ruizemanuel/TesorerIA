@@ -15,6 +15,8 @@ import {
 } from "../src/lib/chat/view";
 import { expenseOutcome } from "../src/lib/expense-outcome";
 import { formatPesos } from "../src/lib/format";
+import { en } from "../src/lib/i18n/en";
+import { es } from "../src/lib/i18n/es";
 import { WARS } from "./support/fixtures";
 
 const rules = { agreedExpense: "la cancha", leftThisWeek: 15_000n * WARS, votesRequired: 3, members: 5 };
@@ -122,8 +124,15 @@ describe("the panel's small words", () => {
 
 describe("expenseOutcome: the same words in the Cargar gasto panel and the card", () => {
   it("says what happened to the expense, and falls back to the agent being busy", () => {
-    expect(expenseOutcome("reimbursed")).toBe("Listo: el agente te devolvió la plata.");
-    expect(expenseOutcome("proposed")).toBe("No entraba sin votación: el agente lo propuso y ahora lo vota el grupo.");
-    expect(expenseOutcome("whatever")).toBe("El agente está ocupado: lo procesa en unos minutos.");
+    expect(expenseOutcome("reimbursed", es)).toBe("Listo: el agente te devolvió la plata.");
+    expect(expenseOutcome("proposed", es)).toBe("No entraba sin votación: el agente lo propuso y ahora lo vota el grupo.");
+    expect(expenseOutcome("whatever", es)).toBe("El agente está ocupado: lo procesa en unos minutos.");
+  });
+
+  it("says it in English too, and an unknown status is the agent being busy there as well", () => {
+    expect(expenseOutcome("reimbursed", en)).toBe("Done: the agent paid you back.");
+    expect(expenseOutcome("proposed", en)).toBe("It couldn't go through without a vote: the agent proposed it and now the group votes on it.");
+    expect(expenseOutcome("whatever", en)).toBe("The agent is busy: it'll process it in a few minutes.");
+    expect(expenseOutcome("constructor", en)).toBe("The agent is busy: it'll process it in a few minutes."); // not an inherited property
   });
 });

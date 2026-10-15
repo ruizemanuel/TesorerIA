@@ -6,7 +6,7 @@ import { post } from "../lib/client/api";
 import { userMessage } from "../lib/client/errors";
 import { expenseOutcome } from "../lib/expense-outcome";
 import { MAX_PESOS, formatPesos, parsePesos } from "../lib/format";
-import { useMessages } from "../lib/i18n/client";
+import { useLocale, useMessages } from "../lib/i18n/client";
 import { useRefresh } from "./refresh-provider";
 import { Button, FIELD } from "./ui";
 
@@ -16,6 +16,7 @@ type Twin = { status: string; amount: bigint };
 /** Cargar un gasto (spec, 9, pantalla 6): the agreed expense or another one, the amount and a note. */
 export function ExpensePanel({ fund, agreedExpense }: { fund: string; agreedExpense: string }) {
   const m = useMessages();
+  const locale = useLocale();
   const { refresh } = useRefresh();
   // One key per opening: a double click or a retry sends the same one, and the server keeps one expense.
   const [clientKey, setClientKey] = useState(() => crypto.randomUUID());
@@ -30,9 +31,10 @@ export function ExpensePanel({ fund, agreedExpense }: { fund: string; agreedExpe
     if (sending.current || form.current === null) return;
     const fields = new FormData(form.current);
     const amount = String(fields.get("amount") ?? "");
-    const units = parsePesos(amount);
+    // With the page's language, the same one the route reads the amount with.
+    const units = parsePesos(amount, locale);
     if (units === null || units > MAX_PESOS) {
-      setError(units === null ? "Escribilo como 10.000 o 10.000,50." : `No puede pasar de ${formatPesos(MAX_PESOS)}.`);
+      setError(units === null ? m.errors.amountFormat : m.errors.amountTooBig(formatPesos(MAX_PESOS, locale)));
       return;
     }
     sending.current = true;
@@ -54,7 +56,7 @@ export function ExpensePanel({ fund, agreedExpense }: { fund: string; agreedExpe
         sending.current = false;
         return;
       }
-      setMessage(expenseOutcome(answer.status));
+      setMessage(expenseOutcome(answer.status, m));
       refresh();
     } catch (caught) {
       setError(userMessage(caught, m));
@@ -76,21 +78,21 @@ export function ExpensePanel({ fund, agreedExpense }: { fund: string; agreedExpe
       }}
     >
       <fieldset className="grid gap-2">
-        <legend className="mb-1 font-semibold">¿Qué gasto es?</legend>
+        <legend className="mb-1 font-semibold">{m.expense.which}</legend>
         <label className="flex min-h-11 items-center gap-3 rounded-[14px] bg-surface px-3">
-          <input type="radio" name="kind" value="agreed" defaultChecked /> {agreedExpense} (el gasto acordado)
+          <input type="radio" name="kind" value="agreed" defaultChecked /> {m.expense.agreed(agreedExpense)}
         </label>
         <label className="flex min-h-11 items-center gap-3 rounded-[14px] bg-surface px-3">
-          <input type="radio" name="kind" value="other" /> Otro gasto (se vota)
+          <input type="radio" name="kind" value="other" /> {m.expense.other}
         </label>
       </fieldset>
       <label className="grid gap-1">
-        <span className="font-semibold">Cuánto pagaste</span>
-        <input className={`${FIELD} money`} name="amount" required inputMode="decimal" autoComplete="off" placeholder="45.000" />
+        <span className="font-semibold">{m.expense.amountLabel}</span>
+        <input className={`${FIELD} money`} name="amount" required inputMode="decimal" autoComplete="off" placeholder={m.expense.amountPlaceholder} />
       </label>
       <label className="grid gap-1">
-        <span className="font-semibold">Nota (opcional)</span>
-        <input className={FIELD} name="note" maxLength={MAX_NOTE_LENGTH} placeholder="La cancha del jueves" />
+        <span className="font-semibold">{m.expense.noteLabel}</span>
+        <input className={FIELD} name="note" maxLength={MAX_NOTE_LENGTH} placeholder={m.expense.notePlaceholder} />
       </label>
       {message ? (
         <p role="status" className="rounded-[14px] bg-tint p-3 font-semibold text-primary">
@@ -99,18 +101,18 @@ export function ExpensePanel({ fund, agreedExpense }: { fund: string; agreedExpe
       ) : twin !== null ? (
         <div className="grid gap-2">
           <p role="status" className="font-semibold">
-            Hace unos minutos cargaste un gasto de <span className="money">{formatPesos(twin.amount)}</span>. ¿Es otro gasto igual?
+            {m.expense.twin(<span className="money">{formatPesos(twin.amount, locale)}</span>)}
           </p>
           <Button disabled={busy} onClick={() => submit(true)}>
-            {busy ? "El agente lo está mirando…" : "Sí, es otro"}
+            {busy ? m.expense.looking : m.expense.another}
           </Button>
-          <Button variant="link" disabled={busy} onClick={() => setMessage(expenseOutcome(twin.status))}>
-            No, es el mismo
+          <Button variant="link" disabled={busy} onClick={() => setMessage(expenseOutcome(twin.status, m))}>
+            {m.expense.same}
           </Button>
         </div>
       ) : (
         <Button type="submit" disabled={busy}>
-          {busy ? "El agente lo está mirando…" : "Cargar el gasto"}
+          {busy ? m.expense.looking : m.expense.submit}
         </Button>
       )}
       <p role="alert" className="text-sm text-owe">

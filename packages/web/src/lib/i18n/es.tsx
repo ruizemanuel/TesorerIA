@@ -37,6 +37,8 @@ export const es = {
     wrongPasskey: "Tu passkey no coincide con tu cuenta. Entrá de nuevo.",
     notCompleted: "La operación no se pudo completar. No se movió plata.",
     amountFormat: "Escribilo como 10.000 o 10.000,50.",
+    /** What the browser says of an amount typed above the most the app takes; `max` is that most. */
+    amountTooBig: (max: string) => `No puede pasar de ${max}.`,
     notInAFund: "No estás en ningún fondo.",
     agentJustRan: "El agente acaba de correr.",
     notYourDraft: "Ese borrador no es tuyo.",
@@ -364,6 +366,130 @@ export const es = {
   account: {
     reading: "Mirando tu cuenta…",
     readFailed: "No pudimos mirar tu cuenta. Probamos de nuevo en unos segundos.",
+    /** What the account holds, in the Aportar and Pasar a pesos panels: `amount` stands out. */
+    youHave: (amount: ReactNode) => <>Tenés {amount} en tu cuenta.</>,
+    /** The top of Tu cuenta. */
+    loggedInAs: (name: string) => `Entraste como ${name}.`,
+    /** What it holds, big and without a full stop: the pesos, or the pesos and the USDT (both stand out). */
+    holds: (pesos: ReactNode) => <>En tu cuenta tenés {pesos}</>,
+    holdsAnd: (pesos: ReactNode, usdt: ReactNode) => (
+      <>
+        En tu cuenta tenés {pesos} y {usdt}
+      </>
+    ),
+    reimbursementsLand: "Acá llegan los reintegros del agente.",
+    cashOut: "Pasar a pesos con Ripio",
+    nothingYet: "Cuando el agente te devuelva un gasto, lo vas a ver acá.",
+  },
+  /** Aportar (spec, 9, pantalla 3): where to send USDT or wARS from, and the button once the money has arrived. */
+  contribute: {
+    /** The two tabs: what the member has. */
+    haveUsdt: "Tengo USDT",
+    havePesos: "Tengo pesos en Ripio",
+    /** The USDT tab, when this week needs more than the account holds: `usdt` and `pesos` stand out as amounts. */
+    sendAtLeast: (usdt: ReactNode, pesos: ReactNode) => (
+      <>
+        Mandá al menos {usdt} a tu cuenta del fondo desde Binance o cualquier exchange: con eso cubrís {pesos} al precio de ahora.
+      </>
+    ),
+    /** The same, when the account already holds some USDT. */
+    sendAtLeastMore: (usdt: ReactNode, pesos: ReactNode) => (
+      <>
+        Mandá al menos {usdt} más a tu cuenta del fondo desde Binance o cualquier exchange: con lo que ya tenés, cubrís {pesos} al precio de ahora.
+      </>
+    ),
+    /** When there is nothing to send for the week, or no rate to say how much. */
+    sendUsdt: "Mandá USDT a tu cuenta del fondo desde Binance o cualquier exchange.",
+    /** Binance's minimum goes after either: `min` stands out. The second is for when the week needs less than that. */
+    binanceMinimum: (min: ReactNode) => <>Si lo retirás de Binance, el mínimo es {min}.</>,
+    binanceMinimumLeftover: (min: ReactNode) => <>Si lo retirás de Binance, el mínimo es {min}: lo que sobre queda en tu cuenta para la próxima.</>,
+    /** The wARS tab: Ripio's app is where they come from. */
+    ripioWithdraw: "En la app de Ripio, retirá wARS por la red Celo a tu cuenta del fondo. O cargalos directo:",
+    loadWithRipio: "Cargar pesos con Ripio",
+    /** The member's contribution went out and has no receipt yet. */
+    onItsWay: "Tu aporte está en camino. Cuando se confirme, lo ves en el fondo.",
+    nothingYet: "Todavía no llegó nada. Cuando llegue, aparece acá; puede tardar unos minutos.",
+    /** The fund is at its cap, in the panel: `cap` stands out. */
+    capReachedNotice: (cap: ReactNode) => <>El fondo llegó a su tope de {cap}: no entra más.</>,
+    amountLabel: "Cuánto aportás",
+    /** The button: `amount` is the one that will go in. */
+    submit: (amount: string) => `Aportar ${amount}`,
+    /** What is wrong with what was typed, as plain text under the field. */
+    accountHolds: (held: string) => `En tu cuenta tenés ${held}.`,
+    capReached: (cap: string) => `El fondo llegó a su tope de ${cap}: no entra más.`,
+    roomLeft: (room: string, cap: string) => `Al fondo le entran hasta ${room} más, porque tiene un tope de ${cap}.`,
+    usdtFormat: "Escribilo como 6 o 6,25.",
+    /** Under the USDT field: that it covers this week's contribution, or what it comes to. */
+    covers: (pesos: string) => `Cubre los ${pesos}, al precio de ahora.`,
+    worth: (pesos: string) => `Son unos ${pesos} al precio de ahora.`,
+  },
+  /** Cargar un gasto (spec, 9, pantalla 6). */
+  expense: {
+    which: "¿Qué gasto es?",
+    /** The first option: `expense` is what the creator wrote. */
+    agreed: (expense: string) => `${expense} (el gasto acordado)`,
+    other: "Otro gasto (se vota)",
+    amountLabel: "Cuánto pagaste",
+    /** An example in the empty field: written the way this language writes amounts. */
+    amountPlaceholder: "45.000",
+    noteLabel: "Nota (opcional)",
+    notePlaceholder: "La cancha del jueves",
+    submit: "Cargar el gasto",
+    looking: "El agente lo está mirando…",
+    /** The same kind and amount as one loaded a few minutes ago: `amount` stands out. */
+    twin: (amount: ReactNode) => <>Hace unos minutos cargaste un gasto de {amount}. ¿Es otro gasto igual?</>,
+    another: "Sí, es otro",
+    same: "No, es el mismo",
+  },
+  /** What happened to an expense a member loaded, by its status: the panel and the agent's card say the same. */
+  outcome: {
+    reimbursed: "Listo: el agente te devolvió la plata.",
+    proposed: "No entraba sin votación: el agente lo propuso y ahora lo vota el grupo.",
+    waiting: "El fondo todavía no tiene esos pesos: el agente te lo devuelve cuando entren.",
+    rejected: "El agente no puede devolver este gasto.",
+    blocked: "No se pudo procesar ahora. El agente lo vuelve a intentar en un rato.",
+    sending: "El agente ya lo mandó. En un rato aparece en los movimientos.",
+    /** Anything else: the expense is saved and the agent hasn't looked yet. */
+    new: "El agente está ocupado: lo procesa en unos minutos.",
+  },
+  /** Pasar a pesos (spec, 9, pantalla 8, and 9.2): the member's wARS, to their Ripio address. */
+  cashOut: {
+    /** After a pass that went well: `amount` stands out. */
+    passed: (amount: ReactNode) => <>Pasaste {amount} a Ripio. En un minuto lo ves en la app: ahí lo vendés 1:1 a pesos y lo pasás a tu banco.</>,
+    depositInstructions: "En la app de Ripio tocá Depositar, elegí wARS y la red Celo, y copiá la dirección.",
+    addressLabel: "Tu dirección de Ripio",
+    /** Over the address this browser remembers. */
+    savedAddress: "A tu cuenta de Ripio",
+    change: "Cambiar",
+    onItsWay: "Tu pase a pesos está en camino.",
+    nothingToPass: "No tenés pesos en tu cuenta para pasar.",
+    amountLabel: "Cuánto pasás",
+    submit: "Pasar a Ripio",
+    /** The button once there is an amount: `amount` is the one that will go. */
+    submitAmount: (amount: string) => `Pasar ${amount} a Ripio`,
+    /** What is wrong with the address pasted as the Ripio one. */
+    badAddress: "Esa dirección no parece válida. Copiala de nuevo desde Ripio.",
+    ownAccount: "Esa es tu cuenta del fondo. Pegá la de Ripio.",
+    ours: "Esa dirección es de TesorerIA, no de Ripio.",
+    /** What is wrong with the amount typed: more than the account holds. */
+    accountHolds: (held: string) => `Tenés ${held} en tu cuenta.`,
+  },
+  /** An address on Celo, wherever money is sent to one (spec, 9.2). */
+  network: {
+    warning: "Elegí la red CELO. Si elegís otra, la plata se pierde.",
+    copy: "Copiar la dirección",
+    copied: "Copiada",
+    /** For screen readers, and when the copy didn't work. */
+    copiedStatus: "Dirección copiada.",
+    copyFailed: "No se pudo copiar. Seleccioná la dirección y copiala.",
+  },
+  /** Votar, on an open proposal; "Votaste" afterwards is `movements.voted`. */
+  vote: {
+    button: "Votar",
+  },
+  /** Ejecutar, on a proposal that has its votes. */
+  execute: {
+    button: "Ejecutar",
   },
 };
 

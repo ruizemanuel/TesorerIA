@@ -54,11 +54,11 @@ export function VoteButton({ fund, proposalId, completes }: { fund: Address; pro
     }
   }
 
-  if (outcome === "voted") return <p className="mt-1 text-[13px] font-semibold text-muted">Votaste</p>;
+  if (outcome === "voted") return <p className="mt-1 text-[13px] font-semibold text-muted">{m.movements.voted}</p>;
   return (
     <div className="mt-2 grid justify-items-start gap-1">
       <Button variant="secondary" className="py-2" disabled={step !== "idle" || outcome !== "open"} onClick={vote}>
-        {step === "signing" ? "Confirmá con tu huella, tu cara o el PIN" : step === "sending" ? "Enviando…" : "Votar"}
+        {step === "signing" ? m.common.confirm : step === "sending" ? m.common.sending : m.vote.button}
       </Button>
       {error && (
         <p role="alert" className="text-sm text-owe">

@@ -31,6 +31,7 @@ export const en: Messages = {
     wrongPasskey: "Your passkey doesn't match your account. Log in again.",
     notCompleted: "The operation couldn't be completed. No money moved.",
     amountFormat: "Write it like 10,000 or 10,000.50.",
+    amountTooBig: (max: string) => `It can't be more than ${max}.`,
     notInAFund: "You aren't in any fund.",
     agentJustRan: "The agent just ran.",
     notYourDraft: "That draft isn't yours.",
@@ -305,5 +306,102 @@ export const en: Messages = {
   account: {
     reading: "Looking at your account…",
     readFailed: "We couldn't look at your account. We'll try again in a few seconds.",
+    youHave: (amount: ReactNode) => <>You have {amount} in your account.</>,
+    loggedInAs: (name: string) => `You're logged in as ${name}.`,
+    holds: (pesos: ReactNode) => <>Your account holds {pesos}</>,
+    holdsAnd: (pesos: ReactNode, usdt: ReactNode) => (
+      <>
+        Your account holds {pesos} and {usdt}
+      </>
+    ),
+    reimbursementsLand: "This is where the agent's reimbursements arrive.",
+    cashOut: "Cash out to pesos with Ripio",
+    nothingYet: "When the agent pays you back for an expense, you'll see it here.",
+  },
+  contribute: {
+    haveUsdt: "I have USDT",
+    havePesos: "I have pesos in Ripio",
+    sendAtLeast: (usdt: ReactNode, pesos: ReactNode) => (
+      <>
+        Send at least {usdt} to your fund account from Binance or any exchange: with that you cover {pesos} at the current price.
+      </>
+    ),
+    sendAtLeastMore: (usdt: ReactNode, pesos: ReactNode) => (
+      <>
+        Send at least {usdt} more to your fund account from Binance or any exchange: with what you already have, you cover {pesos} at the current price.
+      </>
+    ),
+    sendUsdt: "Send USDT to your fund account from Binance or any exchange.",
+    binanceMinimum: (min: ReactNode) => <>If you withdraw it from Binance, the minimum is {min}.</>,
+    binanceMinimumLeftover: (min: ReactNode) => (
+      <>If you withdraw it from Binance, the minimum is {min}: whatever is left over stays in your account for next time.</>
+    ),
+    ripioWithdraw: "In the Ripio app, withdraw wARS over the Celo network to your fund account. Or load them directly:",
+    loadWithRipio: "Load pesos with Ripio",
+    onItsWay: "Your contribution is on its way. Once it's confirmed, you'll see it in the fund.",
+    nothingYet: "Nothing has arrived yet. When it does, it'll show up here; it can take a few minutes.",
+    capReachedNotice: (cap: ReactNode) => <>The fund reached its cap of {cap}: no more fits.</>,
+    amountLabel: "How much to contribute",
+    submit: (amount: string) => `Contribute ${amount}`,
+    accountHolds: (held: string) => `Your account holds ${held}.`,
+    capReached: (cap: string) => `The fund reached its cap of ${cap}: no more fits.`,
+    roomLeft: (room: string, cap: string) => `The fund has room for up to ${room} more, because its cap is ${cap}.`,
+    usdtFormat: "Write it like 6 or 6.25.",
+    covers: (pesos: string) => `That covers ${pesos} at the current price.`,
+    worth: (pesos: string) => `That comes to about ${pesos} at the current price.`,
+  },
+  expense: {
+    which: "Which expense is it?",
+    agreed: (expense: string) => `${expense} (the agreed expense)`,
+    other: "Other expense (voted on)",
+    amountLabel: "How much you paid",
+    amountPlaceholder: "45,000",
+    noteLabel: "Note (optional)",
+    notePlaceholder: "Thursday's pitch",
+    submit: "Add the expense",
+    looking: "The agent is looking at it…",
+    twin: (amount: ReactNode) => <>A few minutes ago you added an expense of {amount}. Is this another expense just like it?</>,
+    another: "Yes, it's another one",
+    same: "No, it's the same one",
+  },
+  outcome: {
+    reimbursed: "Done: the agent paid you back.",
+    proposed: "It couldn't go through without a vote: the agent proposed it and now the group votes on it.",
+    waiting: "The fund doesn't have those pesos yet: the agent pays you back when they arrive.",
+    rejected: "The agent can't pay this expense back.",
+    blocked: "It couldn't be processed right now. The agent will try again in a while.",
+    sending: "The agent already sent it. It'll show up in the activity in a while.",
+    new: "The agent is busy: it'll process it in a few minutes.",
+  },
+  cashOut: {
+    passed: (amount: ReactNode) => (
+      <>You cashed out {amount} to Ripio. In a minute you'll see it in the app: there you sell it 1:1 for pesos and move it to your bank.</>
+    ),
+    depositInstructions: "In the Ripio app, tap Depositar (Deposit), pick wARS and the Celo network, and copy the address.",
+    addressLabel: "Your Ripio address",
+    savedAddress: "To your Ripio account",
+    change: "Change",
+    onItsWay: "Your cash-out to pesos is on its way.",
+    nothingToPass: "You have no pesos in your account to cash out.",
+    amountLabel: "How much to cash out",
+    submit: "Cash out to Ripio",
+    submitAmount: (amount: string) => `Cash out ${amount} to Ripio`,
+    badAddress: "That address doesn't look valid. Copy it again from Ripio.",
+    ownAccount: "That's your fund account. Paste your Ripio one.",
+    ours: "That address belongs to TesorerIA, not Ripio.",
+    accountHolds: (held: string) => `You have ${held} in your account.`,
+  },
+  network: {
+    warning: "Choose the CELO network. If you choose another, the money is lost.",
+    copy: "Copy the address",
+    copied: "Copied",
+    copiedStatus: "Address copied.",
+    copyFailed: "Couldn't copy it. Select the address and copy it.",
+  },
+  vote: {
+    button: "Vote",
+  },
+  execute: {
+    button: "Carry out",
   },
 };

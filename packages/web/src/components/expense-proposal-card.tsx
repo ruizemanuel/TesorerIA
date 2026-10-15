@@ -45,7 +45,7 @@ export function ExpenseProposalCard({
     const status = part.output.status;
     return (
       <p role="status" className="rounded-[14px] bg-tint p-3 font-semibold text-primary">
-        {status === "dismissed" ? "No lo cargué." : expenseOutcome(status)}
+        {status === "dismissed" ? "No lo cargué." : expenseOutcome(status, m)}
       </p>
     );
   }

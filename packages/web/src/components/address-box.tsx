@@ -2,19 +2,18 @@
 
 import QRCode from "qrcode";
 import { useEffect, useState } from "react";
+import { useMessages } from "../lib/i18n/client";
 import { Button } from "./ui";
 
 /** The warning that goes with an address on Celo, wherever money is sent to one (spec, 9.2). */
 export function NetworkWarning() {
-  return (
-    <p className="rounded-[14px] border-2 border-owe bg-owe-tint p-3 text-[15px] font-bold text-owe">
-      Elegí la red CELO. Si elegís otra, la plata se pierde.
-    </p>
-  );
+  const m = useMessages();
+  return <p className="rounded-[14px] border-2 border-owe bg-owe-tint p-3 text-[15px] font-bold text-owe">{m.network.warning}</p>;
 }
 
 /** Your account's address, only here (spec, 9.2): whole, as wallets show it, with its QR, "Copiar" and the network warning. */
 export function AddressBox({ address }: { address: string }) {
+  const m = useMessages();
   const [svg, setSvg] = useState("");
   const [copied, setCopied] = useState<"yes" | "failed" | null>(null);
   useEffect(() => {
@@ -47,10 +46,10 @@ export function AddressBox({ address }: { address: string }) {
           }
         }}
       >
-        {copied === "yes" ? "Copiada" : "Copiar la dirección"}
+        {copied === "yes" ? m.network.copied : m.network.copy}
       </Button>
       <p role="status" className={copied === "failed" ? "text-sm text-owe" : "sr-only"}>
-        {copied === "yes" ? "Dirección copiada." : copied === "failed" ? "No se pudo copiar. Seleccioná la dirección y copiala." : ""}
+        {copied === "yes" ? m.network.copiedStatus : copied === "failed" ? m.network.copyFailed : ""}
       </p>
     </div>
   );

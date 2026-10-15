@@ -25,7 +25,7 @@ import {
 } from "../lib/contribute";
 import { USDT_UNIT, formatPesos, formatUsdt } from "../lib/format";
 import { DEFAULT_BALANCE_CAP, memberFundAbi } from "../lib/fund-abi";
-import { useMessages } from "../lib/i18n/client";
+import { useLocale, useMessages } from "../lib/i18n/client";
 import { AddressBox } from "./address-box";
 import { AmountField } from "./amount-field";
 import { useRefresh } from "./refresh-provider";
@@ -64,6 +64,7 @@ export function ContributePanel({
   contributionOnItsWay: boolean;
 }) {
   const m = useMessages();
+  const locale = useLocale();
   const router = useRouter();
   const { refresh } = useRefresh();
   const [tab, setTab] = useState<Token>("usdt");
@@ -104,23 +105,26 @@ export function ContributePanel({
   }, [account, fund]);
 
   const room = roomUnderCap(balance);
-  const cap = formatPesos(DEFAULT_BALANCE_CAP);
+  const cap = formatPesos(DEFAULT_BALANCE_CAP, locale);
   // This week's contribution, in pesos: what both tabs offer, and what the USDT one says how much to send for.
   const target = weeklyContribution({ owed, weeklyFee, room });
   // Reimbursements land in this same account, so wARS are offered by what the member owes, never by what they hold (F7).
   const warsDefault = defaultWarsAmount({ held: held?.wars ?? 0n, owed, weeklyFee, room });
-  const warsReading = readPesosAmount(typed ?? pesosText(warsDefault), { held: held?.wars ?? 0n, room });
+  const warsReading = readPesosAmount(typed ?? pesosText(warsDefault, locale), { held: held?.wars ?? 0n, room }, m);
   // USDT too: what covers the week at the fund's rate, which moves, so the default follows it until the member types.
   const usdtOffer = { held: held?.usdt ?? 0n, rate: held?.rate ?? null, owed, weeklyFee, room };
   const usdtDefault = defaultUsdtAmount(usdtOffer);
-  const usdtReading = typedUsdt === null ? ({ ok: true, amount: usdtDefault } as const) : readUsdtAmount(typedUsdt, usdtOffer);
+  const usdtReading = typedUsdt === null ? ({ ok: true, amount: usdtDefault } as const) : readUsdtAmount(typedUsdt, usdtOffer, m);
   const toSend = held === null ? null : usdtToSend(usdtOffer);
   const reading = tab === "usdt" ? usdtReading : warsReading;
   const amount = reading.ok ? reading.amount : 0n;
-  const label = tab === "usdt" ? formatUsdt(amount) : formatPesos(amount);
+  const label = tab === "usdt" ? formatUsdt(amount, locale) : formatPesos(amount, locale);
   const holding = held === null ? 0n : held[tab];
   // Whether the server knows of one (a reopened panel, another tab) or this click just sent one: either way, no second.
   const onItsWay = contributionOnItsWay || sentNow;
+  // What the USDT tab says over the address: how much to send ("more" once some USDT is already held), and Binance's minimum.
+  const sendAtLeast = held !== null && held.usdt > 0n ? m.contribute.sendAtLeastMore : m.contribute.sendAtLeast;
+  const binanceMinimum = toSend !== null && toSend > 0n && toSend < MIN_BINANCE_USDT ? m.contribute.binanceMinimumLeftover : m.contribute.binanceMinimum;
 
   async function contribute() {
     if (busy.current || amount === 0n) return;
@@ -161,7 +165,7 @@ export function ContributePanel({
             onClick={() => setTab(token)}
             className={`min-h-11 rounded-[11px] text-sm font-bold ${tab === token ? "bg-surface text-primary" : "text-muted"}`}
           >
-            {token === "usdt" ? "Tengo USDT" : "Tengo pesos en Ripio"}
+            {token === "usdt" ? m.contribute.haveUsdt : m.contribute.havePesos}
           </button>
         ))}
       </div>
@@ -169,29 +173,21 @@ export function ContributePanel({
       <div role="tabpanel" className="grid gap-4">
         {tab === "usdt" ? (
           <p>
-            {toSend !== null && toSend > 0n ? (
-              <>
-                Mandá al menos <span className="money font-semibold">{formatUsdt(toSend)}</span>
-                {held !== null && held.usdt > 0n ? " más" : ""} a tu cuenta del fondo desde Binance o cualquier exchange:{" "}
-                {held !== null && held.usdt > 0n ? "con lo que ya tenés, " : "con eso "}cubrís{" "}
-                <span className="money">{formatPesos(target)}</span> al precio de ahora.
-              </>
-            ) : (
-              "Mandá USDT a tu cuenta del fondo desde Binance o cualquier exchange."
-            )}{" "}
-            Si lo retirás de Binance, el mínimo es <span className="money">{formatUsdt(MIN_BINANCE_USDT)}</span>
-            {toSend !== null && toSend > 0n && toSend < MIN_BINANCE_USDT ? ": lo que sobre queda en tu cuenta para la próxima." : "."}
+            {toSend !== null && toSend > 0n
+              ? sendAtLeast(<span className="money font-semibold">{formatUsdt(toSend, locale)}</span>, <span className="money">{formatPesos(target, locale)}</span>)
+              : m.contribute.sendUsdt}{" "}
+            {binanceMinimum(<span className="money">{formatUsdt(MIN_BINANCE_USDT, locale)}</span>)}
           </p>
         ) : (
           <div className="grid gap-2">
-            <p>En la app de Ripio, retirá wARS por la red Celo a tu cuenta del fondo. O cargalos directo:</p>
+            <p>{m.contribute.ripioWithdraw}</p>
             <ButtonLink
               href={rampUrl(account, target)}
               target="_blank"
               rel="noreferrer"
               variant="secondary"
             >
-              Cargar pesos con Ripio
+              {m.contribute.loadWithRipio}
             </ButtonLink>
           </div>
         )}
@@ -200,40 +196,40 @@ export function ContributePanel({
 
         <div className="grid gap-3 rounded-[14px] bg-surface p-4">
           {onItsWay ? (
-            !sentNow && <p className="font-semibold">Tu aporte está en camino. Cuando se confirme, lo ves en el fondo.</p>
+            !sentNow && <p className="font-semibold">{m.contribute.onItsWay}</p>
           ) : held === null ? (
-            <p className="text-muted">{lookFailed ? "No pudimos mirar tu cuenta. Probamos de nuevo en unos segundos." : "Mirando tu cuenta…"}</p>
+            <p className="text-muted">{lookFailed ? m.account.readFailed : m.account.reading}</p>
           ) : holding === 0n ? (
-            <p className="text-muted">Todavía no llegó nada. Cuando llegue, aparece acá; puede tardar unos minutos.</p>
+            <p className="text-muted">{m.contribute.nothingYet}</p>
           ) : room === 0n || (tab === "usdt" && usdtDefault === 0n) ? (
-            <p className="font-semibold text-owe">
-              El fondo llegó a su tope de <span className="money">{cap}</span>: no entra más.
-            </p>
+            <p className="font-semibold text-owe">{m.contribute.capReachedNotice(<span className="money">{cap}</span>)}</p>
           ) : (
             <>
               <p>
-                Tenés <span className="money font-semibold">{tab === "usdt" ? formatUsdt(held.usdt) : formatPesos(held.wars)}</span> en tu cuenta.
+                {m.account.youHave(
+                  <span className="money font-semibold">{tab === "usdt" ? formatUsdt(held.usdt, locale) : formatPesos(held.wars, locale)}</span>,
+                )}
               </p>
               {tab === "usdt" ? (
                 <AmountField
-                  label="Cuánto aportás"
-                  value={typedUsdt ?? usdtText(usdtDefault)}
+                  label={m.contribute.amountLabel}
+                  value={typedUsdt ?? usdtText(usdtDefault, locale)}
                   problem={usdtReading.ok ? "" : usdtReading.error}
-                  note={usdtReading.ok && held.rate !== null ? usdtWorthText(usdtReading.amount, held.rate, target) : undefined}
+                  note={usdtReading.ok && held.rate !== null ? usdtWorthText(usdtReading.amount, held.rate, target, m) : undefined}
                   disabled={step !== "idle"}
                   onChange={setTypedUsdt}
                 />
               ) : (
                 <AmountField
-                  label="Cuánto aportás"
-                  value={typed ?? pesosText(warsDefault)}
+                  label={m.contribute.amountLabel}
+                  value={typed ?? pesosText(warsDefault, locale)}
                   problem={warsReading.ok ? "" : warsReading.error}
                   disabled={step !== "idle"}
                   onChange={setTyped}
                 />
               )}
               <Button disabled={step !== "idle" || amount === 0n} onClick={contribute}>
-                {step === "signing" ? "Confirmá con tu huella, tu cara o el PIN" : step === "sending" ? "Enviando…" : `Aportar ${label}`}
+                {step === "signing" ? m.common.confirm : step === "sending" ? m.common.sending : m.contribute.submit(label)}
               </Button>
             </>
           )}
