@@ -146,12 +146,17 @@ describe("an amount typed in one language and read in the other (Review Focus 2)
   // one of them: never read as a different amount.
   it("is refused, or read as the same amount", () => {
     const written = ["10.000", "10,000", "10.5", "10,5", "1.000,50", "1,000.50", "1.5", "1,50", "100", "0,5", "0.5", "1.000.000", "1,000,000", "12.34", "12,34"];
+    // Park-Miller: the product stays under 2^53, so the generator keeps going and the separators actually come up.
     let seed = 42;
-    const next = () => (seed = (seed * 1_103_515_245 + 12_345) % 2_147_483_648);
+    const next = () => (seed = (seed * 16_807) % 2_147_483_647);
+    const random: string[] = [];
     for (let i = 0; i < 5_000; i++) {
       const length = 1 + (next() % 9);
-      written.push(Array.from({ length }, () => "0123456789.,"[next() % 12]).join(""));
+      random.push(Array.from({ length }, () => "0123456789.,"[next() % 12]).join(""));
     }
+    // Guards the generator itself: if it ever stops drawing "." and ",", the loop below proves nothing.
+    expect(random.filter((text) => /[.,]/.test(text)).length).toBeGreaterThan(2_000);
+    written.push(...random);
     for (const text of written) {
       const es = parsePesos(text, "es");
       const en = parsePesos(text, "en");
