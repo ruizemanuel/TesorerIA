@@ -3,10 +3,13 @@ import { currentUser } from "../../../lib/current-user";
 import { getDb } from "../../../lib/db/client";
 import { credentials } from "../../../lib/db/schema";
 import { jsonError } from "../../../lib/http";
+import { localeOf } from "../../../lib/i18n/locales";
+import { messagesFor } from "../../../lib/i18n/messages";
 
-export async function GET() {
+export async function GET(request: Request) {
+  const m = messagesFor(localeOf(request));
   const user = await currentUser();
-  if (user === null) return jsonError(401, "Entrá con tu passkey.");
+  if (user === null) return jsonError(401, m.errors.logIn);
   const db = await getDb();
   const [credential] = await db
     .select({ id: credentials.id, publicKey: credentials.publicKey })

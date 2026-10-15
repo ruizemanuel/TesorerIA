@@ -73,6 +73,32 @@ describe("readJson with maxBytes", () => {
   });
 });
 
+describe("readJson in the request's language", () => {
+  it("answers in the language of the request", async () => {
+    const english = new Request("http://localhost/x", {
+      method: "POST",
+      headers: { "content-type": "application/json", "accept-language": "en-US" },
+      body: "{",
+    });
+    const result = await readJson(english, z.object({ a: z.string() }));
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(await result.response.json()).toEqual({ error: "Something went wrong. Try again." });
+  });
+
+  it("says what is wrong with a body in each language, the cookie before the browser's languages", async () => {
+    const answer = async (headers: Record<string, string>, body: string, options?: { maxBytes: number }) => {
+      const result = await readJson(new Request("http://localhost/x", { method: "POST", headers: { "content-type": "application/json", ...headers }, body }), schema, options);
+      return result.ok ? null : await result.response.json();
+    };
+    expect(await answer({ "accept-language": "en" }, '{"name":5}')).toEqual({ error: "Some details are missing or aren't valid." });
+    expect(await answer({ cookie: "lang=es", "accept-language": "en" }, '{"name":5}')).toEqual({ error: "Faltan datos o no son válidos." });
+    expect(await answer({ cookie: "lang=en" }, JSON.stringify({ name: "a".repeat(200) }), { maxBytes: 100 })).toEqual({
+      error: "Some details are missing or aren't valid.",
+    });
+    expect(await answer({}, "{nope")).toEqual({ error: "Algo falló. Probá de nuevo." });
+  });
+});
+
 describe("jsonError", () => {
   it("answers the status with the message in an error field", async () => {
     const response = jsonError(409, "Ya existe.");

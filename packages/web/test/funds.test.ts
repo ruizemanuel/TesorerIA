@@ -1,4 +1,5 @@
 import { AGENT_ADDRESS, FUND_FACTORY, fundFactoryAbi } from "@tesoreria/agent";
+import { eq } from "drizzle-orm";
 import { type Address, type Hash, type Hex, decodeFunctionData, encodeAbiParameters, encodeEventTopics, getAddress, pad } from "viem";
 import { generatePrivateKey, privateKeyToAddress } from "viem/accounts";
 import { describe, expect, it, vi } from "vitest";
@@ -6,8 +7,8 @@ import { agentAddress } from "../src/lib/agent-address";
 import type { UserOperationFinder } from "../src/lib/chain";
 import { claimCreateFundNonce } from "../src/lib/create-fund-cap";
 import type { Db } from "../src/lib/db/client";
-import { funds, memberships, operations } from "../src/lib/db/schema";
-import { MAX_PESOS } from "../src/lib/format";
+import { createFundNonces, funds, memberships, operations } from "../src/lib/db/schema";
+import { MAX_PESOS, formatPesos } from "../src/lib/format";
 import {
   cancelDeploy,
   confirmDeploy,
@@ -19,6 +20,8 @@ import {
   fundsOf,
   joinFund,
 } from "../src/lib/funds";
+import { en } from "../src/lib/i18n/en";
+import { es } from "../src/lib/i18n/es";
 import { PENDING_FOR_MS, finishOperation, recordOperation } from "../src/lib/operations";
 import { addLiveFund, addUser, testDb } from "./support/db";
 import { AGENT, FUND as NEW_FUND, WARS } from "./support/fixtures";
@@ -31,9 +34,9 @@ const DRAFT = { name: "Fútbol de los jueves", agreedExpense: "la cancha", weekl
 async function group(db: Db, size = 3) {
   const people = [];
   for (const name of ["Ana", "Beto", "Caro", "Dani"].slice(0, size)) people.push(await addUser(db, name));
-  const created = await createDraft(db, people[0]!.id, DRAFT);
+  const created = await createDraft(db, people[0]!.id, DRAFT, es);
   if (!created.ok) throw new Error(created.error);
-  for (const person of people.slice(1)) await joinFund(db, person.id, created.inviteCode);
+  for (const person of people.slice(1)) await joinFund(db, person.id, created.inviteCode, es);
   return { people, fundId: created.id, inviteCode: created.inviteCode };
 }
 
@@ -89,27 +92,27 @@ describe("drafts and invitations", () => {
     expect(draft).toMatchObject({ name: "Fútbol de los jueves", status: "draft", creatorName: "Ana", weeklyFee: 10_000n * WARS });
     expect(draft?.members.map((m) => m.name)).toEqual(["Ana", "Beto", "Caro"]);
     expect(inviteCode).toMatch(/^[A-Za-z0-9_-]{12}$/);
-    expect(await joinFund(db, people[1]!.id, inviteCode)).toMatchObject({ ok: true }); // joining twice is fine
+    expect(await joinFund(db, people[1]!.id, inviteCode, es)).toMatchObject({ ok: true }); // joining twice is fine
     expect(await draftByInvite(db, inviteCode).then((d) => d?.members.length)).toBe(3);
-    expect(await joinFund(db, people[1]!.id, "nope")).toMatchObject({ ok: false, status: 404 });
+    expect(await joinFund(db, people[1]!.id, "nope", es)).toMatchObject({ ok: false, status: 404 });
   });
 
   it("refuses a draft without a name, a fee or a cap, or with an amount nobody means", async () => {
     const db = await testDb();
     const ana = await addUser(db, "Ana");
-    expect(await createDraft(db, ana.id, { ...DRAFT, name: " " })).toMatchObject({ ok: false, status: 400 });
-    expect(await createDraft(db, ana.id, { ...DRAFT, agreedExpense: "x".repeat(41) })).toMatchObject({ ok: false, status: 400 });
-    expect(await createDraft(db, ana.id, { ...DRAFT, weeklyFee: 0n })).toMatchObject({ ok: false, status: 400 });
-    expect(await createDraft(db, ana.id, { ...DRAFT, weeklyCap: 0n })).toMatchObject({ ok: false, status: 400 });
-    expect(await createDraft(db, ana.id, { ...DRAFT, weeklyFee: MAX_PESOS + 1n })).toMatchObject({ ok: false, status: 400 });
-    expect(await createDraft(db, ana.id, { ...DRAFT, weeklyCap: MAX_PESOS + 1n })).toMatchObject({ ok: false, status: 400 });
-    expect(await createDraft(db, ana.id, { ...DRAFT, weeklyCap: MAX_PESOS })).toMatchObject({ ok: true });
+    expect(await createDraft(db, ana.id, { ...DRAFT, name: " " }, es)).toMatchObject({ ok: false, status: 400 });
+    expect(await createDraft(db, ana.id, { ...DRAFT, agreedExpense: "x".repeat(41) }, es)).toMatchObject({ ok: false, status: 400 });
+    expect(await createDraft(db, ana.id, { ...DRAFT, weeklyFee: 0n }, es)).toMatchObject({ ok: false, status: 400 });
+    expect(await createDraft(db, ana.id, { ...DRAFT, weeklyCap: 0n }, es)).toMatchObject({ ok: false, status: 400 });
+    expect(await createDraft(db, ana.id, { ...DRAFT, weeklyFee: MAX_PESOS + 1n }, es)).toMatchObject({ ok: false, status: 400 });
+    expect(await createDraft(db, ana.id, { ...DRAFT, weeklyCap: MAX_PESOS + 1n }, es)).toMatchObject({ ok: false, status: 400 });
+    expect(await createDraft(db, ana.id, { ...DRAFT, weeklyCap: MAX_PESOS }, es)).toMatchObject({ ok: true });
   });
 
   it("orders people who joined at the same instant by their id, so every reader gets the same list", async () => {
     const db = await testDb();
     const ana = await addUser(db, "Ana");
-    const created = await createDraft(db, ana.id, DRAFT);
+    const created = await createDraft(db, ana.id, DRAFT, es);
     if (!created.ok) throw new Error(created.error);
     const others = [await addUser(db, "Beto"), await addUser(db, "Caro"), await addUser(db, "Dani")].map((p) => p.id).sort();
     const sameInstant = new Date(Date.now() + 60_000);
@@ -118,7 +121,7 @@ describe("drafts and invitations", () => {
 
     const draft = await draftById(db, created.id);
     expect(draft?.members.map((m) => m.userId)).toEqual([ana.id, ...others]);
-    const result = await deployCall(db, { fundId: created.id, userId: ana.id, votesRequired: 2, agent: AGENT });
+    const result = await deployCall(db, { fundId: created.id, userId: ana.id, votesRequired: 2, agent: AGENT, m: es });
     if (!result.ok) throw new Error(result.error);
     const { args } = decodeFunctionData({ abi: fundFactoryAbi, data: result.call.data });
     expect(args?.[0]).toMatchObject({ members: draft?.members.map((m) => m.account) });
@@ -127,11 +130,11 @@ describe("drafts and invitations", () => {
   it("gives the tenth place to only one of two people who join at once", async () => {
     const db = await testDb();
     const { fundId, inviteCode } = await group(db);
-    for (const name of ["Dani", "Eli", "Fede", "Gabi", "Hugo", "Inés"]) await joinFund(db, (await addUser(db, name)).id, inviteCode);
+    for (const name of ["Dani", "Eli", "Fede", "Gabi", "Hugo", "Inés"]) await joinFund(db, (await addUser(db, name)).id, inviteCode, es);
     const [juan, kari] = [await addUser(db, "Juan"), await addUser(db, "Kari")];
 
     // Both read nine before either writes: only the insert itself can tell them apart.
-    const results = await Promise.all([joinFund(db, juan.id, inviteCode), joinFund(db, kari.id, inviteCode)]);
+    const results = await Promise.all([joinFund(db, juan.id, inviteCode, es), joinFund(db, kari.id, inviteCode, es)]);
     expect(results.filter((result) => result.ok)).toHaveLength(1);
     expect(results.find((result) => !result.ok)).toEqual({ ok: false, status: 409, error: "El fondo ya tiene 10 personas, que es el máximo." });
     expect((await draftById(db, fundId))?.members).toHaveLength(10);
@@ -145,11 +148,11 @@ describe("drafts and invitations", () => {
     const transactions = recordTransactions(db);
     const lock = /^select .* from "funds" where "funds"."id" = \$1 for update$/;
 
-    expect(await joinFund(db, (await addUser(db, "Dani")).id, inviteCode)).toMatchObject({ ok: true });
+    expect(await joinFund(db, (await addUser(db, "Dani")).id, inviteCode, es)).toMatchObject({ ok: true });
     expect(transactions).toHaveLength(1);
     expect(transactions[0]).toEqual([expect.stringMatching(lock), expect.stringMatching(/^insert into "memberships"/)]);
 
-    expect(await deployCall(db, { fundId, userId: people[0]!.id, votesRequired: 2, agent: AGENT })).toMatchObject({ ok: true });
+    expect(await deployCall(db, { fundId, userId: people[0]!.id, votesRequired: 2, agent: AGENT, m: es })).toMatchObject({ ok: true });
     expect(transactions).toHaveLength(2);
     expect(transactions[1]).toEqual([
       expect.stringMatching(lock),
@@ -161,7 +164,7 @@ describe("drafts and invitations", () => {
   it("finds nothing for an id that isn't one, instead of failing", async () => {
     const db = await testDb();
     expect(await draftById(db, "nope")).toBeNull();
-    expect(await deployCall(db, { fundId: "nope", userId: crypto.randomUUID(), votesRequired: 2, agent: AGENT })).toMatchObject({ ok: false, status: 404 });
+    expect(await deployCall(db, { fundId: "nope", userId: crypto.randomUUID(), votesRequired: 2, agent: AGENT, m: es })).toMatchObject({ ok: false, status: 404 });
   });
 
   it("lists a person's funds, live ones first", async () => {
@@ -179,7 +182,7 @@ describe("deployCall", () => {
   it("builds createFund for the creator, with the members in the order they joined and the votes they chose", async () => {
     const db = await testDb();
     const { people, fundId, inviteCode } = await group(db);
-    const result = await deployCall(db, { fundId, userId: people[0]!.id, votesRequired: 2, agent: AGENT });
+    const result = await deployCall(db, { fundId, userId: people[0]!.id, votesRequired: 2, agent: AGENT, m: es });
     if (!result.ok) throw new Error(result.error);
     expect(result.call.to).toBe(FUND_FACTORY);
     const { args } = decodeFunctionData({ abi: fundFactoryAbi, data: result.call.data });
@@ -194,27 +197,27 @@ describe("deployCall", () => {
     });
     // Nobody joins while it's being created: the chain would get a different list.
     const late = await addUser(db, "Dani");
-    expect(await joinFund(db, late.id, inviteCode)).toMatchObject({ ok: false, status: 409 });
-    expect(await joinFund(db, people[1]!.id, inviteCode)).toMatchObject({ ok: true }); // someone already in still gets in
+    expect(await joinFund(db, late.id, inviteCode, es)).toMatchObject({ ok: false, status: 409 });
+    expect(await joinFund(db, people[1]!.id, inviteCode, es)).toMatchObject({ ok: true }); // someone already in still gets in
   });
 
   it("refuses anyone but the creator, fewer than 3 people, and votes outside 2 to members − 1", async () => {
     const db = await testDb();
     const three = await group(db);
-    expect(await deployCall(db, { fundId: three.fundId, userId: three.people[1]!.id, votesRequired: 2, agent: AGENT })).toMatchObject({ ok: false, status: 403 });
+    expect(await deployCall(db, { fundId: three.fundId, userId: three.people[1]!.id, votesRequired: 2, agent: AGENT, m: es })).toMatchObject({ ok: false, status: 403 });
     for (const votes of [1, 3, 2.5]) {
-      expect(await deployCall(db, { fundId: three.fundId, userId: three.people[0]!.id, votesRequired: votes, agent: AGENT })).toMatchObject({ ok: false, status: 400 });
+      expect(await deployCall(db, { fundId: three.fundId, userId: three.people[0]!.id, votesRequired: votes, agent: AGENT, m: es })).toMatchObject({ ok: false, status: 400 });
     }
     expect((await draftById(db, three.fundId))?.status).toBe("draft"); // a refused call freezes nothing
     const two = await group(db, 2);
-    expect(await deployCall(db, { fundId: two.fundId, userId: two.people[0]!.id, votesRequired: 2, agent: AGENT })).toMatchObject({ ok: false, status: 409 });
+    expect(await deployCall(db, { fundId: two.fundId, userId: two.people[0]!.id, votesRequired: 2, agent: AGENT, m: es })).toMatchObject({ ok: false, status: 409 });
   });
 
   it("refuses more than 10 people, which createFund would always revert", async () => {
     const db = await testDb();
     const { people, fundId } = await group(db);
     for (let i = 0; i < 8; i++) await db.insert(memberships).values({ fundId, userId: (await addUser(db, `P${i}`)).id });
-    expect(await deployCall(db, { fundId, userId: people[0]!.id, votesRequired: 2, agent: AGENT })).toEqual({
+    expect(await deployCall(db, { fundId, userId: people[0]!.id, votesRequired: 2, agent: AGENT, m: es })).toEqual({
       ok: false,
       status: 409,
       error: "Un fondo puede tener hasta 10 personas, y este tiene 11.",
@@ -225,7 +228,7 @@ describe("deployCall", () => {
   it("keeps the votes a first tab is signing: a second one can't change them while it's being created", async () => {
     const db = await testDb();
     const { people, fundId } = await group(db, 4);
-    const call = (votesRequired: number) => deployCall(db, { fundId, userId: people[0]!.id, votesRequired, agent: AGENT });
+    const call = (votesRequired: number) => deployCall(db, { fundId, userId: people[0]!.id, votesRequired, agent: AGENT, m: es });
     const first = await call(2);
     expect(await call(3)).toEqual({ ok: false, status: 409, error: "Ya empezaste a crear el fondo con 2 votos necesarios: elegí 2 para seguir." });
     expect((await draftById(db, fundId))?.votesRequired).toBe(2);
@@ -240,16 +243,16 @@ describe("cancelDeploy", () => {
     const ana = people[0]!.id;
     const late = await addUser(db, "Dani");
 
-    await deployCall(db, { fundId, userId: ana, votesRequired: 2, agent: AGENT });
-    expect(await cancelDeploy(db, { fundId, userId: people[1]!.id })).toMatchObject({ ok: false, status: 403 });
-    expect(await cancelDeploy(db, { fundId, userId: ana })).toEqual({ ok: true, reopened: true });
+    await deployCall(db, { fundId, userId: ana, votesRequired: 2, agent: AGENT, m: es });
+    expect(await cancelDeploy(db, { fundId, userId: people[1]!.id, m: es })).toMatchObject({ ok: false, status: 403 });
+    expect(await cancelDeploy(db, { fundId, userId: ana, m: es })).toEqual({ ok: true, reopened: true });
     expect(await draftById(db, fundId)).toMatchObject({ status: "draft", votesRequired: null });
 
-    await deployCall(db, { fundId, userId: ana, votesRequired: 2, agent: AGENT });
+    await deployCall(db, { fundId, userId: ana, votesRequired: 2, agent: AGENT, m: es });
     await recordOperation(db, ana, { userOpHash: OP, kind: "create-fund", draftId: fundId });
     await finishOperation(db, ana, { userOpHash: OP, transactionHash: TX, success: false });
-    expect(await cancelDeploy(db, { fundId, userId: ana })).toEqual({ ok: true, reopened: true });
-    expect(await joinFund(db, late.id, inviteCode)).toMatchObject({ ok: true, status: "draft" });
+    expect(await cancelDeploy(db, { fundId, userId: ana, m: es })).toEqual({ ok: true, reopened: true });
+    expect(await joinFund(db, late.id, inviteCode, es)).toMatchObject({ ok: true, status: "draft" });
   });
 
   it("keeps the list frozen while a createFund for it is on its way or went through", async () => {
@@ -257,14 +260,14 @@ describe("cancelDeploy", () => {
     const { people, fundId, inviteCode } = await group(db);
     const ana = people[0]!.id;
     const late = await addUser(db, "Dani");
-    await deployCall(db, { fundId, userId: ana, votesRequired: 2, agent: AGENT });
+    await deployCall(db, { fundId, userId: ana, votesRequired: 2, agent: AGENT, m: es });
     await recordOperation(db, ana, { userOpHash: OP, kind: "create-fund", draftId: fundId });
 
-    expect(await cancelDeploy(db, { fundId, userId: ana })).toEqual({ ok: true, reopened: false });
+    expect(await cancelDeploy(db, { fundId, userId: ana, m: es })).toEqual({ ok: true, reopened: false });
     await finishOperation(db, ana, { userOpHash: OP, transactionHash: TX, success: true });
-    expect(await cancelDeploy(db, { fundId, userId: ana })).toEqual({ ok: true, reopened: false });
+    expect(await cancelDeploy(db, { fundId, userId: ana, m: es })).toEqual({ ok: true, reopened: false });
     expect(await draftById(db, fundId)).toMatchObject({ status: "deploying", votesRequired: 2 });
-    expect(await joinFund(db, late.id, inviteCode)).toMatchObject({ ok: false, status: 409 });
+    expect(await joinFund(db, late.id, inviteCode, es)).toMatchObject({ ok: false, status: 409 });
   });
 });
 
@@ -275,9 +278,9 @@ describe("confirmDeploy", () => {
     const other = await group(db); // another group's draft, there before any confirmation: it must stay untouched
     const creator = getAddress(people[0]!.account);
     const members = people.map((p) => getAddress(p.account));
-    await deployCall(db, { fundId, userId: people[0]!.id, votesRequired: 2, agent: AGENT });
+    await deployCall(db, { fundId, userId: people[0]!.id, votesRequired: 2, agent: AGENT, m: es });
     const confirm = (client: ReturnType<typeof fakeClient>, userId = people[0]!.id) =>
-      confirmDeploy(db, { fundId, userId, transactionHash: TX, client: client as never, agent: AGENT, factory: FUND_FACTORY });
+      confirmDeploy(db, { fundId, userId, transactionHash: TX, client: client as never, agent: AGENT, factory: FUND_FACTORY, m: es });
 
     expect(await confirm(fakeClient([{ address: FUND_FACTORY, fund: NEW_FUND, creator: members[1]! }], settingsFor(members)))).toMatchObject({ ok: false, status: 409 });
     const impostor = getAddress("0x00000000000000000000000000000000000000ff");
@@ -297,13 +300,13 @@ describe("confirmDeploy", () => {
     const db = await testDb();
     const { people, fundId } = await group(db);
     const members = people.map((p) => getAddress(p.account));
-    await deployCall(db, { fundId, userId: people[0]!.id, votesRequired: 2, agent: AGENT });
+    await deployCall(db, { fundId, userId: people[0]!.id, votesRequired: 2, agent: AGENT, m: es });
     // The bundler saw it land; our node is two reads behind.
     const lagging = fakeClient([{ address: FUND_FACTORY, fund: NEW_FUND, creator: members[0]! }], settingsFor(members));
     lagging.getTransactionReceipt.mockRejectedValueOnce(new Error("receipt not found")).mockRejectedValueOnce(new Error("receipt not found"));
     const wait = { tries: 5, everyMs: 0 };
     expect(
-      await confirmDeploy(db, { fundId, userId: people[0]!.id, transactionHash: TX, client: lagging as never, agent: AGENT, factory: FUND_FACTORY, wait }),
+      await confirmDeploy(db, { fundId, userId: people[0]!.id, transactionHash: TX, client: lagging as never, agent: AGENT, factory: FUND_FACTORY, wait, m: es }),
     ).toEqual({ ok: true, address: NEW_FUND });
     expect(lagging.getTransactionReceipt).toHaveBeenCalledTimes(3);
     expect(await draftById(db, fundId)).toMatchObject({ status: "live", address: NEW_FUND });
@@ -312,12 +315,12 @@ describe("confirmDeploy", () => {
   it("answers that it isn't confirmed only after its tries, and keeps the draft being created", async () => {
     const db = await testDb();
     const { people, fundId } = await group(db);
-    await deployCall(db, { fundId, userId: people[0]!.id, votesRequired: 2, agent: AGENT });
+    await deployCall(db, { fundId, userId: people[0]!.id, votesRequired: 2, agent: AGENT, m: es });
     const unreachable = fakeClient([], []);
     unreachable.getTransactionReceipt.mockRejectedValue(new Error("receipt not found"));
     const wait = { tries: 3, everyMs: 0 };
     expect(
-      await confirmDeploy(db, { fundId, userId: people[0]!.id, transactionHash: TX, client: unreachable as never, agent: AGENT, factory: FUND_FACTORY, wait }),
+      await confirmDeploy(db, { fundId, userId: people[0]!.id, transactionHash: TX, client: unreachable as never, agent: AGENT, factory: FUND_FACTORY, wait, m: es }),
     ).toMatchObject({ ok: false, status: 409, error: "La operación todavía no se confirmó. Probá en un rato." });
     expect(unreachable.getTransactionReceipt).toHaveBeenCalledTimes(3);
     expect((await draftById(db, fundId))?.status).toBe("deploying");
@@ -332,7 +335,7 @@ describe("deployStep", () => {
     /** The chain's log search for UserOperationEvents: by default, it finds nothing. */
     const findOperation = vi.fn<UserOperationFinder>(async () => null);
     const step = (client: ReturnType<typeof fakeClient>, votesRequired = 2, createFundDailyLimit = 10) =>
-      deployStep(db, { fundId, userId: ana, votesRequired, agent: AGENT, client: client as never, findOperation, createFundDailyLimit, factory: FUND_FACTORY });
+      deployStep(db, { fundId, userId: ana, votesRequired, agent: AGENT, client: client as never, findOperation, createFundDailyLimit, factory: FUND_FACTORY, m: es });
     /** Ana's createFund for the draft went out with nonce 5, and its receipt says `success` (none yet if undefined). */
     const sent = async (success?: boolean) => {
       await recordOperation(db, ana, { userOpHash: OP, kind: "create-fund", draftId: fundId, nonce: 5n });
@@ -438,7 +441,7 @@ describe("deployStep", () => {
     expect(await step(chain, 3)).toEqual({ ok: true, pending: OP });
     expect(chain.readContract).toHaveBeenCalledWith(expect.objectContaining({ functionName: "getNonce", args: [creator, 0n] }));
     expect(await draftById(db, fundId)).toMatchObject({ status: "deploying", votesRequired: 2 });
-    expect(await cancelDeploy(db, { fundId, userId: ana })).toEqual({ ok: true, reopened: false });
+    expect(await cancelDeploy(db, { fundId, userId: ana, m: es })).toEqual({ ok: true, reopened: false });
   });
 
   it("finds one that landed after the bundler forgot it on the chain itself, records it, and goes live with its fund", async () => {
@@ -624,5 +627,110 @@ describe("agentAddress", () => {
     const key = generatePrivateKey();
     expect(agentAddress({ CHAIN_MODE: "fork", AGENT_PRIVATE_KEY: key })).toBe(privateKeyToAddress(key));
     expect(() => agentAddress({ CHAIN_MODE: "mainnet", AGENT_PRIVATE_KEY: key })).toThrow(/AGENT_ADDRESS/);
+  });
+});
+
+describe("in the language of the dictionary", () => {
+  it("answers an invitation and a draft in English, and the same ones in Spanish", async () => {
+    const db = await testDb();
+    const { people, fundId, inviteCode } = await group(db);
+    const ana = people[0]!.id;
+    expect(await joinFund(db, people[1]!.id, "nope", en)).toEqual({ ok: false, status: 404, error: en.funds.badInvite });
+    expect(await joinFund(db, people[1]!.id, "nope", es)).toEqual({ ok: false, status: 404, error: "Ese link de invitación no es válido." });
+    expect(en.funds.badInvite).toBe("That invitation link isn't valid.");
+
+    expect(await createDraft(db, ana, { ...DRAFT, name: " " }, en)).toEqual({ ok: false, status: 400, error: en.checks.fundName });
+    expect(await createDraft(db, ana, { ...DRAFT, weeklyFee: MAX_PESOS + 1n }, en)).toEqual({
+      ok: false,
+      status: 400,
+      error: en.checks.feeTooBig(formatPesos(MAX_PESOS, "en")),
+    });
+
+    // A fund that is being created takes nobody else, and one that is live sends them to the group.
+    await deployCall(db, { fundId, userId: ana, votesRequired: 2, agent: AGENT, m: es });
+    const late = await addUser(db, "Dani");
+    expect(await joinFund(db, late.id, inviteCode, en)).toEqual({ ok: false, status: 409, error: en.funds.beingCreated });
+    expect(await joinFund(db, late.id, inviteCode, es)).toEqual({
+      ok: false,
+      status: 409,
+      error: "El fondo se está creando en este momento. Probá en un rato.",
+    });
+    await db.update(funds).set({ status: "live", address: NEW_FUND }).where(eq(funds.id, fundId));
+    expect(await joinFund(db, late.id, inviteCode, en)).toEqual({ ok: false, status: 409, error: en.funds.alreadyLive });
+  });
+
+  it("answers the deploy in English: who may, how many people, how many votes", async () => {
+    const db = await testDb();
+    const three = await group(db);
+    const call = (fundId: string, userId: string, votesRequired: number, m = en) => deployCall(db, { fundId, userId, votesRequired, agent: AGENT, m });
+    const refused = (status: number, error: string) => ({ ok: false, status, error });
+
+    expect(await call("nope", three.people[0]!.id, 2)).toEqual(refused(404, en.errors.fundNotFound));
+    expect(await call("nope", three.people[0]!.id, 2, es)).toEqual(refused(404, "No encontramos ese fondo."));
+    expect(await call(three.fundId, three.people[1]!.id, 2)).toEqual(refused(403, en.funds.onlyCreator));
+    expect(await call(three.fundId, three.people[0]!.id, 1)).toEqual(refused(400, "With 3 people, the votes needed go from 2 to 2."));
+    expect(await call(three.fundId, three.people[0]!.id, 1, es)).toEqual(refused(400, "Con 3 personas, los votos necesarios van de 2 a 2."));
+    const two = await group(db, 2);
+    expect(await call(two.fundId, two.people[0]!.id, 2)).toEqual(refused(409, en.funds.tooFewMembers));
+
+    const big = await group(db);
+    for (let i = 0; i < 8; i++) await db.insert(memberships).values({ fundId: big.fundId, userId: (await addUser(db, `P${i}`)).id });
+    expect(await call(big.fundId, big.people[0]!.id, 2)).toEqual(refused(409, "A fund can have up to 10 people, and this one has 11."));
+
+    const four = await group(db, 4);
+    await call(four.fundId, four.people[0]!.id, 2);
+    expect(await call(four.fundId, four.people[0]!.id, 3)).toEqual(
+      refused(409, "You've already started creating the fund with 2 votes needed: pick 2 to continue."),
+    );
+    expect(await cancelDeploy(db, { fundId: four.fundId, userId: four.people[1]!.id, m: en })).toEqual(refused(403, en.funds.onlyCreator));
+    expect(await cancelDeploy(db, { fundId: "nope", userId: four.people[0]!.id, m: en })).toEqual(refused(404, en.errors.fundNotFound));
+  });
+
+  it("answers the confirmation in English: not created yet, not confirmed, not there, another fund", async () => {
+    const db = await testDb();
+    const { people, fundId } = await group(db);
+    const ana = people[0]!.id;
+    const members = people.map((p) => getAddress(p.account));
+    const creator = members[0]!;
+    const confirm = (client: ReturnType<typeof fakeClient>, m = en) =>
+      confirmDeploy(db, { fundId, userId: ana, transactionHash: TX, client: client as never, agent: AGENT, factory: FUND_FACTORY, wait: { tries: 1, everyMs: 0 }, m });
+    const refused = (error: string) => ({ ok: false, status: 409, error });
+
+    expect(await confirm(fakeClient([], []))).toEqual(refused(en.funds.createFirst));
+    await deployCall(db, { fundId, userId: ana, votesRequired: 2, agent: AGENT, m: es });
+    expect(await confirm(fakeClient([], []))).toEqual(refused(en.funds.notInOperation));
+    expect(await confirm(fakeClient([], []), es)).toEqual(refused("No encontramos el fondo en esa operación."));
+    expect(await confirm(fakeClient([{ address: FUND_FACTORY, fund: NEW_FUND, creator }], settingsFor(members, { votesRequired: 3 })))).toEqual(
+      refused(en.funds.mismatch),
+    );
+    const unreachable = fakeClient([], []);
+    unreachable.getTransactionReceipt.mockRejectedValue(new Error("receipt not found"));
+    expect(await confirm(unreachable)).toEqual(refused(en.funds.unconfirmed));
+  });
+
+  it("says in English that the creator reached a cap, naming how many tries it was", async () => {
+    const db = await testDb();
+    const { people, fundId } = await group(db, 4);
+    const ana = people[0]!.id;
+    for (const nonce of [0n, 1n, 2n]) await claimCreateFundNonce(db, ana, nonce, 10);
+    const client = fakeClient([], []);
+    client.readContract.mockResolvedValue(3n);
+    const findOperation = vi.fn<UserOperationFinder>(async () => null);
+    const step = (createFundDailyLimit: number, m = en) =>
+      deployStep(db, { fundId, userId: ana, votesRequired: 2, agent: AGENT, client: client as never, findOperation, createFundDailyLimit, factory: FUND_FACTORY, m });
+    expect(await step(10)).toEqual({
+      ok: false,
+      status: 429,
+      error: "Your account has already used its 3 tries to create a fund that TesorerIA pays for. Write to us and we'll unblock it.",
+    });
+    expect(await step(10, es)).toEqual({
+      ok: false,
+      status: 429,
+      error: "Tu cuenta ya usó los 3 intentos de crear un fondo que paga TesorerIA. Escribinos y lo destrabamos.",
+    });
+    await db.delete(createFundNonces);
+    for (const person of ["Eli", "Fede"]) await claimCreateFundNonce(db, (await addUser(db, person)).id, 0n, 2);
+    client.readContract.mockResolvedValue(0n);
+    expect(await step(2)).toEqual({ ok: false, status: 429, error: "Many funds were created in TesorerIA today already. Try again tomorrow." });
   });
 });

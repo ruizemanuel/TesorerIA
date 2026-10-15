@@ -4,9 +4,11 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CurrentUser } from "../src/lib/current-user";
 import type { Db } from "../src/lib/db/client";
 import { operations } from "../src/lib/db/schema";
+import { NBSP } from "../src/lib/format";
 import { draftById } from "../src/lib/funds";
 import { PENDING_FOR_MS, recordOperation } from "../src/lib/operations";
 import { addUser, testDb } from "./support/db";
+import { WARS } from "./support/fixtures";
 
 // The routes as the server runs them, with the session and the database standing in.
 const state = vi.hoisted(() => ({ user: null as CurrentUser | null, db: null as unknown }));
@@ -127,5 +129,49 @@ describe("the invitation and the deploy", () => {
     expect((await deploy(json({ votesRequired: 2 }), params({ id: "nope" }))).status).toBe(404);
     const id = await draftOfThree();
     expect((await deployed(json({ transactionHash: "0x1234" }), params({ id }))).status).toBe(400);
+  });
+});
+
+describe("in the language of the request", () => {
+  const english = (body: unknown, method = "POST") =>
+    new Request("http://localhost:3000/api", { method, headers: { "content-type": "application/json", cookie: "lang=en" }, body: JSON.stringify(body) });
+  const answer = async (response: Response) => ({ status: response.status, ...((await response.json()) as { error?: string }) });
+
+  it("asks for a login, teaches how to write an amount, and reads amounts the English way", async () => {
+    state.user = null;
+    expect(await answer(await createDraftRoute(english(DRAFT)))).toEqual({ status: 401, error: "Log in with your passkey." });
+    state.user = people[0]!;
+    expect(await answer(await createDraftRoute(english(DRAFT)))).toEqual({
+      status: 400,
+      error: "We couldn't read the weekly dues. Write them like 10,000 or 10,000.50.",
+    });
+    expect(await answer(await createDraftRoute(english({ ...DRAFT, weeklyFee: "10,000", weeklyCap: "1,000,000,000,001" })))).toEqual({
+      status: 400,
+      error: `The weekly cap can't be more than ARS${NBSP}1,000,000,000,000.`,
+    });
+    const created = await createDraftRoute(english({ ...DRAFT, weeklyFee: "ARS 10,000.50", weeklyCap: "60,000" }));
+    const { id } = (await created.json()) as { id: string };
+    expect(await draftById(db, id)).toMatchObject({ weeklyFee: 10_000n * WARS + WARS / 2n, weeklyCap: 60_000n * WARS });
+  });
+
+  it("answers the invitation and the deploy in English", async () => {
+    expect(await answer(await join(english({}), params({ code: "nope" })))).toEqual({ status: 404, error: "That invitation link isn't valid." });
+    const id = await draftOfThree();
+    state.user = people[1]!;
+    expect(await answer(await deploy(english({ votesRequired: 2 }), params({ id })))).toEqual({
+      status: 403,
+      error: "Only the person who set up the fund can create it.",
+    });
+    expect(await answer(await deploy(english({ votesRequired: 2 }), params({ id: "nope" })))).toEqual({ status: 404, error: "We couldn't find that fund." });
+    expect(await answer(await cancel(english(undefined, "DELETE"), params({ id })))).toEqual({
+      status: 403,
+      error: "Only the person who set up the fund can create it.",
+    });
+    expect(await answer(await deployed(english({ transactionHash: "0x1234" }), params({ id })))).toEqual({
+      status: 400,
+      error: "Some details are missing or aren't valid.",
+    });
+    state.user = null;
+    expect(await answer(await deployed(english({ transactionHash: "0x1234" }), params({ id })))).toEqual({ status: 401, error: "Log in with your passkey." });
   });
 });

@@ -21,6 +21,7 @@ import { describe, expect, it } from "vitest";
 import { authorizeBundlerRequest } from "../src/lib/bundler-proxy";
 import { contributeCalls } from "../src/lib/contribute";
 import { createDraft, deployCall, joinFund } from "../src/lib/funds";
+import { es } from "../src/lib/i18n/es";
 import { voteCalls } from "../src/lib/vote";
 import { WARS, addLiveFund, addUser, randomAccount, testDb } from "./support/db";
 
@@ -59,10 +60,10 @@ describe("the requests viem really sends for a sponsored operation", () => {
     // Ana is creating a fund (deployCall froze it), and is in a live one: every call she can make is hers to make.
     const db = await testDb();
     const ana = await addUser(db, "Ana", account.address);
-    const draft = await createDraft(db, ana.id, { name: "Fútbol", agreedExpense: "la cancha", weeklyFee: 10_000n * WARS, weeklyCap: 60_000n * WARS });
+    const draft = await createDraft(db, ana.id, { name: "Fútbol", agreedExpense: "la cancha", weeklyFee: 10_000n * WARS, weeklyCap: 60_000n * WARS }, es);
     if (!draft.ok) throw new Error(draft.error);
-    for (const name of ["Beto", "Caro"]) await joinFund(db, (await addUser(db, name)).id, draft.inviteCode);
-    const deploy = await deployCall(db, { fundId: draft.id, userId: ana.id, votesRequired: 2, agent: AGENT_ADDRESS });
+    for (const name of ["Beto", "Caro"]) await joinFund(db, (await addUser(db, name)).id, draft.inviteCode, es);
+    const deploy = await deployCall(db, { fundId: draft.id, userId: ana.id, votesRequired: 2, agent: AGENT_ADDRESS, m: es });
     if (!deploy.ok) throw new Error(deploy.error);
     const fund = randomAccount();
     await addLiveFund(db, { creatorId: ana.id, address: fund, members: [ana.id] });

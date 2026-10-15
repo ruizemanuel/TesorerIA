@@ -7,7 +7,9 @@ import type { Db } from "../src/lib/db/client";
 import { acquireLock, releaseLock } from "../src/lib/db/lock";
 import { decisions, expenses } from "../src/lib/db/schema";
 import { submitExpense } from "../src/lib/expenses";
-import { MAX_PESOS } from "../src/lib/format";
+import { MAX_PESOS, formatPesos } from "../src/lib/format";
+import { en } from "../src/lib/i18n/en";
+import { type Messages, es } from "../src/lib/i18n/es";
 import { SENT_HASH, fakeAgent } from "./support/agent";
 import { addLiveFund, addUser, testDb } from "./support/db";
 import { AGENT, ANA, BETO, BLOCK, CARO, FUND, WARS, event, snapshot } from "./support/fixtures";
@@ -30,6 +32,7 @@ async function load(db: Db, user: { id: string }, fundId: string, input: Partial
     userId: user.id,
     fundId,
     input: { clientKey: "k1", kind: "agreed", amount: 45_000n * WARS, note: "la cancha del jueves", ...input },
+    m: es,
   });
   if (!result.ok) throw new Error(result.error);
   return result;
@@ -52,9 +55,26 @@ describe("submitExpense", () => {
   it("refuses a note longer than the chain takes, an amount of zero, or one beyond any real amount", async () => {
     const { db, ana, fund } = await setup();
     const base = { clientKey: "k", kind: "agreed" as const, amount: 1n * WARS, note: "" };
-    expect(await submitExpense(db, { userId: ana.id, fundId: fund.id, input: { ...base, note: "x".repeat(141) } })).toMatchObject({ ok: false, status: 400 });
-    expect(await submitExpense(db, { userId: ana.id, fundId: fund.id, input: { ...base, amount: 0n } })).toMatchObject({ ok: false, status: 400 });
-    expect(await submitExpense(db, { userId: ana.id, fundId: fund.id, input: { ...base, amount: MAX_PESOS + 1n } })).toMatchObject({ ok: false, status: 400 });
+    expect(await submitExpense(db, { userId: ana.id, fundId: fund.id, input: { ...base, note: "x".repeat(141) }, m: es })).toMatchObject({ ok: false, status: 400 });
+    expect(await submitExpense(db, { userId: ana.id, fundId: fund.id, input: { ...base, amount: 0n }, m: es })).toMatchObject({ ok: false, status: 400 });
+    expect(await submitExpense(db, { userId: ana.id, fundId: fund.id, input: { ...base, amount: MAX_PESOS + 1n }, m: es })).toMatchObject({ ok: false, status: 400 });
+    expect(await db.select().from(expenses)).toEqual([]);
+  });
+
+  it("says why it refused, in the language it is given", async () => {
+    const { db, ana, fund } = await setup();
+    const base = { clientKey: "k", kind: "agreed" as const, amount: 1n * WARS, note: "" };
+    const refuse = (change: Partial<typeof base>, m: Messages) => submitExpense(db, { userId: ana.id, fundId: fund.id, input: { ...base, ...change }, m });
+    const refused = (error: string) => ({ ok: false, status: 400, error });
+
+    expect(await refuse({ amount: 0n }, es)).toEqual(refused("El monto tiene que ser más que cero."));
+    expect(await refuse({ amount: 0n }, en)).toEqual(refused(en.expenses.amountZero));
+    expect(await refuse({ amount: MAX_PESOS + 1n }, es)).toEqual(refused(`El monto no puede pasar de ${formatPesos(MAX_PESOS, "es")}.`));
+    expect(await refuse({ amount: MAX_PESOS + 1n }, en)).toEqual(refused(`The amount can't be more than ${formatPesos(MAX_PESOS, "en")}.`));
+    expect(await refuse({ note: "x".repeat(141) }, es)).toEqual(refused("La nota puede tener hasta 140 letras."));
+    expect(await refuse({ note: "x".repeat(141) }, en)).toEqual(refused("The note can be up to 140 letters long."));
+    expect(await refuse({ clientKey: "" }, es)).toEqual(refused("Algo falló. Probá de nuevo."));
+    expect(await refuse({ clientKey: "" }, en)).toEqual(refused(en.errors.failed));
     expect(await db.select().from(expenses)).toEqual([]);
   });
 

@@ -5,6 +5,7 @@ import { type Address, type Hex, isHex, size } from "viem";
 import { personProblem } from "./checks";
 import type { Db } from "./db/client";
 import { credentials, users } from "./db/schema";
+import type { Messages } from "./i18n/messages";
 import type { Session } from "./session";
 
 export const CHALLENGE_TTL_MS = 5 * 60_000;
@@ -43,10 +44,6 @@ function takeChallenge(session: Session, now: number): Hex | null {
   return challenge;
 }
 
-const LATE = "Pasó demasiado tiempo. Probá de nuevo.";
-const BAD_PASSKEY = "No pudimos crear tu passkey. Probá de nuevo.";
-const TAKEN = "Esa passkey ya tiene una cuenta. Entrá con ella.";
-
 /** Creates the person, their passkey and their account (derived here), and starts their session (spec, 6). */
 export async function registerMember({
   db,
@@ -55,6 +52,7 @@ export async function registerMember({
   deriveAccount,
   origin,
   now = Date.now(),
+  m,
 }: {
   db: Db;
   session: Session;
@@ -62,44 +60,45 @@ export async function registerMember({
   deriveAccount: DeriveAccount;
   origin: string;
   now?: number;
+  m: Messages;
 }): Promise<AuthResult> {
   const challenge = takeChallenge(session, now);
   const fail = async (status: number, error: string): Promise<AuthResult> => {
     await session.save();
     return { ok: false, status, error };
   };
-  if (challenge === null) return fail(400, LATE);
-  const problem = personProblem(input); // the same check the form ran before making the passkey
+  if (challenge === null) return fail(400, m.auth.late);
+  const problem = personProblem(input, m); // the same check the form ran before making the passkey
   if (problem !== null) return fail(400, problem);
   const name = input.name.trim();
   const email = input.email?.trim() || undefined;
-  if (!isHex(input.publicKey) || size(input.publicKey) !== 64) return fail(400, BAD_PASSKEY);
-  if (!isHex(input.userHandle) || size(input.userHandle) !== 16) return fail(400, BAD_PASSKEY);
+  if (!isHex(input.publicKey) || size(input.publicKey) !== 64) return fail(400, m.auth.badPasskey);
+  if (!isHex(input.userHandle) || size(input.userHandle) !== 16) return fail(400, m.auth.badPasskey);
   let client: { type?: unknown; challenge?: unknown; origin?: unknown } | null;
   try {
     client = JSON.parse(input.clientDataJSON);
   } catch {
-    return fail(400, BAD_PASSKEY);
+    return fail(400, m.auth.badPasskey);
   }
   if (
     client?.type !== "webauthn.create" ||
     client.origin !== origin ||
     client.challenge !== Base64.fromHex(challenge, { url: true, pad: false })
   ) {
-    return fail(400, BAD_PASSKEY);
+    return fail(400, m.auth.badPasskey);
   }
 
   const account = await deriveAccount({ id: input.credentialId, publicKey: input.publicKey });
   // A credential id someone else registered would leave a person without a passkey behind: check it first.
   const taken = await db.select({ id: users.id }).from(users).where(eq(users.account, account));
   const known = await db.select({ id: credentials.id }).from(credentials).where(eq(credentials.id, input.credentialId));
-  if (taken.length > 0 || known.length > 0) return fail(409, TAKEN);
+  if (taken.length > 0 || known.length > 0) return fail(409, m.auth.taken);
   let userId: string;
   try {
     const [user] = await db.insert(users).values({ name, email, account }).returning({ id: users.id });
     userId = user!.id;
   } catch (error) {
-    if (isUniqueViolation(error)) return fail(409, TAKEN); // someone registered the same account in the meantime
+    if (isUniqueViolation(error)) return fail(409, m.auth.taken); // someone registered the same account in the meantime
     throw error;
   }
   try {
@@ -109,7 +108,7 @@ export async function registerMember({
   } catch (error) {
     // No transactions over Neon's HTTP driver: take the person we just added out again, so none is left without a passkey.
     await db.delete(users).where(eq(users.id, userId)).catch(() => undefined);
-    if (isUniqueViolation(error)) return fail(409, TAKEN);
+    if (isUniqueViolation(error)) return fail(409, m.auth.taken);
     throw error;
   }
   session.userId = userId;
@@ -138,6 +137,7 @@ export async function logIn({
   rpId,
   origin,
   now = Date.now(),
+  m,
 }: {
   db: Db;
   session: Session;
@@ -145,16 +145,17 @@ export async function logIn({
   rpId: string;
   origin: string;
   now?: number;
+  m: Messages;
 }): Promise<AuthResult> {
   const challenge = takeChallenge(session, now);
   if (challenge === null) {
     await session.save();
-    return { ok: false, status: 400, error: LATE };
+    return { ok: false, status: 400, error: m.auth.late };
   }
   const [row] = await db.select().from(credentials).where(eq(credentials.id, assertion.credentialId));
   if (row === undefined || !isValidAnswer({ assertion, publicKey: row.publicKey as Hex, challenge, rpId, origin })) {
     await session.save();
-    return { ok: false, status: 401, error: "No pudimos reconocer tu passkey." };
+    return { ok: false, status: 401, error: m.auth.unknownPasskey };
   }
   session.userId = row.userId;
   await session.save();

@@ -26,6 +26,7 @@ import * as schema from "../src/lib/db/schema";
 import { createFundNonces, funds, memberships } from "../src/lib/db/schema";
 import { memberFundAbi } from "../src/lib/fund-abi";
 import { cancelDeploy, createDraft, deployCall, frozenCreateFunds, joinFund } from "../src/lib/funds";
+import { es } from "../src/lib/i18n/es";
 import { voteCalls } from "../src/lib/vote";
 import { AGENT } from "./support/fixtures";
 import { WARS as WARS_UNIT, addLiveFund, addUser, randomAccount, testDb } from "./support/db";
@@ -72,10 +73,10 @@ function changed(call: Call, change: Partial<ReturnType<typeof createFundParams>
  * with 2 votes and AGENT: the createFund it handed the creator to sign.
  */
 async function frozenDraft(db: Db, creatorId: string, name: string) {
-  const created = await createDraft(db, creatorId, { name, agreedExpense: "la cancha", weeklyFee: 10_000n * WARS_UNIT, weeklyCap: 60_000n * WARS_UNIT });
+  const created = await createDraft(db, creatorId, { name, agreedExpense: "la cancha", weeklyFee: 10_000n * WARS_UNIT, weeklyCap: 60_000n * WARS_UNIT }, es);
   if (!created.ok) throw new Error(created.error);
-  for (const person of ["Beto", "Caro", "Dani"]) await joinFund(db, (await addUser(db, person)).id, created.inviteCode);
-  const deploy = await deployCall(db, { fundId: created.id, userId: creatorId, votesRequired: 2, agent: AGENT });
+  for (const person of ["Beto", "Caro", "Dani"]) await joinFund(db, (await addUser(db, person)).id, created.inviteCode, es);
+  const deploy = await deployCall(db, { fundId: created.id, userId: creatorId, votesRequired: 2, agent: AGENT, m: es });
   if (!deploy.ok) throw new Error(deploy.error);
   return { fundId: created.id, call: deploy.call as Call };
 }
@@ -523,7 +524,7 @@ describe("authorizeBundlerRequest", () => {
       const ana = await addUser(db, "Ana");
       await addLiveFund(db, { creatorId: ana.id, address: FUND, members: [ana.id] }); // sponsored for her live fund, so the call itself is what's refused
       const { fundId, call } = await frozenDraft(db, ana.id, "Fútbol");
-      expect(await cancelDeploy(db, { fundId, userId: ana.id })).toEqual({ ok: true, reopened: true });
+      expect(await cancelDeploy(db, { fundId, userId: ana.id, m: es })).toEqual({ ok: true, reopened: true });
       for (const answer of await answers(db, ana, [call])) expect(answer).toMatchObject(refused);
     });
 
@@ -547,7 +548,7 @@ describe("authorizeBundlerRequest", () => {
       const at = (minutes: number) => new Date(Date.UTC(2026, 9, 10, 12, minutes));
       const calls: Hex[] = [];
       for (const [i, name] of ["Fútbol", "Asado"].entries()) {
-        const created = await createDraft(db, ana.id, { name, agreedExpense: "la cancha", weeklyFee: 10_000n * WARS_UNIT, weeklyCap: 60_000n * WARS_UNIT });
+        const created = await createDraft(db, ana.id, { name, agreedExpense: "la cancha", weeklyFee: 10_000n * WARS_UNIT, weeklyCap: 60_000n * WARS_UNIT }, es);
         if (!created.ok) throw new Error(created.error);
         await db.update(memberships).set({ joinedAt: at(0) }).where(eq(memberships.fundId, created.id));
         // The two drafts' joins interleave in time, each in another order than the people were added in, and two of
@@ -555,7 +556,7 @@ describe("authorizeBundlerRequest", () => {
         for (const [j, person] of (i === 0 ? [...people].reverse() : people).entries()) {
           await db.insert(memberships).values({ fundId: created.id, userId: person.id, joinedAt: at(2 * Math.max(j, 1) + i) });
         }
-        const deploy = await deployCall(db, { fundId: created.id, userId: ana.id, votesRequired: 2, agent: AGENT });
+        const deploy = await deployCall(db, { fundId: created.id, userId: ana.id, votesRequired: 2, agent: AGENT, m: es });
         if (!deploy.ok) throw new Error(deploy.error);
         calls.push(deploy.call.data);
       }

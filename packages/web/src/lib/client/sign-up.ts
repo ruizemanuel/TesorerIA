@@ -1,4 +1,5 @@
 import { personProblem } from "../checks";
+import type { Messages } from "../i18n/messages";
 import { UserFacingError } from "./errors";
 
 type Person = { name: string; email?: string };
@@ -16,6 +17,7 @@ export async function withAccount<T>({
   createAccount,
   created,
   then,
+  m,
 }: {
   hasAccount: boolean;
   person: Person;
@@ -23,8 +25,10 @@ export async function withAccount<T>({
   createAccount: (person: Person) => Promise<void>;
   created: () => void;
   then: () => Promise<T>;
+  /** The language the person reads: what `personProblem` says is wrong with their name or mail. */
+  m: Messages;
 }): Promise<T> {
-  const issue = problem ?? (hasAccount ? null : personProblem(person));
+  const issue = problem ?? (hasAccount ? null : personProblem(person, m));
   if (issue !== null) throw new UserFacingError(issue);
   if (!hasAccount) {
     await createAccount(person);

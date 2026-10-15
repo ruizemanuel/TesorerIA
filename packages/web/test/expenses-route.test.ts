@@ -7,7 +7,7 @@ import { acquireLock } from "../src/lib/db/lock";
 import { expenses } from "../src/lib/db/schema";
 import { fakeAgent } from "./support/agent";
 import { addLiveFund, addUser, testDb } from "./support/db";
-import { ANA, BETO, FUND, snapshot } from "./support/fixtures";
+import { ANA, BETO, FUND, WARS, snapshot } from "./support/fixtures";
 
 // The route as the server runs it, with the session, the database and the agent's chain standing in.
 const state = vi.hoisted(() => ({ user: null as CurrentUser | null, db: null as unknown, makeContext: null as unknown }));
@@ -63,6 +63,28 @@ describe("POST /api/funds/:address/expenses", () => {
     expect(await unclear.json()).toEqual({ error: "No entendimos el monto. Escribilo como 10.000 o 10.000,50." });
     expect(await db.select().from(expenses)).toEqual([]);
     expect(sent).toEqual([]);
+  });
+
+  it("reads the amount and answers in the language of the request", async () => {
+    const english = (amount: string) =>
+      POST(
+        new Request(`http://localhost:3000/api/funds/${FUND}/expenses`, {
+          method: "POST",
+          headers: { "content-type": "application/json", cookie: "lang=en" },
+          body: JSON.stringify({ clientKey: "k-en", kind: "agreed", amount, note: "the pitch" }),
+        }),
+        { params: Promise.resolve({ address: FUND }) },
+      );
+    const refused = await english("45.000");
+    expect(refused.status).toBe(400);
+    expect(await refused.json()).toEqual({ error: "We couldn't read the amount. Write it like 10,000 or 10,000.50." });
+    expect((await english("45,000")).ok).toBe(true);
+    const [kept] = await db.select().from(expenses);
+    expect(kept?.amount).toBe(45_000n * WARS);
+    state.user = null;
+    expect(await (await english("45,000")).json()).toEqual({ error: "Log in with your passkey." });
+    state.user = asUser(await addUser(db, "Dani"));
+    expect(await (await english("45,000")).json()).toEqual({ error: "We couldn't find that fund." });
   });
 
   it("answers a retry with the first call's state, keeping one expense and one reimbursement", async () => {

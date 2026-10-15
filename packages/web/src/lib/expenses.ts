@@ -5,6 +5,7 @@ import { keccak256, toHex } from "viem";
 import type { Db } from "./db/client";
 import { type ExpenseStatus, expenses } from "./db/schema";
 import { MAX_PESOS, formatPesos } from "./format";
+import type { Messages } from "./i18n/messages";
 
 export type ExpenseInput = {
   clientKey: string;
@@ -32,13 +33,13 @@ export const DUPLICATE_WINDOW_MS = 10 * 60_000;
  */
 export async function submitExpense(
   db: Db,
-  { userId, fundId, input }: { userId: string; fundId: string; input: ExpenseInput },
+  { userId, fundId, input, m }: { userId: string; fundId: string; input: ExpenseInput; m: Messages },
 ): Promise<SubmitResult> {
   const note = input.note.trim();
-  if (input.amount <= 0n) return { ok: false, status: 400, error: "El monto tiene que ser más que cero." };
-  if (input.amount > MAX_PESOS) return { ok: false, status: 400, error: `El monto no puede pasar de ${formatPesos(MAX_PESOS)}.` };
-  if ([...note].length > MAX_NOTE_LENGTH) return { ok: false, status: 400, error: `La nota puede tener hasta ${MAX_NOTE_LENGTH} letras.` };
-  if (input.clientKey.length < 1 || input.clientKey.length > 64) return { ok: false, status: 400, error: "Algo falló. Probá de nuevo." };
+  if (input.amount <= 0n) return { ok: false, status: 400, error: m.expenses.amountZero };
+  if (input.amount > MAX_PESOS) return { ok: false, status: 400, error: m.expenses.amountTooBig(formatPesos(MAX_PESOS, m.locale)) };
+  if ([...note].length > MAX_NOTE_LENGTH) return { ok: false, status: 400, error: m.expenses.noteTooLong(MAX_NOTE_LENGTH) };
+  if (input.clientKey.length < 1 || input.clientKey.length > 64) return { ok: false, status: 400, error: m.errors.failed };
 
   const sameKey = and(eq(expenses.userId, userId), eq(expenses.clientKey, input.clientKey));
   const [retried] = await db.select({ id: expenses.id, status: expenses.status }).from(expenses).where(sameKey);

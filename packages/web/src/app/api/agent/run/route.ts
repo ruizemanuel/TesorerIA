@@ -8,19 +8,22 @@ import { getDb } from "../../../../lib/db/client";
 import { acquireLock } from "../../../../lib/db/lock";
 import { fundsOf } from "../../../../lib/funds";
 import { jsonError } from "../../../../lib/http";
+import { localeOf } from "../../../../lib/i18n/locales";
+import { messagesFor } from "../../../../lib/i18n/messages";
 import { lastOperationBlock } from "../../../../lib/operations";
 import { waitForBlock } from "../../../../lib/read-your-writes";
 
 export const maxDuration = 300;
 
 /** A run right after a member's operation, so the agent acts without waiting for the heartbeat (spec, 8.3). */
-export async function POST() {
+export async function POST(request: Request) {
+  const m = messagesFor(localeOf(request));
   const user = await currentUser();
-  if (user === null) return jsonError(401, "Entrá con tu passkey.");
+  if (user === null) return jsonError(401, m.errors.logIn);
   const db = await getDb();
-  if (!(await fundsOf(db, user.id)).some((f) => f.status === "live")) return jsonError(403, "No estás en ningún fondo.");
+  if (!(await fundsOf(db, user.id)).some((f) => f.status === "live")) return jsonError(403, m.errors.notInAFund);
   // At most once a minute, whoever asks: the lock is never released, it just expires.
-  if (!(await acquireLock(db, "agent-run-cooldown", randomUUID(), 60_000))) return jsonError(429, "El agente acaba de correr.");
+  if (!(await acquireLock(db, "agent-run-cooldown", randomUUID(), 60_000))) return jsonError(429, m.errors.agentJustRan);
   // Read-your-writes: the run reads the chain after the operation that called it (spec, 8.3), or it can miss the
   // USDT that operation brought and leave it to the next heartbeat.
   const mine = await lastOperationBlock(db, user.id);

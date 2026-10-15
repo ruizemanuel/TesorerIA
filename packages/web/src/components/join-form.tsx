@@ -6,12 +6,14 @@ import { post } from "../lib/client/api";
 import { userMessage } from "../lib/client/errors";
 import { createAccount } from "../lib/client/passkey";
 import { withAccount } from "../lib/client/sign-up";
+import { useMessages } from "../lib/i18n/client";
 import { PersonFields, personFrom } from "./person-fields";
 import { Button } from "./ui";
 
 /** Joining a fund by its link (spec, 9, screen 1), creating the account first if there's none. */
 export function JoinForm({ code, loggedIn }: { code: string; loggedIn: boolean }) {
   const router = useRouter();
+  const m = useMessages();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   // Once the account is made it stays made, even if the join fails: a retry never makes another.
@@ -34,6 +36,7 @@ export function JoinForm({ code, loggedIn }: { code: string; loggedIn: boolean }
             createAccount,
             created: () => setHasAccount(true),
             then: () => post<{ fundId: string; status: string; address: string | null }>(`/api/invites/${encodeURIComponent(code)}/join`),
+            m,
           });
           router.push(joined.address ? `/f/${joined.address}` : `/f/borrador/${joined.fundId}`);
         } catch (caught) {

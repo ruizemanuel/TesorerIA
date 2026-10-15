@@ -4,6 +4,8 @@ import { registerMember } from "../../../../lib/auth";
 import { getDb } from "../../../../lib/db/client";
 import { env } from "../../../../lib/env";
 import { jsonError, readJson } from "../../../../lib/http";
+import { localeOf } from "../../../../lib/i18n/locales";
+import { messagesFor } from "../../../../lib/i18n/messages";
 import { hexSchema } from "../../../../lib/schemas";
 import { getSession } from "../../../../lib/session";
 
@@ -17,6 +19,7 @@ const Registration = z.object({
 });
 
 export async function POST(request: Request) {
+  const m = messagesFor(localeOf(request));
   const body = await readJson(request, Registration);
   if (!body.ok) return body.response;
   const result = await registerMember({
@@ -25,6 +28,7 @@ export async function POST(request: Request) {
     input: body.value,
     deriveAccount,
     origin: env().ORIGIN,
+    m,
   });
   return result.ok ? Response.json({ ok: true }) : jsonError(result.status, result.error);
 }

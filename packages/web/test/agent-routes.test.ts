@@ -49,7 +49,8 @@ let ana: CurrentUser;
 const asUser = (user: { id: string; name: string; account: string }): CurrentUser => ({ id: user.id, name: user.name, account: getAddress(user.account) });
 const beat = (authorization?: string) =>
   heartbeat.POST(new Request("http://localhost:3000/api/agent/heartbeat", { method: "POST", headers: authorization === undefined ? {} : { authorization } }));
-const afterContribution = () => run.POST();
+const afterContribution = (headers: Record<string, string> = {}) =>
+  run.POST(new Request("http://localhost:3000/api/agent/run", { method: "POST", headers }));
 /** An agent that can't be built, as when AGENT_PRIVATE_KEY is not set. */
 const noKey: MakeContext = async () => {
   throw new Error("AGENT_PRIVATE_KEY is not set");
@@ -117,6 +118,21 @@ describe("POST /api/agent/run", () => {
     state.user = asUser(await addUser(db, "Dani"));
     expect((await afterContribution()).status).toBe(403);
     expect(state.contexts).toBe(0);
+  });
+
+  it("answers its refusals in the language of the request", async () => {
+    const english = { cookie: "lang=en" };
+    state.user = null;
+    expect(await (await afterContribution(english)).json()).toEqual({ error: "Log in with your passkey." });
+    state.user = asUser(await addUser(db, "Dani"));
+    expect(await (await afterContribution(english)).json()).toEqual({ error: "You aren't in any fund." });
+    expect(await (await afterContribution()).json()).toEqual({ error: "No estás en ningún fondo." });
+    state.user = ana;
+    expect((await afterContribution(english)).status).toBe(202);
+    const again = await afterContribution(english);
+    expect(again.status).toBe(429);
+    expect(await again.json()).toEqual({ error: "The agent just ran." });
+    expect(await (await afterContribution()).json()).toEqual({ error: "El agente acaba de correr." });
   });
 
   it("runs the agent for a member, and then at most once a minute whoever asks", async () => {

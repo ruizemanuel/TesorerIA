@@ -6,6 +6,7 @@ import type { CurrentUser } from "../src/lib/current-user";
 import type { Db } from "../src/lib/db/client";
 import { contributeCalls } from "../src/lib/contribute";
 import { cancelDeploy, createDraft, deployCall, joinFund } from "../src/lib/funds";
+import { es } from "../src/lib/i18n/es";
 import { WARS, addLiveFund, addUser, randomAccount, testDb } from "./support/db";
 import { safeCallData } from "./support/safe";
 
@@ -211,10 +212,10 @@ describe("POST /api/bundler", () => {
 
     /** A draft `creatorId` made, with three more people, frozen by deployCall with 2 votes and the server's agent. */
     async function frozen(db: Db, creatorId: string, name: string) {
-      const created = await createDraft(db, creatorId, { name, agreedExpense: "la cancha", weeklyFee: 10_000n * WARS, weeklyCap: 60_000n * WARS });
+      const created = await createDraft(db, creatorId, { name, agreedExpense: "la cancha", weeklyFee: 10_000n * WARS, weeklyCap: 60_000n * WARS }, es);
       if (!created.ok) throw new Error(created.error);
-      for (const person of ["Beto", "Caro", "Dani"]) await joinFund(db, (await addUser(db, person)).id, created.inviteCode);
-      const deploy = await deployCall(db, { fundId: created.id, userId: creatorId, votesRequired: 2, agent: AGENT_ADDRESS });
+      for (const person of ["Beto", "Caro", "Dani"]) await joinFund(db, (await addUser(db, person)).id, created.inviteCode, es);
+      const deploy = await deployCall(db, { fundId: created.id, userId: creatorId, votesRequired: 2, agent: AGENT_ADDRESS, m: es });
       if (!deploy.ok) throw new Error(deploy.error);
       return { fundId: created.id, data: deploy.call.data };
     }
@@ -226,7 +227,7 @@ describe("POST /api/bundler", () => {
       futbol = (await frozen(db, user.id, "Fútbol")).data;
       asado = (await frozen(db, user.id, "Asado")).data;
       const open = await frozen(db, user.id, "Cumple");
-      await cancelDeploy(db, { fundId: open.fundId, userId: user.id });
+      await cancelDeploy(db, { fundId: open.fundId, userId: user.id, m: es });
       reopened = open.data;
     });
 

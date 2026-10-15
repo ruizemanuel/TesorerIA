@@ -13,6 +13,8 @@ import {
 } from "../src/lib/auth";
 import type { Db } from "../src/lib/db/client";
 import { credentials, users } from "../src/lib/db/schema";
+import { en } from "../src/lib/i18n/en";
+import { type Messages, es } from "../src/lib/i18n/es";
 import { testDb } from "./support/db";
 import { fakeSession } from "./support/session";
 
@@ -35,7 +37,7 @@ beforeAll(async () => {
 
 async function register(
   passkey = createFakePasskey(),
-  change: { origin?: string; type?: string; now?: number; input?: Partial<Registration>; db?: Db } = {},
+  change: { origin?: string; type?: string; now?: number; input?: Partial<Registration>; db?: Db; m?: Messages } = {},
 ) {
   const session = fakeSession();
   const challenge = issueChallenge(session, NOW);
@@ -47,7 +49,7 @@ async function register(
     clientDataJSON: creation(challenge, change.origin, change.type),
     ...change.input,
   };
-  const result = await registerMember({ db: change.db ?? db, session, input, deriveAccount, origin: ORIGIN, now: change.now ?? NOW });
+  const result = await registerMember({ db: change.db ?? db, session, input, deriveAccount, origin: ORIGIN, now: change.now ?? NOW, m: change.m ?? es });
   return { result, session, passkey };
 }
 
@@ -110,7 +112,7 @@ describe("registerMember", () => {
       userHandle: toHex(crypto.getRandomValues(new Uint8Array(16))),
       clientDataJSON: creation(issueChallenge(fakeSession(), NOW)),
     };
-    expect(await registerMember({ db, session, input, deriveAccount, origin: ORIGIN, now: NOW })).toMatchObject({ ok: false, status: 400 });
+    expect(await registerMember({ db, session, input, deriveAccount, origin: ORIGIN, now: NOW, m: es })).toMatchObject({ ok: false, status: 400 });
   });
 
   it("refuses a name, an email, a key or a user handle that doesn't fit", async () => {
@@ -162,14 +164,14 @@ describe("logIn", () => {
     const { result, passkey } = await register();
     const session = fakeSession();
     const assertion = await signPasskeyChallenge({ challenge: issueChallenge(session, NOW), rpId: RP_ID, getFn: passkey.getFn });
-    const first = await logIn({ db, session, assertion, rpId: RP_ID, origin: ORIGIN, now: NOW });
+    const first = await logIn({ db, session, assertion, rpId: RP_ID, origin: ORIGIN, now: NOW, m: es });
     expect(first).toEqual({ ok: true, userId: result.ok ? result.userId : "" });
     expect(session.userId).toBe(result.ok ? result.userId : undefined);
     // The same assertion again: the challenge it answered is gone, and a new one is not what it signed.
-    expect(await logIn({ db, session, assertion, rpId: RP_ID, origin: ORIGIN, now: NOW })).toMatchObject({ ok: false, status: 400 });
+    expect(await logIn({ db, session, assertion, rpId: RP_ID, origin: ORIGIN, now: NOW, m: es })).toMatchObject({ ok: false, status: 400 });
     const replay = fakeSession();
     issueChallenge(replay, NOW);
-    expect(await logIn({ db, session: replay, assertion, rpId: RP_ID, origin: ORIGIN, now: NOW })).toMatchObject({ ok: false, status: 401 });
+    expect(await logIn({ db, session: replay, assertion, rpId: RP_ID, origin: ORIGIN, now: NOW, m: es })).toMatchObject({ ok: false, status: 401 });
     expect(replay.userId).toBeUndefined();
   });
 
@@ -178,7 +180,7 @@ describe("logIn", () => {
     const attempt = async (getFn = passkey.getFn, { origin = ORIGIN, late = 0 } = {}) => {
       const session = fakeSession();
       const assertion = await signPasskeyChallenge({ challenge: issueChallenge(session, NOW), rpId: RP_ID, getFn });
-      const result = await logIn({ db, session, assertion, rpId: RP_ID, origin, now: NOW + late });
+      const result = await logIn({ db, session, assertion, rpId: RP_ID, origin, now: NOW + late, m: es });
       return { result, session };
     };
     expect((await attempt(passkey.getFn, { origin: "http://localhost:3000" })).result).toMatchObject({ ok: false, status: 401 });
@@ -193,7 +195,7 @@ describe("logIn", () => {
     const attempt = async (late: number) => {
       const session = fakeSession();
       const assertion = await signPasskeyChallenge({ challenge: issueChallenge(session, NOW), rpId: RP_ID, getFn: passkey.getFn });
-      return logIn({ db, session, assertion, rpId: RP_ID, origin: ORIGIN, now: NOW + late });
+      return logIn({ db, session, assertion, rpId: RP_ID, origin: ORIGIN, now: NOW + late, m: es });
     };
     expect((await attempt(CHALLENGE_TTL_MS)).ok).toBe(true);
     expect((await attempt(CHALLENGE_TTL_MS + 1)).ok).toBe(false);
@@ -203,10 +205,10 @@ describe("logIn", () => {
     const { passkey } = await register();
     const session = fakeSession();
     const assertion = await signPasskeyChallenge({ challenge: issueChallenge(session, NOW), rpId: RP_ID, getFn: passkey.getFn });
-    const wrongOrigin = await logIn({ db, session, assertion, rpId: RP_ID, origin: "https://evil.example", now: NOW });
+    const wrongOrigin = await logIn({ db, session, assertion, rpId: RP_ID, origin: "https://evil.example", now: NOW, m: es });
     expect(wrongOrigin).toMatchObject({ ok: false, status: 401 });
     expect(session.challenge).toBeUndefined();
-    expect(await logIn({ db, session, assertion, rpId: RP_ID, origin: ORIGIN, now: NOW })).toMatchObject({ ok: false, status: 400 });
+    expect(await logIn({ db, session, assertion, rpId: RP_ID, origin: ORIGIN, now: NOW, m: es })).toMatchObject({ ok: false, status: 400 });
     expect(session.userId).toBeUndefined();
   });
 
@@ -215,7 +217,7 @@ describe("logIn", () => {
     const attempt = async (change: Partial<Awaited<ReturnType<typeof signPasskeyChallenge>>>) => {
       const session = fakeSession();
       const assertion = await signPasskeyChallenge({ challenge: issueChallenge(session, NOW), rpId: RP_ID, getFn: passkey.getFn });
-      const result = await logIn({ db, session, assertion: { ...assertion, ...change }, rpId: RP_ID, origin: ORIGIN, now: NOW });
+      const result = await logIn({ db, session, assertion: { ...assertion, ...change }, rpId: RP_ID, origin: ORIGIN, now: NOW, m: es });
       return { result, session };
     };
     for (const change of [
@@ -237,7 +239,7 @@ describe("logIn", () => {
   it("refuses a login nobody asked a challenge for", async () => {
     const { passkey } = await register();
     const assertion = await signPasskeyChallenge({ challenge: issueChallenge(fakeSession(), NOW), rpId: RP_ID, getFn: passkey.getFn });
-    expect(await logIn({ db, session: fakeSession(), assertion, rpId: RP_ID, origin: ORIGIN, now: NOW })).toMatchObject({ ok: false, status: 400 });
+    expect(await logIn({ db, session: fakeSession(), assertion, rpId: RP_ID, origin: ORIGIN, now: NOW, m: es })).toMatchObject({ ok: false, status: 400 });
   });
 
   it("keeps out another passkey that claims to be a member's", async () => {
@@ -245,7 +247,7 @@ describe("logIn", () => {
     const session = fakeSession();
     const signed = await signPasskeyChallenge({ challenge: issueChallenge(session, NOW), rpId: RP_ID, getFn: createFakePasskey().getFn });
     const assertion = { ...signed, credentialId: passkey.credential.id };
-    expect(await logIn({ db, session, assertion, rpId: RP_ID, origin: ORIGIN, now: NOW })).toMatchObject({ ok: false, status: 401 });
+    expect(await logIn({ db, session, assertion, rpId: RP_ID, origin: ORIGIN, now: NOW, m: es })).toMatchObject({ ok: false, status: 401 });
     expect(session.userId).toBeUndefined();
   });
 
@@ -253,7 +255,7 @@ describe("logIn", () => {
     const attempt = async (passkey: ReturnType<typeof createFakePasskey>, signedFor: string, serverRpId: string) => {
       const session = fakeSession();
       const assertion = await signPasskeyChallenge({ challenge: issueChallenge(session, NOW), rpId: signedFor, getFn: passkey.getFn });
-      const result = await logIn({ db, session, assertion, rpId: serverRpId, origin: ORIGIN, now: NOW });
+      const result = await logIn({ db, session, assertion, rpId: serverRpId, origin: ORIGIN, now: NOW, m: es });
       return { result, session };
     };
     // The right passkey, but the server expects another site than the one it signed for.
@@ -269,5 +271,35 @@ describe("logIn", () => {
     expect(wrongAuthenticator.session.userId).toBeUndefined();
     // Control: the same passkey is let in on the site it signed for.
     expect((await attempt(foreign, "evil.example", "evil.example")).result.ok).toBe(true);
+  });
+});
+
+describe("in the language of the dictionary", () => {
+  it("says why a registration was refused, in Spanish and in English", async () => {
+    const refused = async (change: Parameters<typeof register>[1], m: Messages) => (await register(createFakePasskey(), { ...change, m })).result;
+    const stale = { now: NOW + CHALLENGE_TTL_MS + 1 };
+    expect(await refused(stale, es)).toEqual({ ok: false, status: 400, error: "Pasó demasiado tiempo. Probá de nuevo." });
+    expect(await refused(stale, en)).toEqual({ ok: false, status: 400, error: en.auth.late });
+    expect(await refused({ origin: "https://evil.example" }, es)).toEqual({ ok: false, status: 400, error: "No pudimos crear tu passkey. Probá de nuevo." });
+    expect(await refused({ origin: "https://evil.example" }, en)).toEqual({ ok: false, status: 400, error: en.auth.badPasskey });
+    expect(await refused({ input: { name: "   " } }, en)).toEqual({ ok: false, status: 400, error: en.checks.personName });
+    expect(await refused({ input: { email: "not-a-mail" } }, en)).toEqual({ ok: false, status: 400, error: en.checks.personEmail });
+
+    const mine = createFakePasskey();
+    expect((await register(mine)).result.ok).toBe(true);
+    const same = { credentialId: mine.credential.id };
+    expect((await register(createFakePasskey(), { input: same })).result).toEqual({ ok: false, status: 409, error: "Esa passkey ya tiene una cuenta. Entrá con ella." });
+    expect((await register(createFakePasskey(), { input: same, m: en })).result).toEqual({ ok: false, status: 409, error: en.auth.taken });
+  });
+
+  it("says why a login was refused, in Spanish and in English", async () => {
+    const attempt = async (m: Messages, late = 0) => {
+      const session = fakeSession();
+      const assertion = await signPasskeyChallenge({ challenge: issueChallenge(session, NOW), rpId: RP_ID, getFn: createFakePasskey().getFn });
+      return logIn({ db, session, assertion, rpId: RP_ID, origin: ORIGIN, now: NOW + late, m });
+    };
+    expect(await attempt(es)).toEqual({ ok: false, status: 401, error: "No pudimos reconocer tu passkey." });
+    expect(await attempt(en)).toEqual({ ok: false, status: 401, error: en.auth.unknownPasskey });
+    expect(await attempt(en, CHALLENGE_TTL_MS + 1)).toEqual({ ok: false, status: 400, error: en.auth.late });
   });
 });

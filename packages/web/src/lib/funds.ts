@@ -20,6 +20,7 @@ import { MAX_CREATE_FUND_NONCES, createFundRoom } from "./create-fund-cap";
 import { type Db, inTransaction } from "./db/client";
 import { funds, memberships, operations, users } from "./db/schema";
 import { DEFAULT_BALANCE_CAP, memberFundAbi } from "./fund-abi";
+import type { Messages } from "./i18n/messages";
 import { PENDING_FOR_MS, finishOperation } from "./operations";
 
 export const MIN_MEMBERS = 3;
@@ -28,16 +29,6 @@ export const MAX_MEMBERS = 10;
 export type FundsResult<T> = ({ ok: true } & T) | { ok: false; status: number; error: string };
 
 const fail = (status: number, error: string) => ({ ok: false, status, error }) as const;
-
-const NOT_FOUND = "No encontramos ese fondo.";
-const ONLY_CREATOR = "Solo quien armó el fondo puede crearlo.";
-const ALREADY_LIVE = "El fondo ya está creado.";
-const BEING_CREATED = "El fondo se está creando en este momento. Probá en un rato.";
-const UNCONFIRMED = "La operación todavía no se confirmó. Probá en un rato.";
-const FULL = "El fondo ya tiene 10 personas, que es el máximo.";
-const MISMATCH = "Ya se creó un fondo desde tu cuenta, pero con otros datos. No lo crees de nuevo: tendrías dos.";
-const ACCOUNT_CAP = `Tu cuenta ya usó los ${MAX_CREATE_FUND_NONCES} intentos de crear un fondo que paga TesorerIA. Escribinos y lo destrabamos.`;
-const DAY_CAP = "Hoy ya se crearon muchos fondos en TesorerIA. Probá de nuevo mañana.";
 
 export type DraftSummary = {
   id: string;
@@ -59,8 +50,9 @@ export async function createDraft(
   db: Db,
   creatorId: string,
   input: DraftSettings,
+  m: Messages,
 ): Promise<FundsResult<{ id: string; inviteCode: string }>> {
-  const problem = draftProblem(input);
+  const problem = draftProblem(input, m);
   if (problem !== null) return fail(400, problem);
   const name = input.name.trim();
   const agreedExpense = input.agreedExpense.trim();
@@ -151,16 +143,17 @@ export async function joinFund(
   db: Db,
   userId: string,
   code: string,
+  m: Messages,
 ): Promise<FundsResult<{ fundId: string; status: "draft" | "live"; address: Address | null }>> {
   const draft = await draftByInvite(db, code);
-  if (draft === null) return fail(404, "Ese link de invitación no es válido.");
+  if (draft === null) return fail(404, m.funds.badInvite);
   const joined = { ok: true, fundId: draft.id, status: "draft", address: null } as const;
   if (draft.members.some((m) => m.userId === userId)) {
     return draft.status === "live" ? { ok: true, fundId: draft.id, status: "live", address: draft.address } : joined;
   }
-  if (draft.status === "live") return fail(409, "El fondo ya está en marcha: pedile a alguien del grupo que proponga sumarte.");
-  if (draft.status === "deploying") return fail(409, BEING_CREATED);
-  if (draft.members.length >= MAX_MEMBERS) return fail(409, FULL);
+  if (draft.status === "live") return fail(409, m.funds.alreadyLive);
+  if (draft.status === "deploying") return fail(409, m.funds.beingCreated);
+  if (draft.members.length >= MAX_MEMBERS) return fail(409, m.funds.full);
   // Checked again in the insert, since the read above may be stale: only while it's still a draft (a deploy that
   // started since keeps the list it was built with), and only while there's room (two people joining at nine would
   // make eleven, which createFund always refuses). The fund's row is locked first, so a freeze or another join that
@@ -182,7 +175,7 @@ export async function joinFund(
   });
   if (await isMember(db, draft.id, userId)) return joined;
   const [now] = await db.select({ status: funds.status }).from(funds).where(eq(funds.id, draft.id));
-  return fail(409, now?.status === "draft" ? FULL : BEING_CREATED);
+  return fail(409, now?.status === "draft" ? m.funds.full : m.funds.beingCreated);
 }
 
 /**
@@ -192,21 +185,21 @@ export async function joinFund(
  */
 export async function deployCall(
   db: Db,
-  { fundId, userId, votesRequired, agent }: { fundId: string; userId: string; votesRequired: number; agent: Address },
+  { fundId, userId, votesRequired, agent, m }: { fundId: string; userId: string; votesRequired: number; agent: Address; m: Messages },
 ): Promise<FundsResult<{ call: { to: Address; data: Hex } }>> {
   const draft = await draftById(db, fundId);
-  if (draft === null) return fail(404, NOT_FOUND);
-  if (draft.creatorId !== userId) return fail(403, ONLY_CREATOR);
-  if (draft.status === "live") return fail(409, ALREADY_LIVE);
+  if (draft === null) return fail(404, m.errors.fundNotFound);
+  if (draft.creatorId !== userId) return fail(403, m.funds.onlyCreator);
+  if (draft.status === "live") return fail(409, m.funds.alreadyCreated);
   const n = draft.members.length;
-  if (n < MIN_MEMBERS) return fail(409, "Hacen falta al menos 3 personas para crear el fondo.");
-  if (n > MAX_MEMBERS) return fail(409, `Un fondo puede tener hasta ${MAX_MEMBERS} personas, y este tiene ${n}.`);
+  if (n < MIN_MEMBERS) return fail(409, m.funds.tooFewMembers);
+  if (n > MAX_MEMBERS) return fail(409, m.funds.tooManyMembers(MAX_MEMBERS, n));
   if (!Number.isInteger(votesRequired) || votesRequired < 2 || votesRequired > n - 1) {
-    return fail(400, `Con ${n} personas, los votos necesarios van de 2 a ${n - 1}.`);
+    return fail(400, m.funds.votesRange(n));
   }
   // Once it's being created, the votes are the ones being signed: another tab can't change them underneath.
   if (draft.status === "deploying" && draft.votesRequired !== votesRequired) {
-    return fail(409, `Ya empezaste a crear el fondo con ${draft.votesRequired} votos necesarios: elegí ${draft.votesRequired} para seguir.`);
+    return fail(409, m.funds.votesLocked(draft.votesRequired!));
   }
   // Frozen and read under the fund's lock (see `lockFund`): whoever got in before is in the call, and nobody gets
   // in after.
@@ -224,7 +217,7 @@ export async function deployCall(
       .returning({ id: funds.id }),
     membersQuery(tx, fundId),
   ]);
-  if (frozen === undefined) return fail(409, BEING_CREATED); // it changed since the read above
+  if (frozen === undefined) return fail(409, m.funds.beingCreated); // it changed since the read above
   const data = createFundData(draft, asMembers(rows), votesRequired, agent);
   return { ok: true, call: { to: FUND_FACTORY, data } };
 }
@@ -294,11 +287,11 @@ export async function frozenCreateFunds(db: Db, creatorId: string, agent: () => 
  */
 export async function cancelDeploy(
   db: Db,
-  { fundId, userId }: { fundId: string; userId: string },
+  { fundId, userId, m }: { fundId: string; userId: string; m: Messages },
 ): Promise<FundsResult<{ reopened: boolean }>> {
   const draft = await draftById(db, fundId);
-  if (draft === null) return fail(404, NOT_FOUND);
-  if (draft.creatorId !== userId) return fail(403, ONLY_CREATOR);
+  if (draft === null) return fail(404, m.errors.fundNotFound);
+  if (draft.creatorId !== userId) return fail(403, m.funds.onlyCreator);
   return { ok: true, reopened: await reopen(db, fundId) };
 }
 
@@ -414,6 +407,7 @@ export async function confirmDeploy(
     agent,
     factory = FUND_FACTORY,
     wait = CONFIRM_WAIT,
+    m,
   }: {
     fundId: string;
     userId: string;
@@ -422,22 +416,23 @@ export async function confirmDeploy(
     agent: Address;
     factory?: Address;
     wait?: { tries: number; everyMs: number };
+    m: Messages;
   },
 ): Promise<FundsResult<{ address: Address }>> {
   const draft = await draftById(db, fundId);
-  if (draft === null) return fail(404, NOT_FOUND);
-  if (draft.creatorId !== userId) return fail(403, ONLY_CREATOR);
+  if (draft === null) return fail(404, m.errors.fundNotFound);
+  if (draft.creatorId !== userId) return fail(403, m.funds.onlyCreator);
   if (draft.status === "live" && draft.address !== null) return { ok: true, address: draft.address };
-  if (draft.status !== "deploying" || draft.votesRequired === null) return fail(409, "Primero hay que crear el fondo.");
+  if (draft.status !== "deploying" || draft.votesRequired === null) return fail(409, m.funds.createFirst);
   const read = () => findDeployed(draft, draft.votesRequired, { transactionHash, client, agent, factory });
   let found = await read();
   for (let tried = 1; found === "unconfirmed" && tried < wait.tries; tried++) {
     await new Promise((resolve) => setTimeout(resolve, wait.everyMs));
     found = await read();
   }
-  if (found === "unconfirmed") return fail(409, UNCONFIRMED);
-  if (found === "mismatch") return fail(409, MISMATCH);
-  if (found === "none") return fail(409, "No encontramos el fondo en esa operación.");
+  if (found === "unconfirmed") return fail(409, m.funds.unconfirmed);
+  if (found === "mismatch") return fail(409, m.funds.mismatch);
+  if (found === "none") return fail(409, m.funds.notInOperation);
   return markLive(db, fundId, found);
 }
 
@@ -474,7 +469,7 @@ function keyZeroNonce(client: ChainReader, account: Address): Promise<bigint> {
  */
 async function createFundCapped(
   db: Db,
-  { userId, account, client, dailyLimit }: { userId: string; account: Address | undefined; client: ChainReader; dailyLimit: number },
+  { userId, account, client, dailyLimit, m }: { userId: string; account: Address | undefined; client: ChainReader; dailyLimit: number; m: Messages },
 ): Promise<ReturnType<typeof fail> | null> {
   if (account === undefined) return null;
   let nonce: bigint;
@@ -484,7 +479,7 @@ async function createFundCapped(
     return null;
   }
   const room = await createFundRoom(db, userId, nonce, dailyLimit);
-  return room === "ok" ? null : fail(429, room === "account" ? ACCOUNT_CAP : DAY_CAP);
+  return room === "ok" ? null : fail(429, room === "account" ? m.funds.accountCap(MAX_CREATE_FUND_NONCES) : m.funds.dayCap);
 }
 
 /**
@@ -541,6 +536,7 @@ export async function deployStep(
     findOperation,
     createFundDailyLimit,
     factory = FUND_FACTORY,
+    m,
   }: {
     fundId: string;
     userId: string;
@@ -551,11 +547,12 @@ export async function deployStep(
     /** CREATE_FUND_DAILY_LIMIT: the day's cap the paymaster holds, asked before a new one is built. */
     createFundDailyLimit: number;
     factory?: Address;
+    m: Messages;
   },
 ): Promise<FundsResult<DeployStep>> {
   const draft = await draftById(db, fundId);
-  if (draft === null) return fail(404, NOT_FOUND);
-  if (draft.creatorId !== userId) return fail(403, ONLY_CREATOR);
+  if (draft === null) return fail(404, m.errors.fundNotFound);
+  if (draft.creatorId !== userId) return fail(403, m.funds.onlyCreator);
   if (draft.status === "live" && draft.address !== null) return { ok: true, address: draft.address };
   const creator = draft.members.find((m) => m.userId === draft.creatorId)?.account;
   const [sent] = await db
@@ -577,26 +574,26 @@ export async function deployStep(
       if (state === "unspent") {
         // The same call again, with the votes it was frozen with, pinned to its nonce: whichever of the two lands
         // is the same fund, and the other can't land at all.
-        const again = await deployCall(db, { fundId, userId, votesRequired: draft.votesRequired ?? votesRequired, agent });
+        const again = await deployCall(db, { fundId, userId, votesRequired: draft.votesRequired ?? votesRequired, agent, m });
         return again.ok ? { ...again, nonce: nonce! } : again;
       }
       if (state === "spent") transactionHash = await findLanded(db, { fundId, userId, nonce: nonce!, findOperation });
       if (transactionHash === null) return { ok: true, pending: sent.userOpHash as Hash };
     }
     const found = await findDeployed(draft, draft.votesRequired, { transactionHash, client, agent, factory });
-    if (found === "unconfirmed") return fail(409, UNCONFIRMED);
-    if (found === "mismatch") return fail(409, MISMATCH);
+    if (found === "unconfirmed") return fail(409, m.funds.unconfirmed);
+    if (found === "mismatch") return fail(409, m.funds.mismatch);
     if (found !== "none") return markLive(db, fundId, found);
     // It failed, and its nonce is spent: open the draft again, so the new call takes the votes chosen now. If it
     // can't open (another createFund for it is on its way or went through), nothing new is built.
-    if (!(await reopen(db, fundId)) && draft.status === "deploying") return fail(409, BEING_CREATED);
+    if (!(await reopen(db, fundId)) && draft.status === "deploying") return fail(409, m.funds.beingCreated);
   }
-  const capped = await createFundCapped(db, { userId, account: creator, client, dailyLimit: createFundDailyLimit });
+  const capped = await createFundCapped(db, { userId, account: creator, client, dailyLimit: createFundDailyLimit, m });
   if (capped !== null) {
     await reopen(db, fundId); // frozen by an earlier click that sent nothing: people can join again meanwhile
     return capped;
   }
-  return deployCall(db, { fundId, userId, votesRequired, agent });
+  return deployCall(db, { fundId, userId, votesRequired, agent, m });
 }
 
 /** The funds a person belongs to, live ones first. */

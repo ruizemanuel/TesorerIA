@@ -1,4 +1,6 @@
 import type { z } from "zod";
+import { localeOf } from "./i18n/locales";
+import { messagesFor } from "./i18n/messages";
 
 export function jsonError(status: number, error: string): Response {
   return Response.json({ error }, { status });
@@ -11,16 +13,19 @@ export function jsonError(status: number, error: string): Response {
  *
  * With `maxBytes`, a body above it is refused with 413, whether it says so in its content-length or not (a chunked
  * body has none, and a header can lie): the declared length is checked first, then the text actually read.
+ *
+ * It answers in the request's language (`localeOf`); only the 415, which no person ever sees, stays in technical English.
  */
 export async function readJson<T>(
   request: Request,
   schema: z.ZodType<T>,
   { maxBytes }: { maxBytes?: number } = {},
 ): Promise<{ ok: true; value: T } | { ok: false; response: Response }> {
+  const m = messagesFor(localeOf(request));
   if (!(request.headers.get("content-type") ?? "").includes("application/json")) {
     return { ok: false, response: jsonError(415, "Expected application/json") };
   }
-  const tooBig = () => ({ ok: false, response: jsonError(413, "Faltan datos o no son válidos.") }) as const;
+  const tooBig = () => ({ ok: false, response: jsonError(413, m.errors.badRequest) }) as const;
   if (maxBytes !== undefined && Number(request.headers.get("content-length") ?? "0") > maxBytes) return tooBig();
   let body: unknown;
   try {
@@ -32,9 +37,9 @@ export async function readJson<T>(
       body = JSON.parse(text);
     }
   } catch {
-    return { ok: false, response: jsonError(400, "Algo falló. Probá de nuevo.") };
+    return { ok: false, response: jsonError(400, m.errors.failed) };
   }
   const parsed = schema.safeParse(body);
-  if (!parsed.success) return { ok: false, response: jsonError(400, "Faltan datos o no son válidos.") };
+  if (!parsed.success) return { ok: false, response: jsonError(400, m.errors.badRequest) };
   return { ok: true, value: parsed.data };
 }

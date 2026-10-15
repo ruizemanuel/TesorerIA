@@ -2,6 +2,8 @@ import { z } from "zod";
 import { currentUser } from "../../../lib/current-user";
 import { getDb } from "../../../lib/db/client";
 import { jsonError, readJson } from "../../../lib/http";
+import { localeOf } from "../../../lib/i18n/locales";
+import { messagesFor } from "../../../lib/i18n/messages";
 import { ownsDraft, recordOperation } from "../../../lib/operations";
 import { addressSchema, hashSchema } from "../../../lib/schemas";
 
@@ -28,14 +30,15 @@ const Operation = z
   .refine(({ fund, kind }) => fund === undefined || kind !== "cash-out");
 
 export async function POST(request: Request) {
+  const m = messagesFor(localeOf(request));
   const user = await currentUser();
-  if (user === null) return jsonError(401, "Entrá con tu passkey.");
+  if (user === null) return jsonError(401, m.errors.logIn);
   const body = await readJson(request, Operation);
   if (!body.ok) return body.response;
   const { amount, nonce, ...rest } = body.value;
   const db = await getDb();
   if (rest.draftId !== undefined && !(await ownsDraft(db, user.id, rest.draftId))) {
-    return jsonError(403, "Ese borrador no es tuyo.");
+    return jsonError(403, m.errors.notYourDraft);
   }
   await recordOperation(db, user.id, {
     ...rest,

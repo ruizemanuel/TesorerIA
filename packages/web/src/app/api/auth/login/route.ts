@@ -3,6 +3,8 @@ import { logIn } from "../../../../lib/auth";
 import { getDb } from "../../../../lib/db/client";
 import { env } from "../../../../lib/env";
 import { jsonError, readJson } from "../../../../lib/http";
+import { localeOf } from "../../../../lib/i18n/locales";
+import { messagesFor } from "../../../../lib/i18n/messages";
 import { hexSchema } from "../../../../lib/schemas";
 import { getSession } from "../../../../lib/session";
 
@@ -15,6 +17,7 @@ const Assertion = z.object({
 });
 
 export async function POST(request: Request) {
+  const m = messagesFor(localeOf(request));
   const body = await readJson(request, Assertion);
   if (!body.ok) return body.response;
   const { RP_ID, ORIGIN } = env();
@@ -24,6 +27,7 @@ export async function POST(request: Request) {
     assertion: body.value,
     rpId: RP_ID,
     origin: ORIGIN,
+    m,
   });
   return result.ok ? Response.json({ ok: true }) : jsonError(result.status, result.error);
 }
