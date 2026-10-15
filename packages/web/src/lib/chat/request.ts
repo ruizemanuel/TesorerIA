@@ -1,6 +1,6 @@
 import { type UIMessage, safeValidateUIMessages } from "ai";
+import type { Messages } from "../i18n/messages";
 import { MAX_HISTORY_CHARS, MAX_HISTORY_MESSAGES, MAX_MESSAGE_CHARS } from "./limits";
-import { CHAT_BAD_REQUEST, CHAT_LONG_MESSAGE } from "./texts";
 import { type ChatUIMessage, chatTools } from "./tools";
 
 /** A message's text parts, together. */
@@ -52,17 +52,17 @@ export type ChatRequest = { ok: true; messages: ChatUIMessage[] } | { ok: false;
 /**
  * The conversation the browser sent, checked: a valid list of messages (tool parts against their schemas), no
  * system message, only the parts a message may carry, and the member's text last, up to MAX_MESSAGE_CHARS. Then it's
- * trimmed (trimHistory).
+ * trimmed (trimHistory). What it refuses with is said in the request's language (`m`).
  */
-export async function readChatRequest(messages: unknown): Promise<ChatRequest> {
+export async function readChatRequest(messages: unknown, m: Messages): Promise<ChatRequest> {
   const validated = await safeValidateUIMessages<ChatUIMessage>({ messages, tools: chatTools });
-  if (!validated.success) return { ok: false, error: CHAT_BAD_REQUEST };
+  if (!validated.success) return { ok: false, error: m.chat.badRequest };
   const all = validated.data;
-  if (all.some((message) => message.role === "system" || !hasOnlyAllowedParts(message))) return { ok: false, error: CHAT_BAD_REQUEST };
+  if (all.some((message) => message.role === "system" || !hasOnlyAllowedParts(message))) return { ok: false, error: m.chat.badRequest };
   const last = all.at(-1);
   const text = last === undefined ? "" : messageText(last);
-  if (last?.role !== "user" || text.trim() === "") return { ok: false, error: CHAT_BAD_REQUEST };
+  if (last?.role !== "user" || text.trim() === "") return { ok: false, error: m.chat.badRequest };
   // The raw text is measured, not the trimmed one: the whole message reaches the model, padding included.
-  if ([...text].length > MAX_MESSAGE_CHARS) return { ok: false, error: CHAT_LONG_MESSAGE };
+  if ([...text].length > MAX_MESSAGE_CHARS) return { ok: false, error: m.chat.longMessage(MAX_MESSAGE_CHARS) };
   return { ok: true, messages: trimHistory(all) };
 }

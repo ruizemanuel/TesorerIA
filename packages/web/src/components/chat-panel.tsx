@@ -4,7 +4,6 @@ import { Chat, useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
 import { useState } from "react";
 import { MAX_HISTORY_MESSAGES, MAX_MESSAGE_CHARS } from "../lib/chat/limits";
-import { CHAT_REFUSED } from "../lib/chat/texts";
 import type { ChatUIMessage } from "../lib/chat/tools";
 import {
   type ProposalRules,
@@ -17,12 +16,11 @@ import {
   remainingText,
   waitingForText,
 } from "../lib/chat/view";
+import { useMessages } from "../lib/i18n/client";
 import { Avatar } from "./avatar";
 import { useConfirmingCards, useFundConversation } from "./chat-provider";
 import { ExpenseProposalCard } from "./expense-proposal-card";
 import { Button, FIELD } from "./ui";
-
-const SUGGESTIONS = ["¿Quién debe esta semana?", "¿Cuánto queda del tope de la semana?", "Quiero cargar un gasto"];
 
 /**
  * The fund's Chat, made the first time its panel opens and kept by ChatProvider from then on (FundConversation).
@@ -44,13 +42,15 @@ function useFundChat(): Chat<ChatUIMessage> {
 
 /** The chat with the agent (spec, 9.2): plain text both ways, a card to load an expense, and the day's cap. */
 export function ChatPanel({ fund, userName, rules }: { fund: string; userName: string; rules: ProposalRules }) {
+  const m = useMessages();
   const chat = useFundChat();
   const confirming = useConfirmingCards();
   const { messages, sendMessage, status, error, regenerate, addToolOutput, clearError } = useChat({ chat });
   const [text, setText] = useState("");
   const busy = status === "submitted" || status === "streaming";
-  const errorText = error === undefined ? null : chatErrorText(error);
+  const errorText = error === undefined ? null : chatErrorText(error, m);
   const remaining = lastRemaining(messages);
+  const remainingLeft = remainingText(remaining, m);
   const done = remaining === 0 || (errorText !== null && !canRetry(errorText));
   const firstName = userName.split(" ")[0] ?? userName;
 
@@ -77,10 +77,10 @@ export function ChatPanel({ fund, userName, rules }: { fund: string; userName: s
           <li className="grid gap-3">
             <div className="flex gap-2">
               <Avatar kind="agent" />
-              <p className="rounded-[14px] bg-surface p-3">Hola, {firstName}. Preguntame lo que quieras del fondo.</p>
+              <p className="rounded-[14px] bg-surface p-3">{m.chat.greeting(firstName)}</p>
             </div>
             <div className="flex flex-wrap gap-2">
-              {SUGGESTIONS.map((suggestion) => (
+              {m.chat.suggestions.map((suggestion) => (
                 <Button key={suggestion} variant="secondary" disabled={busy || done} onClick={() => send(suggestion)}>
                   {suggestion}
                 </Button>
@@ -119,7 +119,7 @@ export function ChatPanel({ fund, userName, rules }: { fund: string; userName: s
                   }
                   return null;
                 })}
-                {isRefusal(message) && <p className="rounded-[14px] bg-surface p-3">{CHAT_REFUSED}</p>}
+                {isRefusal(message) && <p className="rounded-[14px] bg-surface p-3">{m.chat.refused}</p>}
               </div>
             </li>
           ),
@@ -127,7 +127,7 @@ export function ChatPanel({ fund, userName, rules }: { fund: string; userName: s
         {waitingForText(messages, status) && (
           <li className="flex items-center gap-2 text-sm text-muted">
             <Avatar kind="agent" />
-            <span>El agente está escribiendo</span>
+            <span>{m.chat.typing}</span>
             <span className="typing" aria-hidden="true">
               <span />
               <span />
@@ -141,7 +141,7 @@ export function ChatPanel({ fund, userName, rules }: { fund: string; userName: s
           <p>{errorText}</p>
           {canRetry(errorText) && (
             <Button variant="link" onClick={() => regenerate()}>
-              Probar de nuevo
+              {m.fundError.retry}
             </Button>
           )}
         </div>
@@ -155,27 +155,25 @@ export function ChatPanel({ fund, userName, rules }: { fund: string; userName: s
       >
         <div className="flex gap-2">
           <label className="flex-1">
-            <span className="sr-only">Tu pregunta</span>
+            <span className="sr-only">{m.chat.questionLabel}</span>
             <input
               className={FIELD}
               value={text}
               maxLength={MAX_MESSAGE_CHARS}
-              placeholder="Escribí tu pregunta"
+              placeholder={m.chat.placeholder}
               autoComplete="off"
               disabled={done}
               onChange={(event) => setText(event.target.value)}
             />
           </label>
           <Button type="submit" disabled={busy || done || text.trim() === ""}>
-            Mandar
+            {m.chat.send}
           </Button>
         </div>
         {text.length >= 400 && (
-          <p className="text-xs text-muted">
-            {text.length} de {MAX_MESSAGE_CHARS}
-          </p>
+          <p className="text-xs text-muted">{m.chat.count(text.length, MAX_MESSAGE_CHARS)}</p>
         )}
-        {remainingText(remaining) !== null && errorText === null && <p className="text-xs text-muted">{remainingText(remaining)}</p>}
+        {remainingLeft !== null && errorText === null && <p className="text-xs text-muted">{remainingLeft}</p>}
       </form>
     </div>
   );

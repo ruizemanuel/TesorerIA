@@ -19,6 +19,11 @@ const STYLE: Record<Locale, { intl: string; thousands: string; decimal: string; 
   en: { intl: "en-US", thousands: ",", decimal: ".", pesos: "ARS", today: "Today", yesterday: "Yesterday" },
 };
 
+/** The tag `Intl` knows each language by: what writes a date in words ("jueves, 15 de octubre", "Thursday, October 15"). */
+export function intlLocale(locale: Locale): string {
+  return STYLE[locale].intl;
+}
+
 function thousands(digits: string, separator: string): string {
   return digits.replace(/\B(?=(\d{3})+(?!\d))/g, separator);
 }
@@ -80,6 +85,15 @@ export function parsePesos(input: string, locale: Locale = "es"): bigint | null 
   const decimals = (match[2] ?? "").padEnd(2, "0");
   const units = BigInt(whole) * WARS_UNIT + BigInt(decimals) * CENT;
   return units > 0n ? units : null;
+}
+
+/**
+ * An amount the chat's model wrote, in either language's way. The model writes as the page does, but a page can change
+ * language mid-conversation. No text reads as two different amounts (format.test.ts), so trying both is safe; a
+ * person's typing is read only in their page's language (parsePesos).
+ */
+export function parsePesosEitherWay(text: string): bigint | null {
+  return parsePesos(text, "es") ?? parsePesos(text, "en");
 }
 
 /** An amount typed in USDT, as USDT units, or null: written like pesos in that language (parsePesos), to the cent, with or without "USDT". */

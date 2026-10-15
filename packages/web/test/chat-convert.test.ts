@@ -6,6 +6,7 @@ import { chatCall } from "../src/lib/chat/call";
 import { toAnswerStream, toModelMessages } from "../src/lib/chat/convert";
 import { readChatRequest } from "../src/lib/chat/request";
 import type { ChatUIMessage } from "../src/lib/chat/tools";
+import { es } from "../src/lib/i18n/es";
 
 const usage = { inputTokens: { total: 2_000, noCache: 2_000, cacheRead: 0, cacheWrite: 0 }, outputTokens: { total: 40, text: 0, reasoning: 30 } };
 const streamOf = (chunks: LanguageModelV4StreamPart[]) => simulateReadableStream({ chunks, initialDelayInMs: null, chunkDelayInMs: null });
@@ -53,9 +54,9 @@ const user = (text: string): ChatUIMessage => ({ id: `u${++n}`, role: "user", pa
 
 /** One answer as the browser ends up holding it: the route's call and stream, read the way useChat reads them. */
 async function answerAs(model: LanguageModel, conversation: ChatUIMessage[]): Promise<ChatUIMessage> {
-  const result = streamText({ ...chatCall({ model, brief: "<estado_del_fondo>…</estado_del_fondo>" }), messages: await toModelMessages(conversation) });
+  const result = streamText({ ...chatCall({ model, brief: "<estado_del_fondo>…</estado_del_fondo>", locale: "es" }), messages: await toModelMessages(conversation) });
   let answer: ChatUIMessage | undefined;
-  for await (const message of readUIMessageStream<ChatUIMessage>({ stream: toAnswerStream(result.stream, 7) })) answer = message;
+  for await (const message of readUIMessageStream<ChatUIMessage>({ stream: toAnswerStream(result.stream, 7, es) })) answer = message;
   return { ...answer!, id: `a${++n}` };
 }
 
@@ -85,7 +86,7 @@ describe("the browser's round trip (spec, 8.2): an answer with signed thinking a
     const next = user("No, dejá. ¿Cuánto debo?");
     // As DefaultChatTransport sends it: JSON.
     const sent: unknown = JSON.parse(JSON.stringify([asked, dismissed(answer), next]));
-    const checked = await readChatRequest(sent);
+    const checked = await readChatRequest(sent, es);
     if (!checked.ok) throw new Error(`refused: ${checked.error}`);
 
     const followUp = answers("Debés $ 10.000 de esta semana.");
@@ -112,7 +113,7 @@ describe("the browser's round trip (spec, 8.2): an answer with signed thinking a
     const answer = await answerAs(answers("Hay $ 30.011,49 en el fondo."), [asked]);
     expect(answer.parts.map((part) => part.type)).toEqual(["step-start", "text"]);
     const sent: unknown = JSON.parse(JSON.stringify([asked, answer, user("¿Y cuánto debo?")]));
-    expect((await readChatRequest(sent)).ok).toBe(true);
+    expect((await readChatRequest(sent, es)).ok).toBe(true);
   });
 
   it("leaves out a card nobody answered, so the next call doesn't fail", async () => {

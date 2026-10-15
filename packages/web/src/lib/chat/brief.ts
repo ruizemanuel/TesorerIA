@@ -1,5 +1,6 @@
-import { TIME_ZONE, formatPesos, formatWhen } from "../format";
+import { TIME_ZONE, formatPesos, formatWhen, intlLocale } from "../format";
 import type { FundView } from "../fund-view";
+import type { Messages } from "../i18n/messages";
 import type { FundScreen } from "../read-fund";
 import type { TimelineItem } from "../timeline";
 
@@ -10,49 +11,53 @@ export const BRIEF_MOVEMENTS = 50;
 
 /**
  * Text a member wrote (a name, a note, the agreed expense), as the brief carries it: on one line, so it can't make up
- * a line of its own; with ‹ › for < >, so it can't close the brief's tag; and with no full address in it.
+ * a line of its own; with ‹ › for < >, so it can't close the brief's tag; and with no full address in it (the page's
+ * language says what it becomes).
  */
-export function briefText(text: string): string {
+export function briefText(text: string, m: Messages): string {
   // `\s` also matches the no-break space that formatPesos puts in "$ 50": keep it, so amounts read as they do on screen.
   return text
     .replace(/[^\S ]+/g, " ")
     .replaceAll("<", "‹")
     .replaceAll(">", "›")
-    .replace(/0x[0-9a-fA-F]{40}/g, "una cuenta")
+    .replace(/0x[0-9a-fA-F]{40}/g, m.chat.brief.account)
     .trim();
 }
 
-function who(item: TimelineItem): string {
-  if (item.actor.kind === "agent") return "El agente";
-  if (item.actor.kind === "group") return "El grupo";
+function who(item: TimelineItem, m: Messages): string {
+  if (item.actor.kind === "agent") return m.chat.brief.agent;
+  if (item.actor.kind === "group") return m.chat.brief.group;
   return item.actor.name;
 }
 
-function movement(item: TimelineItem, now: Date): string {
-  const when = item.pending ? "En camino" : formatWhen(item.at, now);
-  const why = item.detail ? ` Motivo: ${item.detail}` : "";
-  const voted = item.action?.kind === "vote" && item.action.voted ? " Ya la votaste." : "";
-  return `- ${when}. ${briefText(`${who(item)}: ${item.text}${why}${voted}`)}`;
+function movement(item: TimelineItem, now: Date, m: Messages): string {
+  const when = item.pending ? m.movements.onItsWay : formatWhen(item.at, now, m.locale);
+  const why = item.detail ? m.chat.brief.reason(item.detail) : "";
+  const voted = item.action?.kind === "vote" && item.action.voted ? m.chat.brief.youVoted : "";
+  return `- ${when}. ${briefText(`${who(item, m)}: ${item.text}${why}${voted}`, m)}`;
 }
 
-function yours(view: FundView): string[] {
+function yours(view: FundView, m: Messages): string[] {
   if (view.me === null) return [];
+  const { brief } = m.chat;
   const standing =
     view.me.owed > 0n
-      ? `Debés ${formatPesos(view.me.owed)}.`
+      ? brief.owe(formatPesos(view.me.owed, m.locale))
       : view.me.ahead > 0n
-        ? `Estás al día, con ${formatPesos(view.me.ahead)} adelantados.`
-        : "Estás al día.";
-  return [`Tu situación: ${standing} Si el fondo se cerrara hoy, te tocarían ${formatPesos(view.me.share)}.`];
+        ? brief.upToDateAhead(formatPesos(view.me.ahead, m.locale))
+        : brief.upToDate;
+  return [brief.situation(standing, formatPesos(view.me.share, m.locale))];
 }
 
 /**
- * The fund as `viewerName` sees it on their screen, in plain Spanish, for the chat's model (spec, 8.2): the same
- * numbers and sentences, so the model can't contradict the screen. No address goes in it, only names.
+ * The fund as `viewerName` sees it on their screen, in the page's language, for the chat's model (spec, 8.2 and 9.3):
+ * the same numbers and sentences, so the model can't contradict the screen. No address goes in it, only names.
  */
-export function fundBrief(screen: FundScreen, viewerName: string, now: Date): string {
+export function fundBrief(screen: FundScreen, viewerName: string, now: Date, m: Messages): string {
   const { view, timeline } = screen;
-  const today = new Intl.DateTimeFormat("es-AR", {
+  const { brief } = m.chat;
+  const { locale } = m;
+  const today = new Intl.DateTimeFormat(intlLocale(locale), {
     timeZone: TIME_ZONE,
     weekday: "long",
     day: "numeric",
@@ -66,25 +71,34 @@ export function fundBrief(screen: FundScreen, viewerName: string, now: Date): st
   const shown = timeline.slice(0, BRIEF_MOVEMENTS);
   const movementsTitle =
     timeline.length === 0
-      ? "Movimientos: todavía no hay."
+      ? brief.noMovements
       : timeline.length > BRIEF_MOVEMENTS
-        ? `Movimientos, del más nuevo al más viejo (los ${BRIEF_MOVEMENTS} más nuevos de ${timeline.length}; los anteriores no los ves):`
-        : "Movimientos, del más nuevo al más viejo:";
+        ? brief.movementsCut(BRIEF_MOVEMENTS, timeline.length)
+        : brief.movements;
+  const pesos = (units: bigint) => formatPesos(units, locale);
   return [
     `<${BRIEF_TAG}>`,
-    `Ahora es ${today}, hora de Argentina. El fondo va por su semana ${view.week + 1n}.`,
-    `Fondo: ${briefText(view.name)}. Saldo: ${formatPesos(view.balance)}.${view.closed ? " El fondo está cerrado." : ""}`,
-    `Reglas: cada uno pone ${formatPesos(view.weeklyFee)} por semana. El agente devuelve hasta ${formatPesos(view.weeklyCap)} por semana por ${briefText(view.agreedExpense)}, el gasto acordado: esta semana devolvió ${formatPesos(view.spentThisWeek)} y quedan ${formatPesos(view.leftThisWeek)}. Todo lo demás necesita ${view.votesRequired} de ${view.rows.length} votos. Nadie puede cambiar esto solo, ni el agente.`,
-    `Te habla: ${briefText(viewerName)}.`,
-    ...yours(view),
-    "La lista de la semana, en el orden en que entraron:",
-    ...view.rows.map(
-      (row) => `${row.position}. ${briefText(row.name)}${row.isMe ? " (vos)" : ""}: ${row.owed === 0n ? "pagó" : `debe ${formatPesos(row.owed)}`}.`,
+    brief.now(today, String(view.week + 1n)),
+    `${brief.fund(briefText(view.name, m), pesos(view.balance))}${view.closed ? brief.closed : ""}`,
+    brief.rules(
+      pesos(view.weeklyFee),
+      pesos(view.weeklyCap),
+      briefText(view.agreedExpense, m),
+      pesos(view.spentThisWeek),
+      pesos(view.leftThisWeek),
+      view.votesRequired,
+      view.rows.length,
     ),
-    open.length === 0 ? "Propuestas abiertas: ninguna." : "Propuestas abiertas:",
-    ...open.map((item) => movement(item, now)),
+    brief.speaking(briefText(viewerName, m)),
+    ...yours(view, m),
+    brief.weekList,
+    ...view.rows.map(
+      (row) => `${row.position}. ${briefText(row.name, m)}${row.isMe ? m.common.you : ""}: ${row.owed === 0n ? m.week.paid : m.week.owes(pesos(row.owed))}.`,
+    ),
+    open.length === 0 ? brief.noProposals : brief.proposals,
+    ...open.map((item) => movement(item, now, m)),
     movementsTitle,
-    ...shown.map((item) => movement(item, now)),
+    ...shown.map((item) => movement(item, now, m)),
     `</${BRIEF_TAG}>`,
   ].join("\n");
 }

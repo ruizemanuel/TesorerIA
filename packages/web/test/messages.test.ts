@@ -273,6 +273,125 @@ describe("the dictionaries", () => {
     });
   });
 
+  it("keeps the chat's Spanish as it always was, word for word, and says each in English", () => {
+    // What the route answers, the panel and the card (texts.ts, chat-panel.tsx, expense-proposal-card.tsx, view.ts).
+    expect({
+      unavailable: es.chat.unavailable,
+      memberLimit: es.chat.memberLimit,
+      refused: es.chat.refused,
+      badCard: es.chat.badCard,
+      sendFailed: es.chat.sendFailed,
+      longMessage: es.chat.longMessage(500),
+      badRequest: es.chat.badRequest,
+      notFound: es.chat.notFound,
+    }).toEqual({
+      unavailable: "El agente no puede responder ahora. Probá más tarde.",
+      memberLimit: "Por hoy ya hablamos bastante. Mañana seguimos.",
+      refused: "No puedo ayudarte con eso.",
+      badCard: "No pude armar el gasto. Contame de nuevo el monto y qué fue.",
+      sendFailed: "No pudimos mandar tu mensaje.",
+      longMessage: "Tu mensaje puede tener hasta 500 letras.",
+      badRequest: "Faltan datos o no son válidos.",
+      notFound: "No encontramos ese fondo.",
+    });
+    expect({
+      unavailable: en.chat.unavailable,
+      memberLimit: en.chat.memberLimit,
+      refused: en.chat.refused,
+      badCard: en.chat.badCard,
+      sendFailed: en.chat.sendFailed,
+      longMessage: en.chat.longMessage(500),
+      badRequest: en.chat.badRequest,
+      notFound: en.chat.notFound,
+    }).toEqual({
+      unavailable: "The agent can't answer right now. Try again later.",
+      memberLimit: "We've talked enough for today. We'll pick this up tomorrow.",
+      refused: "I can't help you with that.",
+      badCard: "I couldn't put the expense together. Tell me the amount and what it was for again.",
+      sendFailed: "We couldn't send your message.",
+      longMessage: "Your message can be up to 500 characters.",
+      badRequest: en.errors.badRequest,
+      notFound: en.errors.fundNotFound,
+    });
+    // The route answers with the dictionary's other words where it doesn't have the chat's: the same sentences.
+    expect(es.chat.badRequest).toBe(es.errors.badRequest);
+    expect(es.chat.notFound).toBe(es.errors.fundNotFound);
+    expect([es.chat.remaining(1), es.chat.remaining(5)]).toEqual(["Te queda 1 mensaje por hoy.", "Te quedan 5 mensajes por hoy."]);
+    expect([en.chat.remaining(1), en.chat.remaining(5)]).toEqual(["You have 1 message left today.", "You have 5 messages left today."]);
+    expect([es.chat.greeting("Ana"), en.chat.greeting("Ana")]).toEqual(["Hola, Ana. Preguntame lo que quieras del fondo.", "Hi, Ana. Ask me anything about the fund."]);
+    expect(es.chat.suggestions).toEqual(["¿Quién debe esta semana?", "¿Cuánto queda del tope de la semana?", "Quiero cargar un gasto"]);
+    expect(en.chat.suggestions).toEqual(["Who owes this week?", "How much is left of the weekly cap?", "I want to add an expense"]);
+    expect([es.chat.typing, es.chat.questionLabel, es.chat.placeholder, es.chat.send, es.chat.count(12, 500)]).toEqual([
+      "El agente está escribiendo",
+      "Tu pregunta",
+      "Escribí tu pregunta",
+      "Mandar",
+      "12 de 500",
+    ]);
+    expect([en.chat.typing, en.chat.questionLabel, en.chat.placeholder, en.chat.send, en.chat.count(12, 500)]).toEqual([
+      "The agent is typing",
+      "Your question",
+      "Write your question",
+      "Send",
+      "12 of 500",
+    ]);
+    // The card.
+    expect(es.chat.card.agreedNext("$ 15.000")).toBe("Si entra en lo que queda del tope de la semana ($ 15.000), te lo devuelvo enseguida. Si no, se vota.");
+    expect(en.chat.card.agreedNext("ARS 15,000")).toBe("If it fits in what's left of the weekly cap (ARS 15,000), I'll pay you back right away. If not, it goes to a vote.");
+    expect([es.chat.card.otherNext(3, 5), en.chat.card.otherNext(3, 5)]).toEqual(["Se vota: necesita 3 de 5 votos.", "It goes to a vote: it needs 3 of 5 votes."]);
+    expect([es.chat.card.otherExpense, es.chat.card.kindLabel, es.chat.card.amountLabel, es.chat.card.noteLabel]).toEqual([
+      "Otro gasto",
+      "Qué gasto es",
+      "Cuánto",
+      "Nota",
+    ]);
+    expect([en.chat.card.otherExpense, en.chat.card.kindLabel, en.chat.card.amountLabel, en.chat.card.noteLabel]).toEqual([
+      "Other expense",
+      "Which expense it is",
+      "How much",
+      "Note",
+    ]);
+    expect([es.chat.card.confirm, es.chat.card.cancel, es.chat.card.notLoaded]).toEqual(["Confirmar", "Cancelar", "No lo cargué."]);
+    expect([en.chat.card.confirm, en.chat.card.cancel, en.chat.card.notLoaded]).toEqual(["Confirm", "Cancel", "I didn't add it."]);
+  });
+
+  it("keeps the chat brief's Spanish as it always was, word for word, and says each in English", () => {
+    const [s, e] = [es.chat.brief, en.chat.brief];
+    expect([s.agent, s.group, s.account, s.youVoted, s.closed]).toEqual(["El agente", "El grupo", "una cuenta", " Ya la votaste.", " El fondo está cerrado."]);
+    expect([e.agent, e.group, e.account, e.youVoted, e.closed]).toEqual(["The agent", "The group", "an account", " You already voted on it.", " The fund is closed."]);
+    expect([s.reason("X"), e.reason("X")]).toEqual([" Motivo: X", " Reason: X"]);
+    expect(s.now("sábado", "3")).toBe("Ahora es sábado, hora de Argentina. El fondo va por su semana 3.");
+    expect(e.now("Saturday", "3")).toBe("It's Saturday, Argentina time. The fund is in week 3.");
+    expect([s.fund("Fútbol", "$ 80.000"), e.fund("Football", "ARS 80,000")]).toEqual(["Fondo: Fútbol. Saldo: $ 80.000.", "Fund: Football. Balance: ARS 80,000."]);
+    expect(s.rules("$ 10.000", "$ 60.000", "la cancha", "$ 45.000", "$ 15.000", 2, 3)).toBe(
+      "Reglas: cada uno pone $ 10.000 por semana. El agente devuelve hasta $ 60.000 por semana por la cancha, el gasto acordado: esta semana devolvió $ 45.000 y quedan $ 15.000. Todo lo demás necesita 2 de 3 votos. Nadie puede cambiar esto solo, ni el agente.",
+    );
+    expect(e.rules("ARS 10,000", "ARS 60,000", "the pitch", "ARS 45,000", "ARS 15,000", 2, 3)).toBe(
+      "Rules: each person puts in ARS 10,000 per week. The agent pays back up to ARS 60,000 per week for the pitch, the agreed expense: this week it has paid back ARS 45,000 and ARS 15,000 is left. Everything else needs 2 of 3 votes. No one can change this alone, not even the agent.",
+    );
+    expect([s.speaking("Ana"), e.speaking("Ana")]).toEqual(["Te habla: Ana.", "Talking to you: Ana."]);
+    expect([s.owe("$ 10.000"), s.upToDateAhead("$ 2.000"), s.upToDate]).toEqual(["Debés $ 10.000.", "Estás al día, con $ 2.000 adelantados.", "Estás al día."]);
+    expect([e.owe("ARS 10,000"), e.upToDateAhead("ARS 2,000"), e.upToDate]).toEqual(["You owe ARS 10,000.", "You're up to date, ARS 2,000 ahead.", "You're up to date."]);
+    expect(s.situation("Estás al día.", "$ 5.000")).toBe("Tu situación: Estás al día. Si el fondo se cerrara hoy, te tocarían $ 5.000.");
+    expect(e.situation("You're up to date.", "ARS 5,000")).toBe("Your situation: You're up to date. If the fund closed today, you'd get ARS 5,000.");
+    expect([s.weekList, s.noProposals, s.proposals, s.noMovements, s.movements]).toEqual([
+      "La lista de la semana, en el orden en que entraron:",
+      "Propuestas abiertas: ninguna.",
+      "Propuestas abiertas:",
+      "Movimientos: todavía no hay.",
+      "Movimientos, del más nuevo al más viejo:",
+    ]);
+    expect([e.weekList, e.noProposals, e.proposals, e.noMovements, e.movements]).toEqual([
+      "This week's list, in the order they joined:",
+      "Open proposals: none.",
+      "Open proposals:",
+      "Activity: none yet.",
+      "Activity, newest first:",
+    ]);
+    expect(s.movementsCut(50, 60)).toBe("Movimientos, del más nuevo al más viejo (los 50 más nuevos de 60; los anteriores no los ves):");
+    expect(e.movementsCut(50, 60)).toBe("Activity, newest first (the newest 50 of 60; you can't see the older ones):");
+  });
+
   it("shares the invitation in the language of whoever shares it", () => {
     expect(es.share.whatsApp("Fútbol", "https://tesoreria.app/invitacion/abc")).toBe('Sumate al fondo "Fútbol" en TesorerIA: https://tesoreria.app/invitacion/abc');
     expect(en.share.whatsApp("Fútbol", "https://tesoreria.app/invitacion/abc")).toBe('Join the fund "Fútbol" on TesorerIA: https://tesoreria.app/invitacion/abc');

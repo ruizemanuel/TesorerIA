@@ -1,5 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { NBSP, USDT_UNIT, WARS_UNIT, formatPesos, formatUsdt, formatWhen, heldAmounts, initials, parsePesos, parseUsdt } from "../src/lib/format";
+import {
+  NBSP,
+  USDT_UNIT,
+  WARS_UNIT,
+  formatPesos,
+  formatUsdt,
+  formatWhen,
+  heldAmounts,
+  initials,
+  parsePesos,
+  parsePesosEitherWay,
+  parseUsdt,
+} from "../src/lib/format";
 
 describe("formatPesos", () => {
   it("writes pesos the Argentine way, with a space that doesn't break after the sign", () => {
@@ -120,6 +132,19 @@ describe("in English (spec, 9.3)", () => {
     for (const bad of ["10.000", "10,00", "10.000,50", "1,0000", "1,000.555", "0,500", "01,000", "10.5.5", "$ 10,000", "abc", "", "0", "0.00", "-5", "1e3"]) {
       expect(parsePesos(bad, "en"), bad).toBeNull();
     }
+  });
+
+  it("reads the model's amount in either language's way", () => {
+    expect(parsePesosEitherWay("45.000")).toBe(45_000n * WARS_UNIT);
+    expect(parsePesosEitherWay("45,000")).toBe(45_000n * WARS_UNIT);
+    expect(parsePesosEitherWay("45,000.50")).toBe(45_000n * WARS_UNIT + 50n * 10n ** 16n);
+    expect(parsePesosEitherWay("45.000,50")).toBe(45_000n * WARS_UNIT + 50n * 10n ** 16n);
+    expect(parsePesosEitherWay(`$${NBSP}8.000`)).toBe(8_000n * WARS_UNIT);
+    expect(parsePesosEitherWay(`ARS${NBSP}8,000`)).toBe(8_000n * WARS_UNIT);
+    expect(parsePesosEitherWay("forty")).toBeNull();
+    expect(parsePesosEitherWay("0")).toBeNull();
+    // Neither language reads these, so neither does the model's amount.
+    for (const bad of ["10.5.5", "1,000.555", "", "-5"]) expect(parsePesosEitherWay(bad), bad).toBeNull();
   });
 
   it("reads USDT written the English way", () => {

@@ -9,11 +9,12 @@ import { MAX_CHAT_BODY_BYTES } from "../../../../../lib/chat/limits";
 import { chatEnabled, chatModel } from "../../../../../lib/chat/model";
 import { recordChatUsage, reserveChatMessage } from "../../../../../lib/chat/quota";
 import { readChatRequest } from "../../../../../lib/chat/request";
-import { CHAT_MEMBER_LIMIT, CHAT_NOT_FOUND, CHAT_UNAVAILABLE } from "../../../../../lib/chat/texts";
 import { currentUser } from "../../../../../lib/current-user";
 import { getDb } from "../../../../../lib/db/client";
 import { env } from "../../../../../lib/env";
 import { jsonError, readJson } from "../../../../../lib/http";
+import { localeOf } from "../../../../../lib/i18n/locales";
+import { messagesFor } from "../../../../../lib/i18n/messages";
 import { type FundScreen, loadFundScreen } from "../../../../../lib/read-fund";
 
 // One answer: a model call or two, well within a minute.
@@ -34,28 +35,34 @@ function sumTokens(counts: Array<number | undefined>): number | undefined {
   return known.length === 0 ? undefined : known.reduce((total, count) => total + count, 0);
 }
 
-/** The chat with the agent (spec, 8.2): one message of a member of a live fund, answered as a stream. */
+/**
+ * The chat with the agent (spec, 8.2): one message of a member of a live fund, answered as a stream. It reads the fund
+ * and answers in the request's language (spec, 9.3): if the page changes language in the middle of a conversation, the
+ * history stays as it was and the next answer comes in the new language.
+ */
 export async function POST(request: Request, { params }: { params: Promise<{ address: string }> }) {
+  const locale = localeOf(request);
+  const m = messagesFor(locale);
   const user = await currentUser();
-  if (user === null) return jsonError(401, "Entrá con tu passkey.");
+  if (user === null) return jsonError(401, m.errors.logIn);
   const { address } = await params;
-  if (!chatEnabled() || !isAddress(address, { strict: false })) return jsonError(404, CHAT_NOT_FOUND);
+  if (!chatEnabled() || !isAddress(address, { strict: false })) return jsonError(404, m.chat.notFound);
   // The cap holds for the bytes actually read, not only for the length the request declares (a chunked body has none).
   const body = await readJson(request, ChatBody, { maxBytes: MAX_CHAT_BODY_BYTES });
   if (!body.ok) return body.response;
-  const conversation = await readChatRequest(body.value.messages);
+  const conversation = await readChatRequest(body.value.messages, m);
   if (!conversation.ok) return jsonError(400, conversation.error);
 
   // Everything that can fail before the model comes before the cap, so a failure costs the member nothing: the
   // brief, the history as the model reads it, and the model itself.
   let screen: FundScreen | null;
   try {
-    screen = await loadFundScreen(address, user, { locale: "es" }); // for now the chat reads the fund in Spanish
+    screen = await loadFundScreen(address, user, { locale });
   } catch (error) {
     console.error(`The chat could not read fund ${address}: ${shortMessage(error)}`);
-    return jsonError(503, CHAT_UNAVAILABLE);
+    return jsonError(503, m.chat.unavailable);
   }
-  if (screen === null) return jsonError(404, CHAT_NOT_FOUND);
+  if (screen === null) return jsonError(404, m.chat.notFound);
   let messages: ModelMessage[];
   let model: LanguageModel;
   try {
@@ -63,7 +70,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ add
     model = await chatModel();
   } catch (error) {
     console.error(`The chat could not start for fund ${address}: ${describeError(error)}`);
-    return jsonError(503, CHAT_UNAVAILABLE);
+    return jsonError(503, m.chat.unavailable);
   }
 
   const db = await getDb();
@@ -74,10 +81,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ add
     memberLimit: CHAT_MEMBER_DAILY_LIMIT,
     globalLimit: CHAT_DAILY_LIMIT,
   });
-  if (!reservation.ok) return jsonError(429, reservation.limit === "member" ? CHAT_MEMBER_LIMIT : CHAT_UNAVAILABLE);
+  if (!reservation.ok) return jsonError(429, reservation.limit === "member" ? m.chat.memberLimit : m.chat.unavailable);
 
   const result = streamText({
-    ...chatCall({ model, brief: fundBrief(screen, user.name, new Date()) }),
+    ...chatCall({ model, brief: fundBrief(screen, user.name, new Date(), m), locale }),
     messages,
     abortSignal: request.signal,
     onEnd: async ({ usage, finishReason, rawFinishReason }) => {
@@ -103,5 +110,5 @@ export async function POST(request: Request, { params }: { params: Promise<{ add
     },
   });
 
-  return createUIMessageStreamResponse({ stream: toAnswerStream(result.stream, reservation.remaining) });
+  return createUIMessageStreamResponse({ stream: toAnswerStream(result.stream, reservation.remaining, m) });
 }

@@ -2,7 +2,7 @@
 // does the check script (scripts/chat-check.ts), so the real model's answers take the same path as the browser's.
 import { MAX_NOTE_LENGTH } from "@tesoreria/agent";
 import { InvalidToolInputError, type ModelMessage, NoSuchToolError, type TextStreamPart, convertToModelMessages, toUIMessageStream } from "ai";
-import { CHAT_UNAVAILABLE } from "./texts";
+import type { Messages } from "../i18n/messages";
 import { type ChatMetadata, type ChatUIMessage, chatTools } from "./tools";
 
 /**
@@ -14,17 +14,17 @@ export function toModelMessages(messages: ChatUIMessage[]): Promise<ModelMessage
 }
 
 /** What the model reads when its card was wrong. Fixed text: the card's own input is never echoed back to it or to a log. */
-export const BAD_CARD_HINT = `Invalid input: write the amount in pesos, like 45.000 or 45.000,50, above zero, and a note of up to ${MAX_NOTE_LENGTH} characters.`;
+export const BAD_CARD_HINT = `Invalid input: write the amount in pesos, like 45.000 or 45.000,50 in Spanish, 45,000 or 45,000.50 in English, above zero, and a note of up to ${MAX_NOTE_LENGTH} characters.`;
 
 /**
  * The answer as the browser reads it, with the member's messages left today (`remaining`) and how it ended. Errors
  * are only mapped: a failure was logged by whoever called the model. A card the model got wrong, or a tool it doesn't
- * have, goes back to the model as a hint (the card itself says CHAT_BAD_CARD); a tool's own error reaches here as a
- * string. Anything else is the member's CHAT_UNAVAILABLE. The provider's own record of the answer (a custom part:
- * Anthropic's message_start, through the AI Gateway, with the message's id and usage) stays here: the panel shows
- * nothing of it, and readChatRequest takes back only the parts a message may carry.
+ * have, goes back to the model as a hint (the card itself says `chat.badCard`); a tool's own error reaches here as a
+ * string. Anything else is the member's `chat.unavailable`, in the request's language (`m`). The provider's own
+ * record of the answer (a custom part: Anthropic's message_start, through the AI Gateway, with the message's id and
+ * usage) stays here: the panel shows nothing of it, and readChatRequest takes back only the parts a message may carry.
  */
-export function toAnswerStream(stream: ReadableStream<TextStreamPart<typeof chatTools>>, remaining: number) {
+export function toAnswerStream(stream: ReadableStream<TextStreamPart<typeof chatTools>>, remaining: number, m: Messages) {
   return toUIMessageStream<typeof chatTools, ChatUIMessage>({
     stream: stream.pipeThrough(
       new TransformStream<TextStreamPart<typeof chatTools>, TextStreamPart<typeof chatTools>>({
@@ -40,6 +40,6 @@ export function toAnswerStream(stream: ReadableStream<TextStreamPart<typeof chat
       return undefined;
     },
     onError: (error) =>
-      InvalidToolInputError.isInstance(error) || NoSuchToolError.isInstance(error) || typeof error === "string" ? BAD_CARD_HINT : CHAT_UNAVAILABLE,
+      InvalidToolInputError.isInstance(error) || NoSuchToolError.isInstance(error) || typeof error === "string" ? BAD_CARD_HINT : m.chat.unavailable,
   });
 }

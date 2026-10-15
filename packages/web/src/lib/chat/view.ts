@@ -1,32 +1,40 @@
 import { APICallError } from "ai";
-import { formatPesos, parsePesos } from "../format";
-import { CHAT_BAD_REQUEST, CHAT_LONG_MESSAGE, CHAT_MEMBER_LIMIT, CHAT_NOT_FOUND, CHAT_SEND_FAILED, CHAT_UNAVAILABLE } from "./texts";
+import { formatPesos, parsePesosEitherWay } from "../format";
+import { MESSAGES, type Messages } from "../i18n/messages";
+import { MAX_MESSAGE_CHARS } from "./limits";
 import type { ChatUIMessage, ProposedExpense } from "./tools";
 
 /** What the card needs from the fund to say what will happen (spec, 9.2). */
 export type ProposalRules = { agreedExpense: string; leftThisWeek: bigint; votesRequired: number; members: number };
 
-/** The card before it's confirmed: the kind, the amount (null if it can't be read), the note, and what comes next. */
-export function proposalPreview(input: ProposedExpense, rules: ProposalRules) {
-  const amount = parsePesos(input.amount);
+/**
+ * The card before it's confirmed: the kind, the amount (null if it can't be read), the note, and what comes next, in
+ * the page's language. The amount is the model's, not a person's: it is read in either language's way (parsePesosEitherWay).
+ */
+export function proposalPreview(input: ProposedExpense, rules: ProposalRules, m: Messages) {
+  const amount = parsePesosEitherWay(input.amount);
   return {
-    kind: input.kind === "agreed" ? `${rules.agreedExpense} (el gasto acordado)` : "Otro gasto",
+    kind: input.kind === "agreed" ? m.expense.agreed(rules.agreedExpense) : m.chat.card.otherExpense,
     amount,
     note: input.note,
     next:
       input.kind === "agreed"
-        ? `Si entra en lo que queda del tope de la semana (${formatPesos(rules.leftThisWeek)}), te lo devuelvo enseguida. Si no, se vota.`
-        : `Se vota: necesita ${rules.votesRequired} de ${rules.members} votos.`,
+        ? m.chat.card.agreedNext(formatPesos(rules.leftThisWeek, m.locale))
+        : m.chat.card.otherNext(rules.votesRequired, rules.members),
   };
 }
 
-const OURS = new Set([CHAT_UNAVAILABLE, CHAT_MEMBER_LIMIT, CHAT_LONG_MESSAGE, CHAT_BAD_REQUEST, CHAT_NOT_FOUND]);
+/** The route's own words, in every language: it answers in its request's, which isn't always the page's by the time they arrive. */
+const OURS = new Set(
+  Object.values(MESSAGES).flatMap((m) => [m.chat.unavailable, m.chat.memberLimit, m.chat.longMessage(MAX_MESSAGE_CHARS), m.chat.badRequest, m.chat.notFound]),
+);
+const MEMBER_LIMITS = new Set(Object.values(MESSAGES).map((m) => m.chat.memberLimit));
 
 /**
  * What the panel says when a message didn't go through: the route's own words (its JSON `error`, or a stream error,
  * which carries the text the route chose), and otherwise that the message didn't go out. Never a raw error.
  */
-export function chatErrorText(error: unknown): string {
+export function chatErrorText(error: unknown, m: Messages): string {
   if (APICallError.isInstance(error)) {
     try {
       const body = JSON.parse(error.responseBody ?? "") as { error?: unknown };
@@ -34,22 +42,22 @@ export function chatErrorText(error: unknown): string {
     } catch {
       // Not our JSON: a proxy's page, say.
     }
-    return CHAT_UNAVAILABLE;
+    return m.chat.unavailable;
   }
   if (error instanceof Error && OURS.has(error.message)) return error.message;
-  return CHAT_SEND_FAILED;
+  return m.chat.sendFailed;
 }
 
-/** Whether "Probar de nuevo" makes sense: not once the member reached their cap. */
+/** Whether "Probar de nuevo" makes sense: not once the member reached their cap (said in either language). */
 export function canRetry(text: string): boolean {
-  return text !== CHAT_MEMBER_LIMIT;
+  return !MEMBER_LIMITS.has(text);
 }
 
-/** "Te quedan 3 mensajes por hoy", from 5 down (spec, 9.2). */
-export function remainingText(remaining: number | undefined): string | null {
+/** "Te quedan 3 mensajes por hoy" ("You have 3 messages left today"), from 5 down (spec, 9.2). */
+export function remainingText(remaining: number | undefined, m: Messages): string | null {
   if (remaining === undefined || remaining > 5) return null;
-  if (remaining === 0) return CHAT_MEMBER_LIMIT;
-  return remaining === 1 ? "Te queda 1 mensaje por hoy." : `Te quedan ${remaining} mensajes por hoy.`;
+  if (remaining === 0) return m.chat.memberLimit;
+  return m.chat.remaining(remaining);
 }
 
 /** The messages left today, as the newest answer that says it does. */
@@ -61,13 +69,13 @@ export function lastRemaining(messages: ChatUIMessage[]): number | undefined {
   return undefined;
 }
 
-/** An answer the model refused, with no words of its own: the panel says CHAT_REFUSED for it. */
+/** An answer the model refused, with no words of its own: the panel says `chat.refused` for it. */
 export function isRefusal(message: ChatUIMessage): boolean {
   const finish = message.metadata?.finish;
   return (finish === "refusal" || finish === "content-filter") && !message.parts.some((part) => part.type === "text" && part.text !== "");
 }
 
-/** The card's states that show something (ExpenseProposalCard): the card itself, its outcome, or CHAT_BAD_CARD. */
+/** The card's states that show something (ExpenseProposalCard): the card itself, its outcome, or `chat.badCard`. */
 const SHOWN_CARD = new Set(["input-available", "output-available", "output-error"]);
 
 /**

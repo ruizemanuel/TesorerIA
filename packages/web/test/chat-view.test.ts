@@ -1,6 +1,6 @@
 import { APICallError } from "ai";
 import { describe, expect, it } from "vitest";
-import { CHAT_LONG_MESSAGE, CHAT_MEMBER_LIMIT, CHAT_SEND_FAILED, CHAT_UNAVAILABLE } from "../src/lib/chat/texts";
+import { MAX_MESSAGE_CHARS } from "../src/lib/chat/limits";
 import type { ChatUIMessage } from "../src/lib/chat/tools";
 import {
   canRetry,
@@ -14,7 +14,7 @@ import {
   waitingForText,
 } from "../src/lib/chat/view";
 import { expenseOutcome } from "../src/lib/expense-outcome";
-import { formatPesos } from "../src/lib/format";
+import { NBSP, formatPesos } from "../src/lib/format";
 import { en } from "../src/lib/i18n/en";
 import { es } from "../src/lib/i18n/es";
 import { WARS } from "./support/fixtures";
@@ -26,7 +26,7 @@ const answer = (parts: ChatUIMessage["parts"], metadata?: ChatUIMessage["metadat
 
 describe("proposalPreview: what the card says before it's confirmed (spec, 9.2)", () => {
   it("says the agreed expense comes back if it fits in what's left of the week", () => {
-    expect(proposalPreview({ kind: "agreed", amount: "45.000", note: "Jueves" }, rules)).toEqual({
+    expect(proposalPreview({ kind: "agreed", amount: "45.000", note: "Jueves" }, rules, es)).toEqual({
       kind: "la cancha (el gasto acordado)",
       amount: 45_000n * WARS,
       note: "Jueves",
@@ -35,36 +35,98 @@ describe("proposalPreview: what the card says before it's confirmed (spec, 9.2)"
   });
 
   it("says another expense goes to a vote, and has no amount it can't read", () => {
-    expect(proposalPreview({ kind: "other", amount: "8.000", note: "" }, rules)).toMatchObject({ kind: "Otro gasto", next: "Se vota: necesita 3 de 5 votos." });
-    expect(proposalPreview({ kind: "other", amount: "mucho", note: "" }, rules).amount).toBeNull();
+    expect(proposalPreview({ kind: "other", amount: "8.000", note: "" }, rules, es)).toMatchObject({
+      kind: "Otro gasto",
+      next: "Se vota: necesita 3 de 5 votos.",
+    });
+    expect(proposalPreview({ kind: "other", amount: "mucho", note: "" }, rules, es).amount).toBeNull();
+  });
+
+  it("says it in English, with the amounts the English way", () => {
+    expect(proposalPreview({ kind: "agreed", amount: "45,000", note: "Thursday" }, rules, en)).toEqual({
+      kind: "la cancha (the agreed expense)",
+      amount: 45_000n * WARS,
+      note: "Thursday",
+      next: `If it fits in what's left of the weekly cap (ARS${NBSP}15,000), I'll pay you back right away. If not, it goes to a vote.`,
+    });
+    expect(proposalPreview({ kind: "other", amount: "8,000", note: "balls" }, rules, en)).toMatchObject({
+      kind: "Other expense",
+      next: "It goes to a vote: it needs 3 of 5 votes.",
+    });
+    expect(proposalPreview({ kind: "other", amount: "8,000", note: "balls" }, rules, en).amount).toBe(8_000n * WARS);
+  });
+
+  it("reads the model's amount in either language's format, whatever language the page is in", () => {
+    // The page can change language in the middle of a chat, or the model can write as it's used to.
+    expect(proposalPreview({ kind: "other", amount: "8,000", note: "" }, rules, es).amount).toBe(8_000n * WARS);
+    expect(proposalPreview({ kind: "other", amount: "8.000", note: "" }, rules, en).amount).toBe(8_000n * WARS);
+    expect(proposalPreview({ kind: "other", amount: "8.000,50", note: "" }, rules, en).amount).toBe(8_000n * WARS + 50n * 10n ** 16n);
+    expect(proposalPreview({ kind: "other", amount: "forty", note: "" }, rules, en).amount).toBeNull();
   });
 });
 
 describe("chatErrorText: what the panel says when a message doesn't go through", () => {
   it("says what the route wrote", () => {
-    expect(chatErrorText(apiError(429, JSON.stringify({ error: CHAT_MEMBER_LIMIT })))).toBe(CHAT_MEMBER_LIMIT);
-    expect(chatErrorText(apiError(400, JSON.stringify({ error: CHAT_LONG_MESSAGE })))).toBe(CHAT_LONG_MESSAGE);
-    expect(chatErrorText(apiError(502, "<html>Bad gateway</html>"))).toBe(CHAT_UNAVAILABLE);
+    expect(chatErrorText(apiError(429, JSON.stringify({ error: es.chat.memberLimit })), es)).toBe("Por hoy ya hablamos bastante. Mañana seguimos.");
+    expect(chatErrorText(apiError(400, JSON.stringify({ error: es.chat.longMessage(MAX_MESSAGE_CHARS) })), es)).toBe(
+      "Tu mensaje puede tener hasta 500 letras.",
+    );
+    expect(chatErrorText(apiError(502, "<html>Bad gateway</html>"), es)).toBe("El agente no puede responder ahora. Probá más tarde.");
   });
 
   it("says the stream's own error, and a lost connection in its own words, never a raw one", () => {
-    expect(chatErrorText(new Error(CHAT_UNAVAILABLE))).toBe(CHAT_UNAVAILABLE);
-    expect(chatErrorText(new TypeError("Failed to fetch"))).toBe(CHAT_SEND_FAILED);
+    expect(chatErrorText(new Error(es.chat.unavailable), es)).toBe(es.chat.unavailable);
+    expect(chatErrorText(new TypeError("Failed to fetch"), es)).toBe("No pudimos mandar tu mensaje.");
   });
 
-  it("offers to try again unless the member reached their cap", () => {
-    expect(canRetry(CHAT_SEND_FAILED)).toBe(true);
-    expect(canRetry(CHAT_MEMBER_LIMIT)).toBe(false);
+  it("says the same in English: the route's words, the stream's own error, and a lost connection", () => {
+    expect(chatErrorText(apiError(429, JSON.stringify({ error: en.chat.memberLimit })), en)).toBe(en.chat.memberLimit);
+    expect(chatErrorText(apiError(400, JSON.stringify({ error: en.chat.longMessage(MAX_MESSAGE_CHARS) })), en)).toBe(
+      "Your message can be up to 500 characters.",
+    );
+    expect(chatErrorText(apiError(502, "<html>Bad gateway</html>"), en)).toBe(en.chat.unavailable);
+    expect(chatErrorText(new Error(en.chat.unavailable), en)).toBe(en.chat.unavailable);
+    expect(chatErrorText(new Error("fetch failed"), en)).toBe(en.chat.sendFailed);
+  });
+
+  it("knows the route's words in either language, since the page's language can change after the request", () => {
+    for (const ours of [es, en]) {
+      const words = [ours.chat.unavailable, ours.chat.memberLimit, ours.chat.longMessage(MAX_MESSAGE_CHARS), ours.chat.badRequest, ours.chat.notFound];
+      for (const text of words) {
+        expect(chatErrorText(new Error(text), es), text).toBe(text);
+        expect(chatErrorText(new Error(text), en), text).toBe(text);
+      }
+    }
+    // Any other message, even one that looks technical, is never shown raw.
+    expect(chatErrorText(new Error("connect ECONNREFUSED 10.0.0.1:5432"), en)).toBe(en.chat.sendFailed);
+  });
+
+  it("offers to try again unless the member reached their cap, in either language", () => {
+    expect(canRetry(es.chat.sendFailed)).toBe(true);
+    expect(canRetry(es.chat.memberLimit)).toBe(false);
+    expect(canRetry(en.chat.sendFailed)).toBe(true);
+    expect(canRetry(en.chat.memberLimit)).toBe(false);
+    // Only the cap's words take it away, whichever language they came in.
+    expect(canRetry(es.chat.unavailable)).toBe(true);
+    expect(canRetry(en.chat.unavailable)).toBe(true);
   });
 });
 
 describe("the panel's small words", () => {
   it("says how many messages are left only from 5 down", () => {
-    expect(remainingText(undefined)).toBeNull();
-    expect(remainingText(6)).toBeNull();
-    expect(remainingText(5)).toBe("Te quedan 5 mensajes por hoy.");
-    expect(remainingText(1)).toBe("Te queda 1 mensaje por hoy.");
-    expect(remainingText(0)).toBe(CHAT_MEMBER_LIMIT);
+    expect(remainingText(undefined, es)).toBeNull();
+    expect(remainingText(6, es)).toBeNull();
+    expect(remainingText(5, es)).toBe("Te quedan 5 mensajes por hoy.");
+    expect(remainingText(1, es)).toBe("Te queda 1 mensaje por hoy.");
+    expect(remainingText(0, es)).toBe("Por hoy ya hablamos bastante. Mañana seguimos.");
+  });
+
+  it("says how many are left in English too", () => {
+    expect(remainingText(undefined, en)).toBeNull();
+    expect(remainingText(6, en)).toBeNull();
+    expect(remainingText(5, en)).toBe("You have 5 messages left today.");
+    expect(remainingText(1, en)).toBe("You have 1 message left today.");
+    expect(remainingText(0, en)).toBe(en.chat.memberLimit);
   });
 
   it("reads the messages left from the newest answer that says it", () => {

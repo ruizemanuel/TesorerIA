@@ -4,13 +4,14 @@ import { MockLanguageModelV4 } from "ai/test";
 import { getAddress } from "viem";
 import { type MockInstance, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BRIEF_TAG } from "../src/lib/chat/brief";
-import { CHAT_INSTRUCTIONS } from "../src/lib/chat/instructions";
-import { CHAT_LONG_MESSAGE, CHAT_MEMBER_LIMIT, CHAT_NOT_FOUND, CHAT_UNAVAILABLE } from "../src/lib/chat/texts";
+import { chatInstructions } from "../src/lib/chat/instructions";
 import type { CurrentUser } from "../src/lib/current-user";
 import type { Db } from "../src/lib/db/client";
 import { chatMessages } from "../src/lib/db/schema";
 import { buildFundView } from "../src/lib/fund-view";
+import { en } from "../src/lib/i18n/en";
 import { es } from "../src/lib/i18n/es";
+import type { Messages } from "../src/lib/i18n/messages";
 import type { FundScreen } from "../src/lib/read-fund";
 import { addLiveFund, addUser, testDb } from "./support/db";
 import { ANA, BETO, BLOCK, FUND, WARS, snapshot } from "./support/fixtures";
@@ -22,6 +23,8 @@ const state = vi.hoisted(() => ({
   enabled: true,
   model: null as unknown,
   screen: null as unknown,
+  /** The language each read of the fund's screen was asked for. */
+  screenLocales: [] as string[],
   memberLimit: 30,
   globalLimit: 150,
 }));
@@ -39,7 +42,8 @@ vi.mock("../src/lib/chat/model", () => ({
   },
 }));
 vi.mock("../src/lib/read-fund", () => ({
-  loadFundScreen: async () => {
+  loadFundScreen: async (_address: string, _user: unknown, options: { locale: string }) => {
+    state.screenLocales.push(options.locale);
     if (state.screen instanceof Error) throw state.screen;
     return state.screen;
   },
@@ -93,6 +97,7 @@ const chunksOf = (body: string): Array<Record<string, unknown>> =>
 
 let db: Db;
 let ana: CurrentUser;
+let fundId: string;
 let errors: MockInstance<typeof console.error>;
 let n = 0;
 const user = (text: string) => ({ id: `m${++n}`, role: "user", parts: [{ type: "text", text }] });
@@ -107,6 +112,25 @@ const chat = (messages: unknown[], address: string = FUND, init: RequestInit = {
     }),
     { params: Promise.resolve({ address }) },
   );
+
+/** The request of a browser whose page is in English: its cookie says so (the chat answers in the request's language). */
+const english: RequestInit = { headers: { "content-type": "application/json", cookie: "lang=en" } };
+
+/** The fund's screen as the page of `m` shows it, without accents in what members wrote. */
+function screenIn(m: Messages): FundScreen {
+  const view = buildFundView({
+    snapshot: snapshot(),
+    name: m === es ? "Fútbol de los jueves" : "Thursday football",
+    agreedExpense: m === es ? "la cancha" : "the pitch",
+    balance: 90_000n * WARS,
+    weeklyFee: 10_000n * WARS,
+    joined: new Map(),
+    names: new Map([[ANA, "Ana"]]),
+    viewer: ANA,
+    m,
+  });
+  return { fundId, block: BLOCK, view, timeline: [], viewerIsMember: true, publicView: false, contributionOnItsWay: false, cashOutOnItsWay: false };
+}
 
 afterEach(() => {
   errors.mockRestore();
@@ -126,18 +150,9 @@ beforeEach(async () => {
   state.memberLimit = 30;
   state.globalLimit = 150;
   state.model = answers("Beto debe $ 10.000 de esta semana.");
-  const view = buildFundView({
-    snapshot: snapshot(),
-    name: "Fútbol de los jueves",
-    agreedExpense: "la cancha",
-    balance: 90_000n * WARS,
-    weeklyFee: 10_000n * WARS,
-    joined: new Map(),
-    names: new Map([[ANA, "Ana"]]),
-    viewer: ANA,
-    m: es,
-  });
-  state.screen = { fundId: fund.id, block: BLOCK, view, timeline: [], viewerIsMember: true, publicView: false, contributionOnItsWay: false, cashOutOnItsWay: false } satisfies FundScreen;
+  fundId = fund.id;
+  state.screenLocales = [];
+  state.screen = screenIn(es);
 });
 
 describe("POST /api/funds/:address/chat (spec, 8.2)", () => {
@@ -152,8 +167,40 @@ describe("POST /api/funds/:address/chat (spec, 8.2)", () => {
     state.screen = null;
     const outside = await chat([user("Hola")]);
     expect(outside.status).toBe(404);
-    expect(await outside.json()).toEqual({ error: CHAT_NOT_FOUND });
+    expect(await outside.json()).toEqual({ error: es.chat.notFound });
     expect(await db.select().from(chatMessages)).toEqual([]);
+  });
+
+  it("answers its errors in the request's language", async () => {
+    state.user = null;
+    const loggedOut = await chat([user("Hi")], FUND, english);
+    expect(loggedOut.status).toBe(401);
+    expect(await loggedOut.json()).toEqual({ error: "Log in with your passkey." });
+    expect(await (await chat([user("Hola")])).json()).toEqual({ error: "Entrá con tu passkey." });
+    state.user = ana;
+
+    expect(await (await chat([user("Hi")], "0x123", english)).json()).toEqual({ error: "We couldn't find that fund." });
+    expect(await (await chat([user("a".repeat(501))], FUND, english)).json()).toEqual({ error: "Your message can be up to 500 characters." });
+    expect(await (await chat([user("Hi"), agent("Hi")], FUND, english)).json()).toEqual({ error: en.chat.badRequest });
+
+    state.screen = null;
+    expect(await (await chat([user("Hi")], FUND, english)).json()).toEqual({ error: en.chat.notFound });
+    state.screen = new Error("forno is down");
+    expect(await (await chat([user("Hi")], FUND, english)).json()).toEqual({ error: en.chat.unavailable });
+    state.screen = screenIn(en);
+
+    state.model = new Error("the scripted model could not load");
+    expect(await (await chat([user("Hi")], FUND, english)).json()).toEqual({ error: en.chat.unavailable });
+    state.model = answers("Beto owes ARS 10,000 for this week.");
+
+    state.memberLimit = 1;
+    await (await chat([user("Hi")], FUND, english)).text();
+    const mine = await chat([user("Hi")], FUND, english);
+    expect(mine.status).toBe(429);
+    expect(await mine.json()).toEqual({ error: "We've talked enough for today. We'll pick this up tomorrow." });
+    state.memberLimit = 30;
+    state.globalLimit = 1;
+    expect(await (await chat([user("Hi")], FUND, english)).json()).toEqual({ error: en.chat.unavailable });
   });
 
   it("refuses a body that's too big, a long message, and a conversation that doesn't end with the member, before counting", async () => {
@@ -161,7 +208,7 @@ describe("POST /api/funds/:address/chat (spec, 8.2)", () => {
     expect(huge.status).toBe(413);
     const long = await chat([user("a".repeat(501))]);
     expect(long.status).toBe(400);
-    expect(await long.json()).toEqual({ error: CHAT_LONG_MESSAGE });
+    expect(await long.json()).toEqual({ error: es.chat.longMessage(500) });
     expect((await chat([user("Hola"), agent("Hola")])).status).toBe(400);
     expect(await db.select().from(chatMessages)).toEqual([]);
   });
@@ -195,7 +242,7 @@ describe("POST /api/funds/:address/chat (spec, 8.2)", () => {
     state.screen = new Error("forno is down");
     const response = await chat([user("Hola")]);
     expect(response.status).toBe(503);
-    expect(await response.json()).toEqual({ error: CHAT_UNAVAILABLE });
+    expect(await response.json()).toEqual({ error: es.chat.unavailable });
     expect(await db.select().from(chatMessages)).toEqual([]);
     expect(errors.mock.calls).toEqual([[`The chat could not read fund ${FUND}: forno is down`]]);
   });
@@ -204,7 +251,7 @@ describe("POST /api/funds/:address/chat (spec, 8.2)", () => {
     state.model = new Error("the scripted model could not load for ana@example.com");
     const response = await chat([user("Hola")]);
     expect(response.status).toBe(503);
-    expect(await response.json()).toEqual({ error: CHAT_UNAVAILABLE });
+    expect(await response.json()).toEqual({ error: es.chat.unavailable });
     expect(await db.select().from(chatMessages)).toEqual([]);
     expect(errors.mock.calls).toEqual([[`The chat could not start for fund ${FUND}: Error`]]);
   });
@@ -216,12 +263,12 @@ describe("POST /api/funds/:address/chat (spec, 8.2)", () => {
     await first.text(); // read to its end, so the model's one call is done
     const mine = await chat([user("Hola")]);
     expect(mine.status).toBe(429);
-    expect(await mine.json()).toEqual({ error: CHAT_MEMBER_LIMIT });
+    expect(await mine.json()).toEqual({ error: es.chat.memberLimit });
     state.memberLimit = 30;
     state.globalLimit = 1;
     const everyone = await chat([user("Hola")]);
     expect(everyone.status).toBe(429);
-    expect(await everyone.json()).toEqual({ error: CHAT_UNAVAILABLE });
+    expect(await everyone.json()).toEqual({ error: es.chat.unavailable });
     expect((state.model as MockLanguageModelV4).doStreamCalls).toHaveLength(1);
   });
 
@@ -232,8 +279,9 @@ describe("POST /api/funds/:address/chat (spec, 8.2)", () => {
     expect(body).toContain("Beto debe $ 10.000 de esta semana.");
     expect(body).toMatch(/"remaining":29/);
 
+    expect(state.screenLocales).toEqual(["es"]);
     const [call] = (state.model as MockLanguageModelV4).doStreamCalls;
-    expect(call!.prompt[0]).toMatchObject({ role: "system", content: CHAT_INSTRUCTIONS });
+    expect(call!.prompt[0]).toMatchObject({ role: "system", content: chatInstructions("es") });
     expect(call!.prompt[1]).toMatchObject({ role: "system" });
     expect(JSON.stringify(call!.prompt[1])).toContain(`<${BRIEF_TAG}>`);
     expect(call!.tools?.map((t) => t.name)).toEqual(["proposeExpense"]);
@@ -245,6 +293,48 @@ describe("POST /api/funds/:address/chat (spec, 8.2)", () => {
       expect(row).toMatchObject({ userId: ana.id, inputTokens: 2_000, outputTokens: 40, finish: "stop" });
     });
     expect(errors).not.toHaveBeenCalled();
+  });
+
+  it("asks the model with the English instructions and the English brief when the page is in English", async () => {
+    state.screen = screenIn(en);
+    const response = await chat([user("Who owes this week?")], FUND, english);
+    expect(response.status).toBe(200);
+    await response.text();
+    expect(state.screenLocales).toEqual(["en"]);
+    const [call] = (state.model as MockLanguageModelV4).doStreamCalls;
+    expect(call!.prompt[0]).toMatchObject({ role: "system", content: chatInstructions("en") });
+    expect(call!.prompt[0]).toMatchObject({ content: expect.stringContaining("In plain English") });
+    const brief = JSON.stringify(call!.prompt[1]);
+    expect(brief).toContain(`<${BRIEF_TAG}>`);
+    expect(brief).toContain("ARS");
+    expect(brief).toContain("Fund: Thursday football.");
+    expect(brief).not.toContain("Fondo:");
+  });
+
+  it("answers in English for a browser that asks for English and has no cookie, and in Spanish with neither", async () => {
+    state.screen = screenIn(en);
+    const asksEnglish = { headers: { "content-type": "application/json", "accept-language": "en-US,en;q=0.9" } };
+    await (await chat([user("Hi")], FUND, asksEnglish)).text();
+    state.screen = screenIn(es);
+    await (await chat([user("Hola")])).text();
+    expect(state.screenLocales).toEqual(["en", "es"]);
+    const [englishCall, spanishCall] = (state.model as MockLanguageModelV4).doStreamCalls;
+    expect(englishCall!.prompt[0]).toMatchObject({ content: chatInstructions("en") });
+    expect(spanishCall!.prompt[0]).toMatchObject({ content: chatInstructions("es") });
+    expect(JSON.stringify(spanishCall!.prompt[1])).toContain("Fondo: Fútbol de los jueves.");
+  });
+
+  it("keeps the history as it was when the page changes language mid-conversation, and answers the new message in the new language", async () => {
+    state.screen = screenIn(en);
+    const response = await chat([user("¿Quién debe esta semana?"), agent("Beto debe $ 10.000."), user("And now in English?")], FUND, english);
+    expect(response.status).toBe(200);
+    await response.text();
+    const [call] = (state.model as MockLanguageModelV4).doStreamCalls;
+    expect(call!.prompt[0]).toMatchObject({ content: chatInstructions("en") });
+    const history = JSON.stringify(call!.prompt.slice(2));
+    expect(history).toContain("¿Quién debe esta semana?");
+    expect(history).toContain("Beto debe $ 10.000.");
+    expect(history).toContain("And now in English?");
   });
 
   it("sends the model only the last messages", async () => {
@@ -304,12 +394,23 @@ describe("POST /api/funds/:address/chat (spec, 8.2)", () => {
     const response = await chat([user("Hola")]);
     expect(response.status).toBe(200);
     const body = await response.text();
-    expect(chunksOf(body).filter((chunk) => chunk.type === "error")).toEqual([{ type: "error", errorText: CHAT_UNAVAILABLE }]);
+    expect(chunksOf(body).filter((chunk) => chunk.type === "error")).toEqual([{ type: "error", errorText: es.chat.unavailable }]);
     await vi.waitFor(async () => {
       const [row] = await db.select().from(chatMessages);
       expect(row?.finish).toBe("error");
     });
     expect(errors.mock.calls).toEqual([[`The chat failed for fund ${FUND}: AI_APICallError 402`]]);
+  });
+
+  it("tells the member in English that the agent can't answer when the page is in English", async () => {
+    state.screen = screenIn(en);
+    state.model = new MockLanguageModelV4({
+      doStream: async () => {
+        throw new APICallError({ message: "credit balance too low", url: "https://gateway.test/v1", requestBodyValues: {}, statusCode: 402 });
+      },
+    });
+    const body = await (await chat([user("Hi")], FUND, english)).text();
+    expect(chunksOf(body).filter((chunk) => chunk.type === "error")).toEqual([{ type: "error", errorText: "The agent can't answer right now. Try again later." }]);
   });
 
   it("ends the row as an abort, with the tokens of the steps done, when the member leaves mid-answer", async () => {

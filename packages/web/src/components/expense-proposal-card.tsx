@@ -1,11 +1,11 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { CHAT_BAD_CARD } from "../lib/chat/texts";
 import type { ChatUIMessage } from "../lib/chat/tools";
 import { type ProposalRules, proposalPreview } from "../lib/chat/view";
 import { post } from "../lib/client/api";
 import { userMessage } from "../lib/client/errors";
+import { pesosText } from "../lib/contribute";
 import { expenseOutcome } from "../lib/expense-outcome";
 import { formatPesos } from "../lib/format";
 import { useMessages } from "../lib/i18n/client";
@@ -40,18 +40,18 @@ export function ExpenseProposalCard({
   const [error, setError] = useState("");
 
   if (part.state === "input-streaming") return null;
-  if (part.state === "output-error") return <p className="rounded-[14px] bg-surface p-3">{CHAT_BAD_CARD}</p>;
+  if (part.state === "output-error") return <p className="rounded-[14px] bg-surface p-3">{m.chat.badCard}</p>;
   if (part.state === "output-available") {
     const status = part.output.status;
     return (
       <p role="status" className="rounded-[14px] bg-tint p-3 font-semibold text-primary">
-        {status === "dismissed" ? "No lo cargué." : expenseOutcome(status, m)}
+        {status === "dismissed" ? m.chat.card.notLoaded : expenseOutcome(status, m)}
       </p>
     );
   }
   if (part.state !== "input-available") return null;
-  const preview = proposalPreview(part.input, rules);
-  if (preview.amount === null) return <p className="rounded-[14px] bg-surface p-3">{CHAT_BAD_CARD}</p>;
+  const preview = proposalPreview(part.input, rules, m);
+  if (preview.amount === null) return <p className="rounded-[14px] bg-surface p-3">{m.chat.badCard}</p>;
   const units = preview.amount;
   const toolCallId = part.toolCallId;
   const input = part.input;
@@ -68,7 +68,8 @@ export function ExpenseProposalCard({
         // The same key for a retry of the same card; another one once the member says it's another expense.
         clientKey: confirmDuplicate ? `${toolCallId}:another` : toolCallId,
         kind: input.kind,
-        amount: input.amount,
+        // The amount in the page's format, never the model's text: the route reads it with the request's language.
+        amount: pesosText(units, m.locale),
         note: input.note,
         confirmDuplicate,
       });
@@ -89,19 +90,19 @@ export function ExpenseProposalCard({
 
   return (
     <div className="grid gap-3 rounded-[14px] border border-line bg-surface p-3">
-      <p className="font-bold">Cargar gasto</p>
+      <p className="font-bold">{m.fund.addExpense}</p>
       <dl className="grid gap-1 text-sm">
         <div>
-          <dt className="sr-only">Qué gasto es</dt>
+          <dt className="sr-only">{m.chat.card.kindLabel}</dt>
           <dd>{preview.kind}</dd>
         </div>
         <div>
-          <dt className="sr-only">Cuánto</dt>
-          <dd className="money text-lg font-bold">{formatPesos(units)}</dd>
+          <dt className="sr-only">{m.chat.card.amountLabel}</dt>
+          <dd className="money text-lg font-bold">{formatPesos(units, m.locale)}</dd>
         </div>
         {preview.note !== "" && (
           <div>
-            <dt className="sr-only">Nota</dt>
+            <dt className="sr-only">{m.chat.card.noteLabel}</dt>
             <dd>{preview.note}</dd>
           </div>
         )}
@@ -110,22 +111,22 @@ export function ExpenseProposalCard({
       {twin !== null ? (
         <div className="grid gap-2">
           <p role="status" className="font-semibold">
-            Hace unos minutos cargaste un gasto de <span className="money">{formatPesos(twin.amount)}</span>. ¿Es otro gasto igual?
+            {m.expense.twin(<span className="money">{formatPesos(twin.amount, m.locale)}</span>)}
           </p>
           <Button disabled={busy} onClick={() => confirm(true)}>
-            {busy ? "El agente lo está mirando…" : "Sí, es otro"}
+            {busy ? m.expense.looking : m.expense.another}
           </Button>
           <Button variant="link" disabled={busy} onClick={() => onAnswer(twin.status)}>
-            No, es el mismo
+            {m.expense.same}
           </Button>
         </div>
       ) : (
         <div className="grid gap-2">
           <Button disabled={busy} onClick={() => confirm(false)}>
-            {busy ? "El agente lo está mirando…" : "Confirmar"}
+            {busy ? m.expense.looking : m.chat.card.confirm}
           </Button>
           <Button variant="link" disabled={busy} onClick={() => onAnswer("dismissed")}>
-            Cancelar
+            {m.chat.card.cancel}
           </Button>
         </div>
       )}

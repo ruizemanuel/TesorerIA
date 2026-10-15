@@ -491,6 +491,77 @@ export const es = {
   execute: {
     button: "Ejecutar",
   },
+  /** The chat with the agent (spec, 9.2 and 9.3): what its route answers, its panel, its card, and the brief's fixed text. */
+  chat: {
+    /** What the chat says when something stops it (spec, 8.2 and 9.2), in the interface's voice. */
+    unavailable: "El agente no puede responder ahora. Probá más tarde.",
+    memberLimit: "Por hoy ya hablamos bastante. Mañana seguimos.",
+    refused: "No puedo ayudarte con eso.",
+    badCard: "No pude armar el gasto. Contame de nuevo el monto y qué fue.",
+    sendFailed: "No pudimos mandar tu mensaje.",
+    /** `max` is the most letters a message may have. */
+    longMessage: (max: number) => `Tu mensaje puede tener hasta ${max} letras.`,
+    badRequest: "Faltan datos o no son válidos.",
+    notFound: "No encontramos ese fondo.",
+    /** The messages left today, said from 5 down. */
+    remaining: (n: number) => (n === 1 ? "Te queda 1 mensaje por hoy." : `Te quedan ${n} mensajes por hoy.`),
+    greeting: (name: string) => `Hola, ${name}. Preguntame lo que quieras del fondo.`,
+    /** Tapping one sends it as the member's own words, so they come in the page's language. */
+    suggestions: ["¿Quién debe esta semana?", "¿Cuánto queda del tope de la semana?", "Quiero cargar un gasto"],
+    /** Before the three dots that move. */
+    typing: "El agente está escribiendo",
+    questionLabel: "Tu pregunta",
+    placeholder: "Escribí tu pregunta",
+    send: "Mandar",
+    /** Under the field from 400 letters: how many there are, of the most a message may have. */
+    count: (used: number, max: number) => `${used} de ${max}`,
+    /** The card the agent shows to load an expense. */
+    card: {
+      otherExpense: "Otro gasto",
+      /** `left` is what remains of the week's cap. */
+      agreedNext: (left: string) => `Si entra en lo que queda del tope de la semana (${left}), te lo devuelvo enseguida. Si no, se vota.`,
+      otherNext: (votes: number, members: number) => `Se vota: necesita ${votes} de ${members} votos.`,
+      /** For screen readers, over each line of the card. */
+      kindLabel: "Qué gasto es",
+      amountLabel: "Cuánto",
+      noteLabel: "Nota",
+      confirm: "Confirmar",
+      cancel: "Cancelar",
+      /** After the member tells the agent not to load it. */
+      notLoaded: "No lo cargué.",
+    },
+    /**
+     * What the model reads of the fund (spec, 8.2): the fixed text around the screen's own amounts and sentences. Each
+     * function takes its values already formatted; the leading spaces of `reason`, `youVoted` and `closed` are part of them.
+     */
+    brief: {
+      agent: "El agente",
+      group: "El grupo",
+      /** What a full address a member wrote becomes: the model never reads one. */
+      account: "una cuenta",
+      reason: (detail: string) => ` Motivo: ${detail}`,
+      youVoted: " Ya la votaste.",
+      /** `today` is the date and time, in words; `week` counts from 1. */
+      now: (today: string, week: string) => `Ahora es ${today}, hora de Argentina. El fondo va por su semana ${week}.`,
+      fund: (name: string, balance: string) => `Fondo: ${name}. Saldo: ${balance}.`,
+      closed: " El fondo está cerrado.",
+      rules: (fee: string, cap: string, expense: string, spent: string, left: string, votes: number, members: number) =>
+        `Reglas: cada uno pone ${fee} por semana. El agente devuelve hasta ${cap} por semana por ${expense}, el gasto acordado: esta semana devolvió ${spent} y quedan ${left}. Todo lo demás necesita ${votes} de ${members} votos. Nadie puede cambiar esto solo, ni el agente.`,
+      speaking: (name: string) => `Te habla: ${name}.`,
+      owe: (amount: string) => `Debés ${amount}.`,
+      upToDateAhead: (amount: string) => `Estás al día, con ${amount} adelantados.`,
+      upToDate: "Estás al día.",
+      /** `standing` is one of the three sentences above; `share` is what they'd get if the fund closed today. */
+      situation: (standing: string, share: string) => `Tu situación: ${standing} Si el fondo se cerrara hoy, te tocarían ${share}.`,
+      weekList: "La lista de la semana, en el orden en que entraron:",
+      noProposals: "Propuestas abiertas: ninguna.",
+      proposals: "Propuestas abiertas:",
+      noMovements: "Movimientos: todavía no hay.",
+      /** When there are more than the brief carries: `shown` of `total`. */
+      movementsCut: (shown: number, total: number) => `Movimientos, del más nuevo al más viejo (los ${shown} más nuevos de ${total}; los anteriores no los ves):`,
+      movements: "Movimientos, del más nuevo al más viejo:",
+    },
+  },
 };
 
 export type Messages = typeof es;
