@@ -13,7 +13,7 @@ import { loadPublicFundScreen } from "../lib/read-fund";
 const STEPS = [
   "Armás el fondo y sumás a tus amigos con un link.",
   "Cada uno aporta su cuota, en pesos o en USDT.",
-  "El agente devuelve lo acordado, les avisa a los atrasados, y lo demás se vota.",
+  "El agente devuelve lo acordado, lleva la cuenta de quién debe, y lo demás se vota.",
 ];
 
 /**
