@@ -7,6 +7,9 @@ export const LOCALE_COOKIE = "lang";
 /** A year, in seconds. */
 export const LOCALE_COOKIE_MAX_AGE = 60 * 60 * 24 * 365;
 
+/** Each language's name in itself: what the switch reads out, whichever language the page is in. */
+export const LOCALE_NAMES: Record<Locale, string> = { es: "Español", en: "English" };
+
 export function isLocale(value: unknown): value is Locale {
   return typeof value === "string" && (LOCALES as readonly string[]).includes(value);
 }
