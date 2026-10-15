@@ -81,7 +81,7 @@ export default async function Home() {
           {real && (
             <div className="grid gap-2">
               <p className="text-sm text-muted">{m.home.live(<span className="font-semibold text-ink">{real.view.name}</span>)}</p>
-              <WeekList view={real.view} />
+              <WeekList view={real.view} m={m} locale={locale} />
             </div>
           )}
         </div>

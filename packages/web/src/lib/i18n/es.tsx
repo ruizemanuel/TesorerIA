@@ -274,6 +274,97 @@ export const es = {
       contribution: (what: string) => `Tu aporte de ${what} está en camino.`,
     },
   },
+  /** The top of a fund's inicio: the balance, where you stand, and what's in your own account (spec, 9.2, Inicio 1–2). */
+  fund: {
+    /** The label above the balance, so the balance doesn't read as "$ X en el fondo. Estás al día…". */
+    inFund: "En el fondo",
+    /** Where you stand: `amount` stands out. */
+    owe: (amount: ReactNode) => <>Debés {amount}.</>,
+    upToDateAhead: (amount: ReactNode) => <>Estás al día, con {amount} adelantados.</>,
+    upToDate: "Estás al día.",
+    share: (amount: ReactNode) => <>Si se cerrara hoy, te tocan {amount}.</>,
+    contribute: "Aportar",
+    addExpense: "Cargar gasto",
+    /** What reached the member's own account and isn't in the fund: `amounts` is the pesos and the USDT, joined with `and`. */
+    inYourAccount: (amounts: ReactNode) => <>En tu cuenta tenés {amounts}.</>,
+    and: "y",
+    /** The link next to what's in your account, which opens the panel of the same name. */
+    cashOut: "Pasar a pesos",
+    /** On the public view, over the whole screen. */
+    publicNotice: "Estás viendo un fondo real, en solo lectura.",
+    /** The name of the fund's loading screen for screen readers. */
+    loading: "Cargando",
+  },
+  /** The week's list (spec, 9.1): who paid and who owes. */
+  week: {
+    title: "Esta semana",
+    dues: (amount: string) => `Cuota de ${amount}`,
+    owes: (amount: string) => `debe ${amount}`,
+    /** The name of the check by someone who paid, for screen readers. */
+    paid: "pagó",
+  },
+  /** The rules in plain words: `cap` and `left` stand out as amounts; `expense` is what the creator wrote. */
+  rules: {
+    title: "Las reglas",
+    text: (cap: ReactNode, expense: string, left: ReactNode, votes: number, members: number) => (
+      <>
+        El agente devuelve hasta {cap} por semana por {expense}. Esta semana quedan {left}. Todo lo demás necesita {votes} de {members} votos. Nadie puede
+        cambiar esto solo, ni el agente.
+      </>
+    ),
+  },
+  /** The bars that take you around a fund (spec, 9.2). */
+  nav: {
+    home: "Inicio",
+    activity: "Movimientos",
+    agent: "Agente",
+    /** Your avatar opens it. */
+    account: "Tu cuenta",
+    /** The name of the bottom bar for screen readers. */
+    sections: "Secciones del fondo",
+    /** The floating button from 1024 px. */
+    askAgent: "Preguntale al agente",
+  },
+  /** The movements (spec, 9.2); the sentences themselves come written by the server (`timeline`). */
+  movements: {
+    title: "Movimientos",
+    latest: "Lo último del agente",
+    seeAll: "Ver todos",
+    empty: "Todavía no hay movimientos. El primero puede ser tu aporte.",
+    onItsWay: "En camino",
+    viewReceipt: "Ver comprobante",
+    voted: "Votaste",
+  },
+  /** The comprobante: the only link to the chain. */
+  receipt: {
+    viewOnExplorer: "Ver en el explorador de Celo",
+  },
+  /** When the chain or its history couldn't be read just now (spec, 9.2). */
+  fundError: {
+    title: "No pudimos leer el fondo en este momento.",
+    moneyIsFine: "La plata está bien: es la lectura la que falló.",
+    tryLater: "Probá de nuevo en un rato.",
+    retrying: "Lo volvemos a intentar en unos segundos.",
+    retry: "Probar de nuevo",
+  },
+  /** The panels' frame: the title of each, by what the URL names (`?p=`), and the arrow that closes them. */
+  panels: {
+    /** The arrow's name for screen readers. */
+    back: "Volver",
+    titles: {
+      aportar: "Aportar",
+      gasto: "Cargar un gasto",
+      cuenta: "Tu cuenta",
+      pesos: "Pasar a pesos",
+      agente: "Agente",
+      comprobante: "Comprobante",
+    },
+  },
+  /** Your own account, which holds what hasn't reached the fund yet. */
+  account: {
+    reading: "Mirando tu cuenta…",
+    readFailed: "No pudimos mirar tu cuenta. Probamos de nuevo en unos segundos.",
+  },
 };
 
 export type Messages = typeof es;

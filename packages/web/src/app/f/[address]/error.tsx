@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Button } from "../../../components/ui";
+import { useMessages } from "../../../lib/i18n/client";
 import { nextRetryDelay } from "../../../lib/retry";
 
 /** When this page asked the server again by itself. Kept by the module: each try that fails mounts the page anew. */
@@ -14,6 +15,7 @@ const tries: number[] = [];
  * only redraw the error it already has.
  */
 export default function FundError({ retry }: { retry: () => void }) {
+  const m = useMessages();
   const [delay] = useState(() => nextRetryDelay(tries, Date.now()));
   useEffect(() => {
     if (delay === null) return;
@@ -26,12 +28,11 @@ export default function FundError({ retry }: { retry: () => void }) {
 
   return (
     <main className="mx-auto grid max-w-[560px] gap-3 p-4 pt-10">
-      <p className="text-lg font-bold">No pudimos leer el fondo en este momento.</p>
+      <p className="text-lg font-bold">{m.fundError.title}</p>
       <p className="text-muted">
-        La plata está bien: es la lectura la que falló.{" "}
-        {delay === null ? "Probá de nuevo en un rato." : "Lo volvemos a intentar en unos segundos."}
+        {m.fundError.moneyIsFine} {delay === null ? m.fundError.tryLater : m.fundError.retrying}
       </p>
-      <Button onClick={retry}>Probar de nuevo</Button>
+      <Button onClick={retry}>{m.fundError.retry}</Button>
     </main>
   );
 }

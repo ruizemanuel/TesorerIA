@@ -1,5 +1,7 @@
 import type { Address } from "viem";
 import { formatWhen } from "../lib/format";
+import type { Locale } from "../lib/i18n/locales";
+import type { Messages } from "../lib/i18n/messages";
 import type { TimelineItem } from "../lib/timeline";
 import { Avatar } from "./avatar";
 import { ExecuteButton } from "./execute-button";
@@ -17,6 +19,8 @@ export function TimelineList({
   closed = false,
   basePath = "",
   viewerName = "",
+  m,
+  locale,
 }: {
   items: readonly TimelineItem[];
   fund: Address;
@@ -27,16 +31,18 @@ export function TimelineList({
   closed?: boolean;
   /** Where the comprobante and Aportar open: "" for this page, or the inicio's path from Movimientos. */
   basePath?: string;
-  /** Whose initials your own operations on their way wear: the timeline names their actor "Vos". */
+  /** Whose initials your own operations on their way wear: the timeline names their actor "Vos" ("You" in English). */
   viewerName?: string;
+  m: Messages;
+  locale: Locale;
 }) {
   if (items.length === 0) {
     return (
       <div className="grid justify-items-start py-1">
-        <p className="py-2 text-muted">Todavía no hay movimientos. El primero puede ser tu aporte.</p>
+        <p className="py-2 text-muted">{m.movements.empty}</p>
         {!readOnly && (
           <PanelLink href={`${basePath}?p=aportar`} className={buttonClass("link")}>
-            Aportar
+            {m.fund.contribute}
           </PanelLink>
         )}
       </div>
@@ -53,21 +59,21 @@ export function TimelineList({
             <Avatar kind={actor.kind === "agent" ? "agent" : "member"} name={who} />
             <div className="min-w-0 flex-1">
               <p className="text-sm leading-snug [font-variant-numeric:lining-nums_tabular-nums]">{item.text}</p>
-              <p className="mt-0.5 text-xs text-muted">{item.pending ? "En camino" : formatWhen(item.at, now)}</p>
+              <p className="mt-0.5 text-xs text-muted">{item.pending ? m.movements.onItsWay : formatWhen(item.at, now, locale)}</p>
               {item.action?.kind === "receipt" && (
                 // 44 px to tap: the box reaches down to the row's divider instead of making the row taller.
                 <PanelLink
                   href={`${basePath}?p=comprobante&id=${encodeURIComponent(item.id)}`}
                   className="-mb-3 -mt-1.5 inline-flex min-h-11 items-center text-[13px] font-bold text-primary"
                 >
-                  Ver comprobante
+                  {m.movements.viewReceipt}
                 </PanelLink>
               )}
               {item.action?.kind === "vote" && !readOnly && !closed && item.action.canVote && (
                 <VoteButton fund={fund} proposalId={item.action.proposalId.toString()} completes={item.action.completes} />
               )}
               {item.action?.kind === "vote" && !readOnly && item.action.voted && (
-                <p className="mt-1 text-[13px] font-semibold text-muted">Votaste</p>
+                <p className="mt-1 text-[13px] font-semibold text-muted">{m.movements.voted}</p>
               )}
               {item.action?.kind === "execute" && !readOnly && !closed && item.action.canExecute && (
                 <ExecuteButton fund={fund} proposalId={item.action.proposalId.toString()} />

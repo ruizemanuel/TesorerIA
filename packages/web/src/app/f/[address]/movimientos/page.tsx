@@ -7,7 +7,7 @@ import { TimelineList } from "../../../../components/timeline-list";
 import { Card, CardTitle } from "../../../../components/ui";
 import { chatEnabled } from "../../../../lib/chat/model";
 import { currentUser } from "../../../../lib/current-user";
-import { getLocale } from "../../../../lib/i18n/server";
+import { getLocale, getMessages } from "../../../../lib/i18n/server";
 import { loadFundScreen } from "../../../../lib/read-fund";
 import { safeNext } from "../../../../lib/safe-next";
 
@@ -18,17 +18,19 @@ export default async function MovementsPage({ params }: { params: Promise<{ addr
   if (!isAddress(address, { strict: false })) notFound();
   const user = await currentUser();
   if (user === null) redirect(`/entrar?next=${encodeURIComponent(safeNext(`/f/${address}/movimientos`))}`);
-  const screen = await loadFundScreen(address, user, { locale: await getLocale() });
+  const m = await getMessages();
+  const locale = await getLocale();
+  const screen = await loadFundScreen(address, user, { locale });
   if (screen === null) notFound();
   const { view } = screen;
   const chat = chatEnabled();
   return (
     <div className="min-h-dvh pb-24 lg:pb-0">
-      <TopBar fundName={view.name} address={view.address} userName={user.name} />
-      <MobileBar fundName={view.name} address={view.address} userName={user.name} />
+      <TopBar fundName={view.name} address={view.address} userName={user.name} m={m} />
+      <MobileBar fundName={view.name} address={view.address} userName={user.name} m={m} />
       <main className="mx-auto max-w-[560px] p-4 lg:max-w-[1120px] lg:p-7">
         <Card>
-          <CardTitle>Movimientos</CardTitle>
+          <CardTitle>{m.movements.title}</CardTitle>
           <TimelineList
             items={screen.timeline}
             fund={view.address}
@@ -37,11 +39,13 @@ export default async function MovementsPage({ params }: { params: Promise<{ addr
             closed={view.closed}
             basePath={`/f/${view.address}`}
             viewerName={user.name}
+            m={m}
+            locale={locale}
           />
         </Card>
       </main>
-      <TabBar address={view.address} active="movimientos" chat={chat} />
-      {chat && <AgentButton address={view.address} />}
+      <TabBar address={view.address} active="movimientos" chat={chat} m={m} />
+      {chat && <AgentButton address={view.address} m={m} />}
       <LiveFund fund={view.address} block={screen.block} />
     </div>
   );

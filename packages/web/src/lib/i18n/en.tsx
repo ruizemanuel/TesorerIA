@@ -235,4 +235,75 @@ export const en: Messages = {
       contribution: (what: string) => `Your contribution of ${what} is on its way.`,
     },
   },
+  fund: {
+    inFund: "In the fund",
+    owe: (amount: ReactNode) => <>You owe {amount}.</>,
+    upToDateAhead: (amount: ReactNode) => <>You're up to date, {amount} ahead.</>,
+    upToDate: "You're up to date.",
+    share: (amount: ReactNode) => <>If the fund closed today, you'd get {amount}.</>,
+    contribute: "Contribute",
+    addExpense: "Add an expense",
+    inYourAccount: (amounts: ReactNode) => <>You have {amounts} in your account.</>,
+    and: "and",
+    cashOut: "Cash out to pesos",
+    publicNotice: "You're looking at a real fund, read-only.",
+    loading: "Loading",
+  },
+  week: {
+    title: "This week",
+    dues: (amount: string) => `Weekly dues: ${amount}`,
+    owes: (amount: string) => `owes ${amount}`,
+    paid: "paid",
+  },
+  rules: {
+    title: "The rules",
+    text: (cap: ReactNode, expense: string, left: ReactNode, votes: number, members: number) => (
+      <>
+        The agent pays back up to {cap} per week for {expense}. This week's cap has {left} left. Everything else needs {votes} of {members} votes. No
+        one can change this alone, not even the agent.
+      </>
+    ),
+  },
+  nav: {
+    home: "Home",
+    activity: "Activity",
+    agent: "Agent",
+    account: "Your account",
+    sections: "Fund sections",
+    askAgent: "Ask the agent",
+  },
+  movements: {
+    title: "Activity",
+    latest: "Latest from the agent",
+    seeAll: "See all",
+    empty: "No activity yet. The first one can be your contribution.",
+    onItsWay: "On its way",
+    viewReceipt: "View receipt",
+    voted: "You voted",
+  },
+  receipt: {
+    viewOnExplorer: "View on the Celo explorer",
+  },
+  fundError: {
+    title: "We couldn't read the fund right now.",
+    moneyIsFine: "The money is fine: it's the reading that failed.",
+    tryLater: "Try again in a while.",
+    retrying: "We'll try again in a few seconds.",
+    retry: "Try again",
+  },
+  panels: {
+    back: "Back",
+    titles: {
+      aportar: "Contribute",
+      gasto: "Add an expense",
+      cuenta: "Your account",
+      pesos: "Cash out to pesos",
+      agente: "Agent",
+      comprobante: "Receipt",
+    },
+  },
+  account: {
+    reading: "Looking at your account…",
+    readFailed: "We couldn't look at your account. We'll try again in a few seconds.",
+  },
 };

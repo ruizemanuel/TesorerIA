@@ -1,6 +1,7 @@
 "use client";
 
 import { type ReactNode, useEffect, useRef } from "react";
+import { useMessages } from "../lib/i18n/client";
 import { REOPEN_PANEL, namesPanel } from "../lib/panel";
 import { useRefresh } from "./refresh-provider";
 
@@ -23,6 +24,7 @@ export function Panel({
   closeHref: string;
   children: ReactNode;
 }) {
+  const m = useMessages();
   const dialog = useRef<HTMLDialogElement>(null);
   const { afterRefresh } = useRefresh();
   // Closed, with the URL still naming the panel until a refresh on its way lands (see close).
@@ -69,7 +71,7 @@ export function Panel({
           <button
             type="button"
             className="grid size-11 place-items-center rounded-full text-primary"
-            aria-label="Volver"
+            aria-label={m.panels.back}
             onClick={() => dialog.current?.close()}
           >
             {/* An SVG, not the "←" character: a glyph sits where its font puts it (3 px below the button's centre in

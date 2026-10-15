@@ -3,6 +3,7 @@
 import type { Address } from "viem";
 import { useAccountBalances } from "../lib/client/account";
 import { WARS_SPECK, heldAmounts } from "../lib/format";
+import { useLocale, useMessages } from "../lib/i18n/client";
 import { PanelLink } from "./panel-link";
 import { buttonClass } from "./ui";
 
@@ -16,26 +17,28 @@ const LOOK_EVERY_MS = 30_000;
  * reads, if it can't, or if the account is empty; a pass reads it again at once (ACCOUNT_CHANGED).
  */
 export function AccountHolding({ account }: { account: Address }) {
+  const m = useMessages();
+  const locale = useLocale();
   const { balances } = useAccountBalances(account, LOOK_EVERY_MS);
   if (balances === null) return null;
-  const amounts = heldAmounts(balances);
+  const amounts = heldAmounts(balances, locale);
   if (amounts.length === 0) return null;
   return (
     <p className="mt-1 text-sm text-muted">
-      En tu cuenta tenés{" "}
-      {amounts.map((amount, i) => (
-        <span key={amount}>
-          {i > 0 && " y "}
-          <span className="money font-semibold text-ink">{amount}</span>
-        </span>
-      ))}
-      .
+      {m.fund.inYourAccount(
+        amounts.map((amount, i) => (
+          <span key={amount}>
+            {i > 0 && ` ${m.fund.and} `}
+            <span className="money font-semibold text-ink">{amount}</span>
+          </span>
+        )),
+      )}
       {balances.wars >= WARS_SPECK && (
         <>
           {" "}
           {/* A link-styled button: 44 px tall, so it's easy to tap inside the sentence (spec, 9.1). */}
           <PanelLink href="?p=pesos" className={buttonClass("link")}>
-            Pasar a pesos
+            {m.fund.cashOut}
           </PanelLink>
         </>
       )}
