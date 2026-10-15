@@ -63,7 +63,7 @@ describe("no Spanish outside the dictionaries (spec, 11)", () => {
 describe("no jargon in either language (spec, 9.2)", () => {
   it("never says gas, hash, wallet, blockchain, token or smart account", () => {
     for (const dictionary of [es, en]) {
-      const said = sentences(dictionary).filter((sentence) => /\b(gas|hash|wallet|blockchain|token|smart account)\b/i.test(sentence));
+      const said = sentences(dictionary).filter((sentence) => /\b(gas|hash(es)?|wallets?|blockchains?|tokens?|smart accounts?)\b/i.test(sentence));
       expect(said).toEqual([]);
     }
   });
