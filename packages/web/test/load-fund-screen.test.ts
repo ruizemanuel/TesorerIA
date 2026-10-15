@@ -150,7 +150,7 @@ describe("loadFundScreen: the public view", () => {
     const screen = (await loadFundScreen(address, null, { publicView: true }))!;
     expect(screen).toMatchObject({ publicView: true });
     expect(screen.view.rows.map((row) => row.name)).toEqual(["Miembro 1", "Miembro 2", "Miembro 3"]);
-    expect(texts(screen)).toEqual([`Miembro 3 aportó ${formatPesos(10_000n * WARS)}.`]);
+    expect(texts(screen)).toEqual([`Miembro 3 aportó ${formatPesos(10_000n * WARS, "es")}.`]);
     // Nothing in what the screen carries has a real name.
     const everything = JSON.stringify(screen, (_, value) => (typeof value === "bigint" ? value.toString() : value));
     for (const name of ["Ana", "Beto", "Caro"]) expect(everything).not.toContain(name);
@@ -176,7 +176,7 @@ describe("loadFundScreen: the public view", () => {
     const english = (await loadPublicFundScreen(address, "en"))!;
     expect(spanish.view.rows[0]!.name).toBe("Miembro 1");
     expect(english.view.rows[0]!.name).toBe("Member 1");
-    expect(texts(spanish)).toEqual([`Miembro 2 aportó ${formatPesos(10_000n * WARS)}.`]);
+    expect(texts(spanish)).toEqual([`Miembro 2 aportó ${formatPesos(10_000n * WARS, "es")}.`]);
     expect(texts(english)).toEqual([`Member 2 contributed ${formatPesos(10_000n * WARS, "en")}.`]);
 
     // Each language is its own entry: asking again gives each its own screen back, without reading the chain again.
@@ -212,7 +212,7 @@ describe("loadFundScreen: the public view", () => {
       ["Caro", false],
     ]);
     expect(screen.view.me).toBeNull();
-    expect(texts(screen)).toEqual([`Beto aportó ${formatPesos(10_000n * WARS)}.`]);
+    expect(texts(screen)).toEqual([`Beto aportó ${formatPesos(10_000n * WARS, "es")}.`]);
   });
 
   it("does not read the expenses or the pending operations: they are the group's, not the public's", async () => {
@@ -234,7 +234,7 @@ describe("loadFundScreen: the public view", () => {
     // The members do see them...
     const own = (await loadFundScreen(address, asViewer(ana)))!;
     expect(texts(own).some((text) => text.includes("que cargó Ana (pelota)"))).toBe(true);
-    expect(own.timeline.filter((item) => item.pending).map((item) => item.text)).toEqual([`Tu aporte de ${formatPesos(10_000n * WARS)} está en camino.`]);
+    expect(own.timeline.filter((item) => item.pending).map((item) => item.text)).toEqual([`Tu aporte de ${formatPesos(10_000n * WARS, "es")} está en camino.`]);
 
     // ...and the public view, even asked by that same member, sees neither.
     for (const viewer of [null, asViewer(ana)]) {
@@ -248,7 +248,7 @@ describe("loadFundScreen: the public view", () => {
     await recordOperation(db, ana.id, { userOpHash: `0x${"b1".repeat(32)}`, kind: "contribute", fund: address, amount: 10_000n * WARS, token: "wars" });
     await recordOperation(db, beto.id, { userOpHash: `0x${"b2".repeat(32)}`, kind: "contribute", fund: address, amount: 20_000n * WARS, token: "wars" });
     const forBeto = (await loadFundScreen(address, asViewer(beto)))!;
-    expect(texts(forBeto)).toEqual([`Tu aporte de ${formatPesos(20_000n * WARS)} está en camino.`]);
+    expect(texts(forBeto)).toEqual([`Tu aporte de ${formatPesos(20_000n * WARS, "es")} está en camino.`]);
   });
 
   describe("a contribution on its way", () => {

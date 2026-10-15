@@ -1,0 +1,7 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    // tsx has no Next to compile the dictionaries' JSX: it needs it as react-jsx, not preserved.
+    "jsx": "react-jsx"
+  }
+}

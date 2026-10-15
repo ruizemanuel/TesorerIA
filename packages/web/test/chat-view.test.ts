@@ -30,7 +30,7 @@ describe("proposalPreview: what the card says before it's confirmed (spec, 9.2)"
       kind: "la cancha (el gasto acordado)",
       amount: 45_000n * WARS,
       note: "Jueves",
-      next: `Si entra en lo que queda del tope de la semana (${formatPesos(15_000n * WARS)}), te lo devuelvo enseguida. Si no, se vota.`,
+      next: `Si entra en lo que queda del tope de la semana (${formatPesos(15_000n * WARS, "es")}), te lo devuelvo enseguida. Si no, se vota.`,
     });
   });
 

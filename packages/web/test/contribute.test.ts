@@ -79,7 +79,7 @@ describe("what Aportar offers", () => {
 
 describe("the fund's cap", () => {
   it("is $ 450.000 by default, and the room is what is left of it", () => {
-    expect(formatPesos(DEFAULT_BALANCE_CAP)).toBe(`$${NBSP}450.000`);
+    expect(formatPesos(DEFAULT_BALANCE_CAP, "es")).toBe(`$${NBSP}450.000`);
     expect(roomUnderCap(pesos(440_000))).toBe(pesos(10_000));
     expect(roomUnderCap(DEFAULT_BALANCE_CAP)).toBe(0n);
     expect(roomUnderCap(DEFAULT_BALANCE_CAP + 1n)).toBe(0n);
@@ -122,20 +122,20 @@ describe("readPesosAmount", () => {
 
   it("refuses an absurd amount before anything is encoded", () => {
     const result = readPesosAmount("1.000.000.000.001", { held: 10n ** 40n, room: null }, es);
-    expect(result).toEqual({ ok: false, error: `No puede pasar de ${formatPesos(1_000_000_000_000n * WARS_UNIT)}.` });
+    expect(result).toEqual({ ok: false, error: `No puede pasar de ${formatPesos(1_000_000_000_000n * WARS_UNIT, "es")}.` });
     expect(readPesosAmount("1.000.000.000.000", { held: 10n ** 40n, room: null }, es).ok).toBe(true);
   });
 
   it("refuses more than you have, and more than fits in the fund", () => {
-    expect(readPesosAmount("45.001", { held, room: null }, es)).toEqual({ ok: false, error: `En tu cuenta tenés ${formatPesos(held)}.` });
+    expect(readPesosAmount("45.001", { held, room: null }, es)).toEqual({ ok: false, error: `En tu cuenta tenés ${formatPesos(held, "es")}.` });
     expect(readPesosAmount("45.000", { held, room: pesos(10_000) }, es)).toEqual({
       ok: false,
-      error: `Al fondo le entran hasta ${formatPesos(pesos(10_000))} más, porque tiene un tope de ${formatPesos(DEFAULT_BALANCE_CAP)}.`,
+      error: `Al fondo le entran hasta ${formatPesos(pesos(10_000), "es")} más, porque tiene un tope de ${formatPesos(DEFAULT_BALANCE_CAP, "es")}.`,
     });
     expect(readPesosAmount("10.000", { held, room: pesos(10_000) }, es).ok).toBe(true);
     expect(readPesosAmount("1", { held, room: 0n }, es)).toEqual({
       ok: false,
-      error: `El fondo llegó a su tope de ${formatPesos(DEFAULT_BALANCE_CAP)}: no entra más.`,
+      error: `El fondo llegó a su tope de ${formatPesos(DEFAULT_BALANCE_CAP, "es")}: no entra más.`,
     });
   });
 });
@@ -210,7 +210,7 @@ describe("Aportar in USDT: what covers the week, at the fund's rate", () => {
     expect(readUsdtAmount(usdtText(usdt(6.26), "es"), mine, es)).toEqual({ ok: true, amount: usdt(6.26) }); // round-trips the field
     expect(readUsdtAmount("6.26", mine, es)).toEqual({ ok: false, error: "Escribilo como 6 o 6,25." });
     expect(readUsdtAmount("21", mine, es)).toEqual({ ok: false, error: `En tu cuenta tenés 20${NBSP}USDT.` });
-    const cap = formatPesos(DEFAULT_BALANCE_CAP);
+    const cap = formatPesos(DEFAULT_BALANCE_CAP, "es");
     expect(readUsdtAmount("10", { ...mine, room: pesos(8_000) }, es)).toEqual({
       ok: false,
       error: `Al fondo le entran hasta 5${NBSP}USDT más, porque tiene un tope de ${cap}.`,
@@ -219,9 +219,9 @@ describe("Aportar in USDT: what covers the week, at the fund's rate", () => {
   });
 
   it("says under the field that it covers the week, or what it comes to", () => {
-    expect(usdtWorthText(usdt(6.26), rate, pesos(10_000), es)).toBe(`Cubre los ${formatPesos(pesos(10_000))}, al precio de ahora.`);
-    expect(usdtWorthText(usdt(10), rate, pesos(10_000), es)).toBe(`Son unos ${formatPesos(pesos(16_000))} al precio de ahora.`);
-    expect(usdtWorthText(usdt(5), rate, pesos(10_000), es)).toBe(`Son unos ${formatPesos(pesos(8_000))} al precio de ahora.`);
+    expect(usdtWorthText(usdt(6.26), rate, pesos(10_000), es)).toBe(`Cubre los ${formatPesos(pesos(10_000), "es")}, al precio de ahora.`);
+    expect(usdtWorthText(usdt(10), rate, pesos(10_000), es)).toBe(`Son unos ${formatPesos(pesos(16_000), "es")} al precio de ahora.`);
+    expect(usdtWorthText(usdt(5), rate, pesos(10_000), es)).toBe(`Son unos ${formatPesos(pesos(8_000), "es")} al precio de ahora.`);
   });
 });
 

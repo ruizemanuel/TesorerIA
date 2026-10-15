@@ -8,6 +8,8 @@ Built for the [Agents on Open Rails](https://www.loops.house/agents-on-open-rail
 
 Status: early development.
 
+The web speaks Rioplatense Spanish and English: the browser's language picks one, and an ES · EN switch changes it.
+
 ## The agent
 
 `packages/agent` is the agent's deterministic core: TypeScript and viem, no language model. It is the only part that signs, and every transaction it sends pays its gas in USDT (CIP-64) and carries the ERC-8021 attribution suffix.

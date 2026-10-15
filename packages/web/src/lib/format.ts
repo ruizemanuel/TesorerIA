@@ -32,7 +32,7 @@ function thousands(digits: string, separator: string): string {
  * Pesos from wARS units: "$ 87.500" or "$ 16.050,37" in Spanish, "ARS 87,500" or "ARS 16,050.37" in English, rounded
  * half up (spec, 9.1 and 9.3). In English "$" would read as dollars.
  */
-export function formatPesos(units: bigint, locale: Locale = "es"): string {
+export function formatPesos(units: bigint, locale: Locale): string {
   const style = STYLE[locale];
   const negative = units < 0n;
   const cents = ((negative ? -units : units) + CENT / 2n) / CENT;
@@ -43,7 +43,7 @@ export function formatPesos(units: bigint, locale: Locale = "es"): string {
 }
 
 /** USDT from its 6-decimal units: "10 USDT", "10,5 USDT" ("10.5 USDT" in English). */
-export function formatUsdt(units: bigint, locale: Locale = "es"): string {
+export function formatUsdt(units: bigint, locale: Locale): string {
   const style = STYLE[locale];
   const cents = (units + 5_000n) / 10_000n;
   const rest = cents % 100n;
@@ -55,7 +55,7 @@ export function formatUsdt(units: bigint, locale: Locale = "es"): string {
  * What a member's own account holds, as the inicio says it ("En tu cuenta tenés …"): pesos, then USDT, leaving out
  * what rounds to zero, since a speck of either says nothing.
  */
-export function heldAmounts({ wars, usdt }: { wars: bigint; usdt: bigint }, locale: Locale = "es"): string[] {
+export function heldAmounts({ wars, usdt }: { wars: bigint; usdt: bigint }, locale: Locale): string[] {
   const amounts: string[] = [];
   if (wars >= WARS_SPECK) amounts.push(formatPesos(wars, locale));
   if (usdt >= USDT_SPECK) amounts.push(formatUsdt(usdt, locale));
@@ -75,7 +75,7 @@ const AMOUNT: Record<Locale, { prefix: RegExp; shape: RegExp }> = {
  * so is a group that starts with a zero, and anything that isn't more than zero. The screen's own prefix ("$" or
  * "ARS") may come along, so an amount copied out of the app reads back.
  */
-export function parsePesos(input: string, locale: Locale = "es"): bigint | null {
+export function parsePesos(input: string, locale: Locale): bigint | null {
   const { prefix, shape } = AMOUNT[locale];
   // `\s` takes the no-break space too, so "$ 45.000" copied out of the app's own screens reads back.
   const text = input.replace(/\s/g, "").replace(prefix, "");
@@ -97,7 +97,7 @@ export function parsePesosEitherWay(text: string): bigint | null {
 }
 
 /** An amount typed in USDT, as USDT units, or null: written like pesos in that language (parsePesos), to the cent, with or without "USDT". */
-export function parseUsdt(input: string, locale: Locale = "es"): bigint | null {
+export function parseUsdt(input: string, locale: Locale): bigint | null {
   const asPesos = parsePesos(input.replace(/\s*USDT\s*$/i, ""), locale);
   return asPesos === null ? null : asPesos / 10n ** 12n;
 }
@@ -117,7 +117,7 @@ function dayNumber(date: Date): number {
  * "Yesterday, 18:02", "Monday, 9:00", then "Oct 12", since "12/10" reads differently in England and in the US (9.3).
  * Always on a 24-hour clock, in Buenos Aires time.
  */
-export function formatWhen(date: Date, now: Date, locale: Locale = "es"): string {
+export function formatWhen(date: Date, now: Date, locale: Locale): string {
   const style = STYLE[locale];
   const { hour, minute } = parts(date, { hour: "numeric", minute: "2-digit", hourCycle: "h23" });
   const time = `${Number(hour)}:${minute}`;

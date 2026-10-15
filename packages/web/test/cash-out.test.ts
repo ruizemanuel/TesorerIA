@@ -60,7 +60,7 @@ describe("readCashOutAmount", () => {
   });
 
   it("takes an amount typed as the field shows all of it as all of it, though the field rounded it", () => {
-    expect(formatPesos(held)).toBe("$ 45.000,01");
+    expect(formatPesos(held, "es")).toBe("$ 45.000,01");
     expect(readCashOutAmount("45.000,01", held, es)).toEqual({ ok: true, amount: held });
     const justUnder = 45_000n * WARS_UNIT + 4n * 10n ** 15n; // $ 45.000,004 shows as $ 45.000
     expect(readCashOutAmount("45.000", justUnder, es)).toEqual({ ok: true, amount: justUnder });
@@ -69,7 +69,7 @@ describe("readCashOutAmount", () => {
   it("says what to fix: a malformed amount, nothing, or more than the account holds", () => {
     expect(readCashOutAmount("2,000.50", held, es)).toEqual({ ok: false, error: "Escribilo como 10.000 o 10.000,50." });
     expect(readCashOutAmount("0", held, es)).toEqual({ ok: false, error: "Escribilo como 10.000 o 10.000,50." });
-    expect(readCashOutAmount("45.000,02", held, es)).toEqual({ ok: false, error: `Tenés ${formatPesos(held)} en tu cuenta.` });
+    expect(readCashOutAmount("45.000,02", held, es)).toEqual({ ok: false, error: `Tenés ${formatPesos(held, "es")} en tu cuenta.` });
   });
 
   it("has nothing to pass below half a cent, whatever was typed", () => {

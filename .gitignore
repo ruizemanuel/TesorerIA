@@ -12,6 +12,8 @@ next-env.d.ts
 .wrangler/
 test-results/
 playwright-report/
+# Written by `pnpm --filter @tesoreria/web i18n:table`, to read the English before a push
+packages/web/i18n-table.html
 
 # Foundry
 cache/

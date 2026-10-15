@@ -212,7 +212,7 @@ describe("buildTimeline", () => {
         id: "conversion-hold",
         at,
         actor: { kind: "agent" },
-        text: `Todavía no pasé a pesos ${formatUsdt(5n * USDT_UNIT)}: el precio de referencia del dólar no está al día. Lo vuelvo a intentar en unos minutos.`,
+        text: `Todavía no pasé a pesos ${formatUsdt(5n * USDT_UNIT, "es")}: el precio de referencia del dólar no está al día. Lo vuelvo a intentar en unos minutos.`,
       },
     ]);
     expect(hold("daily-limit")[0]?.text).toContain(": ya cambié todo lo que puedo cambiar por día en este fondo.");

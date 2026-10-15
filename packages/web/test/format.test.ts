@@ -15,59 +15,59 @@ import {
 
 describe("formatPesos", () => {
   it("writes pesos the Argentine way, with a space that doesn't break after the sign", () => {
-    expect(formatPesos(87_500n * WARS_UNIT)).toBe(`$${NBSP}87.500`);
+    expect(formatPesos(87_500n * WARS_UNIT, "es")).toBe(`$${NBSP}87.500`);
     // Written out, not built from NBSP: a plain space here would break spec 9.1 and still match the constant.
-    expect(formatPesos(87_500n * WARS_UNIT)).toBe("$\u00A087.500");
-    expect(formatPesos(0n)).toBe(`$${NBSP}0`);
-    expect(formatPesos(1_234_567n * WARS_UNIT)).toBe(`$${NBSP}1.234.567`);
+    expect(formatPesos(87_500n * WARS_UNIT, "es")).toBe("$\u00A087.500");
+    expect(formatPesos(0n, "es")).toBe(`$${NBSP}0`);
+    expect(formatPesos(1_234_567n * WARS_UNIT, "es")).toBe(`$${NBSP}1.234.567`);
   });
 
   it("shows cents only when there are some, rounded half up", () => {
-    expect(formatPesos(16_050n * WARS_UNIT + 37n * 10n ** 16n)).toBe(`$${NBSP}16.050,37`);
-    expect(formatPesos(10n * WARS_UNIT + 5n * 10n ** 15n)).toBe(`$${NBSP}10,01`);
-    expect(formatPesos(10n * WARS_UNIT + 4n * 10n ** 15n)).toBe(`$${NBSP}10`);
-    expect(formatPesos(-45_000n * WARS_UNIT)).toBe(`-$${NBSP}45.000`);
+    expect(formatPesos(16_050n * WARS_UNIT + 37n * 10n ** 16n, "es")).toBe(`$${NBSP}16.050,37`);
+    expect(formatPesos(10n * WARS_UNIT + 5n * 10n ** 15n, "es")).toBe(`$${NBSP}10,01`);
+    expect(formatPesos(10n * WARS_UNIT + 4n * 10n ** 15n, "es")).toBe(`$${NBSP}10`);
+    expect(formatPesos(-45_000n * WARS_UNIT, "es")).toBe(`-$${NBSP}45.000`);
   });
 });
 
 describe("formatUsdt", () => {
   it("writes USDT with up to two decimals", () => {
-    expect(formatUsdt(10n * USDT_UNIT)).toBe(`10${NBSP}USDT`);
-    expect(formatUsdt(10n * USDT_UNIT)).toBe("10\u00A0USDT");
-    expect(formatUsdt(10_500_000n)).toBe(`10,5${NBSP}USDT`);
-    expect(formatUsdt(50_000n)).toBe(`0,05${NBSP}USDT`);
-    expect(formatUsdt(1_000n * USDT_UNIT)).toBe(`1.000${NBSP}USDT`);
+    expect(formatUsdt(10n * USDT_UNIT, "es")).toBe(`10${NBSP}USDT`);
+    expect(formatUsdt(10n * USDT_UNIT, "es")).toBe("10\u00A0USDT");
+    expect(formatUsdt(10_500_000n, "es")).toBe(`10,5${NBSP}USDT`);
+    expect(formatUsdt(50_000n, "es")).toBe(`0,05${NBSP}USDT`);
+    expect(formatUsdt(1_000n * USDT_UNIT, "es")).toBe(`1.000${NBSP}USDT`);
   });
 });
 
 describe("parsePesos", () => {
   it("reads amounts the way people write them in Argentina, and rejects the ambiguous ones", () => {
-    expect(parsePesos("10.000")).toBe(10_000n * WARS_UNIT);
-    expect(parsePesos("10000")).toBe(10_000n * WARS_UNIT);
-    expect(parsePesos("10.000,50")).toBe(10_000n * WARS_UNIT + 50n * 10n ** 16n);
-    expect(parsePesos("$ 10.000")).toBe(10_000n * WARS_UNIT);
-    expect(parsePesos(`$${NBSP}45.000`)).toBe(45_000n * WARS_UNIT);
-    expect(parsePesos("10,5")).toBe(10n * WARS_UNIT + 50n * 10n ** 16n);
-    expect(parsePesos("1.000.000")).toBe(1_000_000n * WARS_UNIT);
-    expect(parsePesos("1.000,5")).toBe(1_000n * WARS_UNIT + 50n * 10n ** 16n);
+    expect(parsePesos("10.000", "es")).toBe(10_000n * WARS_UNIT);
+    expect(parsePesos("10000", "es")).toBe(10_000n * WARS_UNIT);
+    expect(parsePesos("10.000,50", "es")).toBe(10_000n * WARS_UNIT + 50n * 10n ** 16n);
+    expect(parsePesos("$ 10.000", "es")).toBe(10_000n * WARS_UNIT);
+    expect(parsePesos(`$${NBSP}45.000`, "es")).toBe(45_000n * WARS_UNIT);
+    expect(parsePesos("10,5", "es")).toBe(10n * WARS_UNIT + 50n * 10n ** 16n);
+    expect(parsePesos("1.000.000", "es")).toBe(1_000_000n * WARS_UNIT);
+    expect(parsePesos("1.000,5", "es")).toBe(1_000n * WARS_UNIT + 50n * 10n ** 16n);
     // A dot is always thousands here: "10.5" or "1.0000" would be read wrong either way, so they're refused.
     // So is a comma with three digits after it ("1,000" is a thousand in the US and a one in Argentina).
     // And a group of thousands never starts with a zero: "0.500" is neither 500 nor a half, so it's refused.
     for (const bad of ["10,000.50", "1.0000", "10.5", "10.00", "1000.000", "1,000", "0.500", "0.001", "00.500", "01.000", "10,555", "abc", "", "0", "0,00", "-5", "1e3"]) {
-      expect(parsePesos(bad), bad).toBeNull();
+      expect(parsePesos(bad, "es"), bad).toBeNull();
     }
   });
 });
 
 describe("parseUsdt", () => {
   it("reads USDT written like pesos, to the cent", () => {
-    expect(parseUsdt("6,25")).toBe(6_250_000n);
-    expect(parseUsdt("10")).toBe(10_000_000n);
-    expect(parseUsdt("1.000,5")).toBe(1_000_500_000n);
-    expect(parseUsdt(`6,25${NBSP}USDT`)).toBe(6_250_000n);
-    expect(parseUsdt("6.25")).toBeNull();
-    expect(parseUsdt("6,255")).toBeNull();
-    expect(parseUsdt("0")).toBeNull();
+    expect(parseUsdt("6,25", "es")).toBe(6_250_000n);
+    expect(parseUsdt("10", "es")).toBe(10_000_000n);
+    expect(parseUsdt("1.000,5", "es")).toBe(1_000_500_000n);
+    expect(parseUsdt(`6,25${NBSP}USDT`, "es")).toBe(6_250_000n);
+    expect(parseUsdt("6.25", "es")).toBeNull();
+    expect(parseUsdt("6,255", "es")).toBeNull();
+    expect(parseUsdt("0", "es")).toBeNull();
   });
 });
 
@@ -76,21 +76,21 @@ describe("formatWhen", () => {
   const now = new Date("2026-10-10T15:00:00Z");
 
   it("says today, yesterday, the weekday within the week, and the date after that, in Buenos Aires time", () => {
-    expect(formatWhen(new Date("2026-10-10T13:15:00Z"), now)).toBe("Hoy, 10:15");
-    expect(formatWhen(new Date("2026-10-10T03:05:00Z"), now)).toBe("Hoy, 0:05");
-    expect(formatWhen(new Date("2026-10-10T02:59:00Z"), now)).toBe("Ayer, 23:59");
-    expect(formatWhen(new Date("2026-10-05T12:00:00Z"), now)).toBe("Lunes, 9:00");
-    expect(formatWhen(new Date("2026-10-03T12:00:00Z"), now)).toBe("3/10");
+    expect(formatWhen(new Date("2026-10-10T13:15:00Z"), now, "es")).toBe("Hoy, 10:15");
+    expect(formatWhen(new Date("2026-10-10T03:05:00Z"), now, "es")).toBe("Hoy, 0:05");
+    expect(formatWhen(new Date("2026-10-10T02:59:00Z"), now, "es")).toBe("Ayer, 23:59");
+    expect(formatWhen(new Date("2026-10-05T12:00:00Z"), now, "es")).toBe("Lunes, 9:00");
+    expect(formatWhen(new Date("2026-10-03T12:00:00Z"), now, "es")).toBe("3/10");
   });
 });
 
 describe("heldAmounts", () => {
   it("says pesos, then USDT, and leaves out what rounds to zero", () => {
-    expect(heldAmounts({ wars: 1_016_100_000_000_000_000_000n, usdt: 0n })).toEqual([`$${NBSP}1.016,10`]);
-    expect(heldAmounts({ wars: 0n, usdt: 5n * USDT_UNIT })).toEqual([`5${NBSP}USDT`]);
-    expect(heldAmounts({ wars: 10_000n * WARS_UNIT, usdt: 5n * USDT_UNIT })).toEqual([`$${NBSP}10.000`, `5${NBSP}USDT`]);
-    expect(heldAmounts({ wars: 4n * 10n ** 15n, usdt: 4_999n })).toEqual([]); // under half a cent of each
-    expect(heldAmounts({ wars: 5n * 10n ** 15n, usdt: 5_000n })).toEqual([`$${NBSP}0,01`, `0,01${NBSP}USDT`]);
+    expect(heldAmounts({ wars: 1_016_100_000_000_000_000_000n, usdt: 0n }, "es")).toEqual([`$${NBSP}1.016,10`]);
+    expect(heldAmounts({ wars: 0n, usdt: 5n * USDT_UNIT }, "es")).toEqual([`5${NBSP}USDT`]);
+    expect(heldAmounts({ wars: 10_000n * WARS_UNIT, usdt: 5n * USDT_UNIT }, "es")).toEqual([`$${NBSP}10.000`, `5${NBSP}USDT`]);
+    expect(heldAmounts({ wars: 4n * 10n ** 15n, usdt: 4_999n }, "es")).toEqual([]); // under half a cent of each
+    expect(heldAmounts({ wars: 5n * 10n ** 15n, usdt: 5_000n }, "es")).toEqual([`$${NBSP}0,01`, `0,01${NBSP}USDT`]);
   });
 });
 

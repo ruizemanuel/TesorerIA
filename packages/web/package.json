@@ -12,6 +12,7 @@
     "e2e:serve": "node e2e/serve.ts",
     "typecheck": "next typegen && tsc --noEmit",
     "chat:check": "tsx scripts/chat-check.ts",
+    "i18n:table": "tsx --tsconfig scripts/tsconfig.i18n.json scripts/i18n-table.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate"
   },
