@@ -38,9 +38,11 @@ export async function FundScreenView({
     <div className="min-h-dvh pb-24 lg:pb-0">
       <TopBar fundName={view.name} address={view.address} userName={userName} m={m} />
       {publicView && (
-        <div className="flex items-center gap-2 bg-tint px-4 text-sm">
-          <p className="flex-1 py-2 text-center font-semibold">{m.fund.publicNotice}</p>
-          <LanguageSwitch />
+        // On a phone the notice lines up with the page, beside the switch; on a computer it's centered on the page,
+        // with the switch in a column of its own.
+        <div className="flex items-center gap-2 bg-tint px-4 text-sm lg:grid lg:grid-cols-[1fr_auto_1fr]">
+          <p className="flex-1 py-2 font-semibold text-pretty lg:col-start-2 lg:text-center">{m.fund.publicNotice}</p>
+          <LanguageSwitch className="lg:justify-self-end" />
         </div>
       )}
       <main className="grid gap-3 lg:mx-auto lg:max-w-[1120px] lg:grid-cols-[380px_1fr] lg:items-start lg:gap-4 lg:p-7">
