@@ -451,6 +451,33 @@ describe("buildTimeline in English", () => {
     expect(paidBack?.text).toBe(ars("I paid someone back ARS 45,000 for la cancha. This week's cap has ARS 15,000 left."));
   });
 
+  it("shows a member's name as they wrote it where it starts a sentence, and capitalizes only the stand-ins", () => {
+    const written = new Map<Address, string>([
+      [ANA, "juan"],
+      [BETO, "constructor"],
+    ]);
+    const at = (events: Parameters<typeof buildTimeline>[0]["events"], proposals: Parameters<typeof buildTimeline>[0]["proposals"] = new Map()) =>
+      english({ names: written, events, proposals })[0]?.text;
+
+    expect(at([event("Contribution", { member: ANA, token: WARS_TOKEN, amount: 10_000n * WARS, creditedWars: 10_000n * WARS }, BLOCK - 100n)])).toBe(
+      ars("juan contributed ARS 10,000."),
+    );
+    expect(at([proposal(6, zeroAddress, 0n, ANA)], new Map([[0n, open]]))).toBe("juan proposed changing the agent. It has 1 of 2 votes.");
+    expect(at([event("MemberAdded", { member: ANA }, BLOCK - 100n)])).toBe("juan joined the fund.");
+    expect(at([event("MemberRemoved", { member: BETO, warsReturned: 0n, usdtReturned: 0n }, BLOCK - 100n)])).toBe(
+      "constructor left the fund and took their share.",
+    );
+    expect(at([event("MemberReplaced", { oldMember: ANA, newMember: BETO }, BLOCK - 100n)])).toBe("constructor switched accounts.");
+
+    // The stand-ins, for an address nobody named, still open the sentence capitalized.
+    const stranger = "0x000000000000000000000000000000000000dEaD";
+    expect(at([event("Contribution", { member: stranger, token: WARS_TOKEN, amount: 10_000n * WARS, creditedWars: 10_000n * WARS }, BLOCK - 100n)])).toBe(
+      ars("Someone contributed ARS 10,000."),
+    );
+    expect(at([proposal(6, zeroAddress, 0n, stranger)], new Map([[0n, open]]))).toBe("Someone proposed changing the agent. It has 1 of 2 votes.");
+    expect(at([event("MemberAdded", { member: stranger }, BLOCK - 100n)])).toBe("A new account joined the fund.");
+  });
+
   it("says the expenses the agent still holds, one sentence for each state, with the note in the member's own words", () => {
     const at = new Date(NOW.getTime() - 60_000);
     const expense = (status: ExpenseStatus, id: string, note = "la cancha del jueves") => ({ id, by: "Ana", amount: 45_000n * WARS, note, status, createdAt: at });

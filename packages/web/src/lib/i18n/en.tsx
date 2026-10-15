@@ -1,8 +1,17 @@
 import type { ReactNode } from "react";
 import type { Messages } from "./es";
 
-/** A name, or the stand-in for one ("someone"), where it starts a sentence. */
-const sentenceStart = (name: string) => `${name.charAt(0).toUpperCase()}${name.slice(1)}`;
+const SOMEONE = "someone";
+const NEW_ACCOUNT = "a new account";
+
+/** The two stand-ins for a name, as they read where they start a sentence. */
+const STAND_INS = new Map([
+  [SOMEONE, "Someone"],
+  [NEW_ACCOUNT, "A new account"],
+]);
+
+/** Capitalizes a stand-in where it starts a sentence, and leaves a member's name as they wrote it (spec, 9.3). */
+const sentenceStart = (who: string) => STAND_INS.get(who) ?? who;
 
 /** Everything the web says, in English (spec, 9.3): the voice and the glossary of the spec, never a word of jargon. */
 export const en: Messages = {
@@ -176,8 +185,8 @@ export const en: Messages = {
     goToFund: "Go to the fund",
   },
   timeline: {
-    someone: "someone",
-    newAccount: "a new account",
+    someone: SOMEONE,
+    newAccount: NEW_ACCOUNT,
     you: "You",
     contributed: (who: string, what: string) => `${sentenceStart(who)} contributed ${what}.`,
     converted: (usdt: string, pesos: string) => `I changed the ${usdt} that came in into pesos: ${pesos}.`,
