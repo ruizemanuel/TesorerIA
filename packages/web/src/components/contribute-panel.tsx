@@ -25,6 +25,7 @@ import {
 } from "../lib/contribute";
 import { USDT_UNIT, formatPesos, formatUsdt } from "../lib/format";
 import { DEFAULT_BALANCE_CAP, memberFundAbi } from "../lib/fund-abi";
+import { useMessages } from "../lib/i18n/client";
 import { AddressBox } from "./address-box";
 import { AmountField } from "./amount-field";
 import { useRefresh } from "./refresh-provider";
@@ -62,6 +63,7 @@ export function ContributePanel({
   /** A contribution of this member's already went out and has no receipt yet: the button is not offered again. */
   contributionOnItsWay: boolean;
 }) {
+  const m = useMessages();
   const router = useRouter();
   const { refresh } = useRefresh();
   const [tab, setTab] = useState<Token>("usdt");
@@ -134,7 +136,7 @@ export function ContributePanel({
       router.replace(`/f/${fund}?aporte=${balance}`, { scroll: false });
       refresh();
     } catch (caught) {
-      setError(userMessage(caught));
+      setError(userMessage(caught, m));
       setStep("idle");
       if (isOnItsWay(caught)) {
         // It went out and may still land: the button stays off, and the page shows it "en camino" meanwhile.

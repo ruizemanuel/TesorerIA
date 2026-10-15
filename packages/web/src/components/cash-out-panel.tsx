@@ -9,6 +9,7 @@ import { isOnItsWay, userMessage } from "../lib/client/errors";
 import { loadMe, sendCalls } from "../lib/client/wallet";
 import { pesosText } from "../lib/contribute";
 import { WARS_SPECK, formatPesos } from "../lib/format";
+import { useMessages } from "../lib/i18n/client";
 import { NetworkWarning } from "./address-box";
 import { AmountField } from "./amount-field";
 import { useRefresh } from "./refresh-provider";
@@ -25,6 +26,7 @@ const ADDRESS = "narrow break-all rounded-[14px] bg-surface p-3 text-center text
  * block), so the old balance is never offered again.
  */
 export function CashOutPanel({ fund, account, cashOutOnItsWay }: { fund: Address; account: Address; cashOutOnItsWay: boolean }) {
+  const m = useMessages();
   const { refresh } = useRefresh();
   // `changing`: right after a pass, until the account is read again, the balances are the old ones.
   const { balances, failed, changing } = useAccountBalances(account, LOOK_EVERY_MS);
@@ -71,7 +73,7 @@ export function CashOutPanel({ fund, account, cashOutOnItsWay }: { fund: Address
       setStep("idle");
       busy.current = false;
     } catch (caught) {
-      setError(userMessage(caught));
+      setError(userMessage(caught, m));
       setStep("idle");
       if (isOnItsWay(caught)) {
         setSentNow(true); // it went out and may still land: no second one

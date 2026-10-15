@@ -6,6 +6,7 @@ import { del, post } from "../lib/client/api";
 import { isOnItsWay, userMessage } from "../lib/client/errors";
 import { loadMe, sendCalls, settleOperation } from "../lib/client/wallet";
 import type { DeployStep } from "../lib/funds";
+import { useMessages } from "../lib/i18n/client";
 import { Button } from "./ui";
 
 type Call = Extract<DeployStep, { call: unknown }>["call"];
@@ -17,6 +18,7 @@ type Answer = Exclude<DeployStep, { call: unknown }> | { call: Call; nonce?: str
  * `chosenVotes`: the ones of a creation already started, which stay as they are until it ends.
  */
 export function DeployForm({ fundId, memberCount, chosenVotes }: { fundId: string; memberCount: number; chosenVotes: number | null }) {
+  const m = useMessages();
   const router = useRouter();
   const [votes, setVotes] = useState(chosenVotes ?? Math.max(2, Math.ceil(memberCount / 2)));
   const [step, setStep] = useState<"idle" | "signing" | "sending">("idle");
@@ -81,7 +83,7 @@ export function DeployForm({ fundId, memberCount, chosenVotes }: { fundId: strin
             // land: reopening the draft would let the list change under a createFund that is about to be created.
             // The server also keeps the list frozen while a createFund is on its way.
             if (built && !isOnItsWay(caught)) await del(`/api/drafts/${fundId}/deploy`).catch(() => {});
-            setError(userMessage(caught));
+            setError(userMessage(caught, m));
             setStep("idle");
           }
         }}

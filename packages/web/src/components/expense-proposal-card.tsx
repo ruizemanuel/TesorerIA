@@ -8,6 +8,7 @@ import { post } from "../lib/client/api";
 import { userMessage } from "../lib/client/errors";
 import { expenseOutcome } from "../lib/expense-outcome";
 import { formatPesos } from "../lib/format";
+import { useMessages } from "../lib/i18n/client";
 import { useConfirmingCards } from "./chat-provider";
 import { useRefresh } from "./refresh-provider";
 import { Button } from "./ui";
@@ -30,6 +31,7 @@ export function ExpenseProposalCard({
   rules: ProposalRules;
   onAnswer: (status: string) => Promise<void>;
 }) {
+  const m = useMessages();
   const { refresh } = useRefresh();
   const confirming = useConfirmingCards();
   const [busy, setBusy] = useState(false);
@@ -77,7 +79,7 @@ export function ExpenseProposalCard({
       await onAnswer(answer.status);
       refresh();
     } catch (caught) {
-      setError(userMessage(caught));
+      setError(userMessage(caught, m));
     } finally {
       confirming.delete(toolCallId);
       setBusy(false);

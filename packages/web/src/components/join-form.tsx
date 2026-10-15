@@ -40,7 +40,7 @@ export function JoinForm({ code, loggedIn }: { code: string; loggedIn: boolean }
           });
           router.push(joined.address ? `/f/${joined.address}` : `/f/borrador/${joined.fundId}`);
         } catch (caught) {
-          setError(userMessage(caught));
+          setError(userMessage(caught, m));
           setBusy(false);
         }
       }}

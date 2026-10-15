@@ -62,7 +62,7 @@ export async function sendCalls(
   };
   const account = await createMemberAccount({ client, owner });
   if (account.address.toLowerCase() !== me.account.toLowerCase()) {
-    throw new UserFacingError("Tu passkey no coincide con tu cuenta. Entrá de nuevo.");
+    throw new UserFacingError({ key: "wrongPasskey" });
   }
   const bundlerClient = createPimlicoBundlerClient({
     client,
@@ -103,7 +103,7 @@ export async function sendCalls(
     blockNumber: result.blockNumber?.toString(),
     success: result.success,
   }).catch(() => {});
-  if (!result.success) throw new UserFacingError("La operación no se pudo completar. No se movió plata.");
+  if (!result.success) throw new UserFacingError({ key: "notCompleted" });
   return result;
 }
 

@@ -23,8 +23,9 @@ vi.mock("viem/account-abstraction", async (importOriginal) => ({
 const api = vi.hoisted(() => ({ post: vi.fn(async (_path: string, _body?: unknown) => ({ ok: true })), get: vi.fn() }));
 vi.mock("../src/lib/client/api", () => api);
 
-import { OnItsWayError, UserFacingError } from "../src/lib/client/errors";
+import { OnItsWayError, UserFacingError, userMessage } from "../src/lib/client/errors";
 import { type Me, sendCalls, settleOperation } from "../src/lib/client/wallet";
+import { es } from "../src/lib/i18n/es";
 
 const ACCOUNT = getAddress("0x2F8218c7cF6d822091EDe24Db9c46B0324c21A6F");
 const me: Me = { name: "Ema", account: ACCOUNT, credential: { id: "cred", publicKey: "0x1234" } };
@@ -96,7 +97,8 @@ describe("sendCalls", () => {
     wallet.createMemberAccount.mockResolvedValue({ address: getAddress("0x6BE3c1eB63A4edbc6C23c281F93F81B14eF3a671") });
     const error = await sendCalls(me, CALLS, INFO).catch((caught) => caught);
     expect(error).toBeInstanceOf(UserFacingError);
-    expect(error.message).toBe("Tu passkey no coincide con tu cuenta. Entrá de nuevo.");
+    expect(error.key).toBe("wrongPasskey");
+    expect(userMessage(error, es)).toBe("Tu passkey no coincide con tu cuenta. Entrá de nuevo.");
     expect(error).not.toBeInstanceOf(OnItsWayError);
     expect(wallet.sendTaggedCalls).not.toHaveBeenCalled();
   });
@@ -112,7 +114,8 @@ describe("sendCalls", () => {
     wallet.sendTaggedCalls.mockResolvedValue({ ...RECEIPT, success: false, reason: "reverted" });
     const error = await sendCalls(me, CALLS, INFO).catch((caught) => caught);
     expect(error).toBeInstanceOf(UserFacingError);
-    expect(error.message).toBe("La operación no se pudo completar. No se movió plata.");
+    expect(error.key).toBe("notCompleted");
+    expect(userMessage(error, es)).toBe("La operación no se pudo completar. No se movió plata.");
     expect(error).not.toBeInstanceOf(OnItsWayError); // it landed and failed: trying again is the right thing
     expect(posted().at(-1)).toEqual(["/api/operations/done", { userOpHash: OP, transactionHash: TX, blockNumber: "79925582", success: false }]);
   });
@@ -128,7 +131,7 @@ describe("sendCalls", () => {
     const error = await sendCalls(me, CALLS, INFO).catch((caught) => caught);
 
     expect(error).toBeInstanceOf(OnItsWayError);
-    expect(error.message).toMatch(/en camino/);
+    expect(userMessage(error, es)).toMatch(/en camino/);
     expect(error.message).not.toMatch(/prob[aá] de nuevo/i);
     expect(posted()).toEqual([
       ["/api/operations", expect.objectContaining({ userOpHash: OP })],
@@ -143,7 +146,7 @@ describe("sendCalls", () => {
     });
     const error = await sendCalls(me, CALLS, INFO).catch((caught) => caught);
     expect(error).toBeInstanceOf(OnItsWayError);
-    expect(error.message).toMatch(/en camino/);
+    expect(userMessage(error, es)).toMatch(/en camino/);
     expect(posted().every(([path]) => path === "/api/operations")).toBe(true); // idempotent: the server keeps one row
   });
 
@@ -259,7 +262,7 @@ describe("settleOperation", () => {
     bundler(null);
     const error = await settleOperation(OP).catch((caught) => caught);
     expect(error).toBeInstanceOf(OnItsWayError);
-    expect(error.message).toMatch(/en camino/);
+    expect(userMessage(error, es)).toMatch(/en camino/);
     expect(api.post).not.toHaveBeenCalled();
   });
 });

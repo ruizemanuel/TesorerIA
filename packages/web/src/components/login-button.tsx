@@ -4,10 +4,12 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { loginMessage } from "../lib/client/errors";
 import { logInWithPasskey } from "../lib/client/passkey";
+import { useMessages } from "../lib/i18n/client";
 import { safeNext } from "../lib/safe-next";
 import { Button } from "./ui";
 
 export function LoginButton({ next = "/" }: { next?: string }) {
+  const m = useMessages();
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -23,7 +25,7 @@ export function LoginButton({ next = "/" }: { next?: string }) {
             router.replace(safeNext(next)); // the prop is checked again here: this never leaves the site
             router.refresh();
           } catch (caught) {
-            setError(loginMessage(caught));
+            setError(loginMessage(caught, m));
             setBusy(false);
           }
         }}

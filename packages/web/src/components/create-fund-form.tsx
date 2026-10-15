@@ -45,7 +45,7 @@ export function CreateFundForm({ loggedIn }: { loggedIn: boolean }) {
           });
           router.push(`/f/borrador/${id}`);
         } catch (caught) {
-          setError(userMessage(caught));
+          setError(userMessage(caught, m));
           setBusy(false);
         }
       }}

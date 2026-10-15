@@ -6,6 +6,7 @@ import { post } from "../lib/client/api";
 import { userMessage } from "../lib/client/errors";
 import { expenseOutcome } from "../lib/expense-outcome";
 import { MAX_PESOS, formatPesos, parsePesos } from "../lib/format";
+import { useMessages } from "../lib/i18n/client";
 import { useRefresh } from "./refresh-provider";
 import { Button, FIELD } from "./ui";
 
@@ -14,6 +15,7 @@ type Twin = { status: string; amount: bigint };
 
 /** Cargar un gasto (spec, 9, pantalla 6): the agreed expense or another one, the amount and a note. */
 export function ExpensePanel({ fund, agreedExpense }: { fund: string; agreedExpense: string }) {
+  const m = useMessages();
   const { refresh } = useRefresh();
   // One key per opening: a double click or a retry sends the same one, and the server keeps one expense.
   const [clientKey, setClientKey] = useState(() => crypto.randomUUID());
@@ -55,7 +57,7 @@ export function ExpensePanel({ fund, agreedExpense }: { fund: string; agreedExpe
       setMessage(expenseOutcome(answer.status));
       refresh();
     } catch (caught) {
-      setError(userMessage(caught));
+      setError(userMessage(caught, m));
       setBusy(false);
       sending.current = false;
     }

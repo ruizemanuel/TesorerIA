@@ -5,6 +5,7 @@ import type { Address } from "viem";
 import { post } from "../lib/client/api";
 import { isOnItsWay, userMessage } from "../lib/client/errors";
 import { loadMe, sendCalls } from "../lib/client/wallet";
+import { useMessages } from "../lib/i18n/client";
 import { castVote } from "../lib/vote";
 import { useRefresh } from "./refresh-provider";
 import { Button } from "./ui";
@@ -14,6 +15,7 @@ import { Button } from "./ui";
  * operation, so the money moves without anyone coming back to the app.
  */
 export function VoteButton({ fund, proposalId, completes }: { fund: Address; proposalId: string; completes: boolean }) {
+  const m = useMessages();
   const { refresh } = useRefresh();
   const [step, setStep] = useState<"idle" | "signing" | "sending">("idle");
   const [error, setError] = useState("");
@@ -39,7 +41,7 @@ export function VoteButton({ fund, proposalId, completes }: { fund: Address; pro
       setOutcome("voted");
       refresh();
     } catch (caught) {
-      setError(userMessage(caught));
+      setError(userMessage(caught, m));
       if (isOnItsWay(caught)) {
         // It went out and may still land: the button stays off, and the page shows the vote "en camino" meanwhile.
         setOutcome("on its way");

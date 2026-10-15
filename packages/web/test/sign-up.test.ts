@@ -20,19 +20,19 @@ describe("withAccount", () => {
   it("refuses what the form can tell is wrong before making the passkey", async () => {
     const { submit, createAccount, then } = form();
     const bad = await submit(PERSON, "No entendimos la cuota. Escribila como 10.000 o 10.000,50.").catch((error: unknown) => error);
-    expect(userMessage(bad)).toBe("No entendimos la cuota. Escribila como 10.000 o 10.000,50.");
-    expect(userMessage(await submit({ name: " " }).catch((error: unknown) => error))).toBe("Poné tu nombre, de hasta 30 letras.");
-    expect(userMessage(await submit({ name: "Ema", email: "nope" }).catch((error: unknown) => error))).toBe("Ese mail no parece válido.");
+    expect(userMessage(bad, es)).toBe("No entendimos la cuota. Escribila como 10.000 o 10.000,50.");
+    expect(userMessage(await submit({ name: " " }).catch((error: unknown) => error), es)).toBe("Poné tu nombre, de hasta 30 letras.");
+    expect(userMessage(await submit({ name: "Ema", email: "nope" }).catch((error: unknown) => error), es)).toBe("Ese mail no parece válido.");
     expect(createAccount).not.toHaveBeenCalled();
     expect(then).not.toHaveBeenCalled();
   });
 
   it("says what is wrong with the person in the language it is given, and takes the form's own problem as it comes", async () => {
     const { submit, createAccount } = form({ m: en });
-    expect(userMessage(await submit({ name: " " }).catch((error: unknown) => error))).toBe("Enter your name, up to 30 letters.");
-    expect(userMessage(await submit({ name: "Ema", email: "nope" }).catch((error: unknown) => error))).toBe("That email doesn't look valid.");
+    expect(userMessage(await submit({ name: " " }).catch((error: unknown) => error), en)).toBe("Enter your name, up to 30 letters.");
+    expect(userMessage(await submit({ name: "Ema", email: "nope" }).catch((error: unknown) => error), en)).toBe("That email doesn't look valid.");
     const bad = await submit(PERSON, "We couldn't read the weekly dues. Write them like 10,000 or 10,000.50.").catch((error: unknown) => error);
-    expect(userMessage(bad)).toBe("We couldn't read the weekly dues. Write them like 10,000 or 10,000.50.");
+    expect(userMessage(bad, en)).toBe("We couldn't read the weekly dues. Write them like 10,000 or 10,000.50.");
     expect(createAccount).not.toHaveBeenCalled();
   });
 

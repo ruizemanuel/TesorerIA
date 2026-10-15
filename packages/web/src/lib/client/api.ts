@@ -1,11 +1,9 @@
 import { UserFacingError } from "./errors";
 
-const FAILED = "Algo falló. Probá de nuevo.";
-
-/** The route's answer; a failure throws with the message the route wrote for people (see `userMessage`). */
+/** The route's answer; a failure throws with the message the route wrote for people, or the `failed` key when it said none (see `userMessage`). */
 async function answer<T>(response: Response): Promise<T> {
   const data = (await response.json().catch(() => ({}))) as { error?: unknown };
-  if (!response.ok) throw new UserFacingError(typeof data.error === "string" && data.error ? data.error : FAILED);
+  if (!response.ok) throw new UserFacingError(typeof data.error === "string" && data.error ? data.error : { key: "failed" });
   return data as T;
 }
 

@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import type { Address } from "viem";
 import { isOnItsWay, userMessage } from "../lib/client/errors";
 import { loadMe, sendCalls } from "../lib/client/wallet";
+import { useMessages } from "../lib/i18n/client";
 import { executeCalls } from "../lib/vote";
 import { useRefresh } from "./refresh-provider";
 import { Button } from "./ui";
@@ -13,6 +14,7 @@ import { Button } from "./ui";
  * One operation, confirmed with the passkey; the refreshed page then says "Se aprobó.".
  */
 export function ExecuteButton({ fund, proposalId }: { fund: Address; proposalId: string }) {
+  const m = useMessages();
   const { refresh } = useRefresh();
   const [step, setStep] = useState<"idle" | "signing" | "sending">("idle");
   const [error, setError] = useState("");
@@ -31,7 +33,7 @@ export function ExecuteButton({ fund, proposalId }: { fund: Address; proposalId:
       setOutcome("done");
       refresh();
     } catch (caught) {
-      setError(userMessage(caught));
+      setError(userMessage(caught, m));
       if (isOnItsWay(caught)) {
         setOutcome("on its way");
         refresh();
