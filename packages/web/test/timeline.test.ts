@@ -3,6 +3,8 @@ import { type Address, pad, toHex, zeroAddress } from "viem";
 import { describe, expect, it } from "vitest";
 import type { ExpenseStatus } from "../src/lib/db/schema";
 import { NBSP, formatUsdt } from "../src/lib/format";
+import { en } from "../src/lib/i18n/en";
+import { es } from "../src/lib/i18n/es";
 import { type ProposalState, buildTimeline } from "../src/lib/timeline";
 import { AGENT, ANA, BETO, BLOCK, CARO, CLOCK, NOW, START, USDT_UNIT, WARS, event } from "./support/fixtures";
 
@@ -30,6 +32,7 @@ function timeline(change: Partial<Parameters<typeof buildTimeline>[0]> = {}) {
     warsBalance: 90_000n * WARS,
     viewerIsMember: true,
     now: NOW,
+    m: es,
     ...change,
   });
 }
@@ -225,5 +228,276 @@ describe("buildTimeline", () => {
   it("leaves a pass to pesos out: it moves the member's own account, not the fund (spec, 9.2)", () => {
     const pass = { userOpHash: "0xpass", kind: "cash-out" as const, amount: 5_000n * WARS, token: "wars" as const, createdAt: NOW };
     expect(timeline({ pending: [pass] })).toEqual([]);
+  });
+});
+
+// The sentences the cases above don't reach, in Spanish: every one is as it was before the dictionary (Messages).
+describe("buildTimeline: the other sentences, in Spanish", () => {
+  const OPEN: ProposalState = { votes: 1, executed: false, deadline: CLOCK.timestamp + 86_400n, voted: false };
+  const proposed = (action: number, a: Address, amount: bigint, proposer: Address, note = "") =>
+    timeline({
+      events: [event("ProposalCreated", { id: 0n, action, a, b: zeroAddress, amount, proposer, note }, BLOCK - 100n)],
+      proposals: new Map([[0n, OPEN]]),
+    })[0]!;
+
+  it("says each kind of proposal, and what the agent says about the ones it makes", () => {
+    expect(proposed(0, CARO, 30_000n * WARS, AGENT).text).toBe($("Propuse pagarle $ 30.000 a Caro. Lleva 1 de 2 votos."));
+    expect(proposed(1, zeroAddress, 0n, BETO).text).toBe("Beto propuso sumar a una cuenta nueva al fondo. Lleva 1 de 2 votos.");
+    expect(proposed(2, CARO, 0n, BETO).text).toBe("Beto propuso sacar a Caro del fondo. Lleva 1 de 2 votos.");
+    expect(proposed(3, CARO, 0n, BETO).text).toBe("Beto propuso cambiar la cuenta de Caro. Lleva 1 de 2 votos.");
+    expect(proposed(4, zeroAddress, 80_000n * WARS, BETO).text).toBe($("Beto propuso cambiar el tope semanal de la cancha a $ 80.000. Lleva 1 de 2 votos."));
+    expect(proposed(5, zeroAddress, 3n, BETO).text).toBe("Beto propuso pedir 3 votos para lo que no es la cancha. Lleva 1 de 2 votos.");
+    expect(proposed(6, zeroAddress, 0n, BETO).text).toBe("Beto propuso cambiar el agente. Lleva 1 de 2 votos.");
+    expect(proposed(0, CARO, 30_000n * WARS, AGENT).detail).toBe("Lo que no puedo devolver por mi cuenta lo tienen que votar: hacen falta 2 votos.");
+    expect(proposed(7, zeroAddress, 0n, BETO).detail).toBeUndefined();
+  });
+
+  it("says a name it doesn't have as 'alguien', and the viewer's own operations on their way as 'Vos'", () => {
+    const [byStranger] = timeline({ events: [event("MemberRemoved", { member: zeroAddress, warsReturned: 0n, usdtReturned: 0n }, BLOCK - 100n)] });
+    expect(byStranger?.text).toBe("alguien dejó el fondo y se llevó su parte.");
+    const vote = { userOpHash: "0xv", kind: "vote" as const, amount: null, token: null, createdAt: NOW };
+    expect(timeline({ pending: [vote] })[0]?.actor).toEqual({ kind: "member", name: "Vos" });
+  });
+
+  it("tells a member leaving or switching account, a cap or the votes changing, and a new agent", () => {
+    const items = timeline({
+      events: [
+        event("MemberRemoved", { member: CARO, warsReturned: 0n, usdtReturned: 0n }, BLOCK - 600n),
+        event("MemberReplaced", { oldMember: BETO, newMember: ANA }, BLOCK - 500n),
+        event("WeeklyCapChanged", { cap: 80_000n * WARS }, BLOCK - 400n),
+        event("VotesRequiredChanged", { votes: 3 }, BLOCK - 300n),
+        event("AgentChanged", { agent: BETO }, BLOCK - 200n),
+        event("MemberAdded", { member: ANA }, BLOCK - 100n),
+      ],
+    });
+    expect(items.map((i) => i.text)).toEqual([
+      "Se sumó Ana al fondo.",
+      "Cambió el agente del fondo.",
+      "Ahora hacen falta 3 votos para lo que no es la cancha.",
+      $("El tope semanal de la cancha ahora es $ 80.000."),
+      "Ana cambió de cuenta.",
+      "Caro dejó el fondo y se llevó su parte.",
+    ]);
+  });
+});
+
+describe("buildTimeline in English", () => {
+  /** English amounts: "ARS 45,000" and "10 USDT", with the no-break spaces. */
+  const ars = (text: string) => text.replaceAll("ARS ", `ARS${NBSP}`).replaceAll(" USDT", `${NBSP}USDT`);
+  const english = (change: Partial<Parameters<typeof buildTimeline>[0]> = {}) => timeline({ ...change, m: en });
+  const open: ProposalState = { votes: 1, executed: false, deadline: CLOCK.timestamp + 86_400n, voted: false };
+  const proposal = (action: number, a: Address, amount: bigint, proposer: Address, note = "") =>
+    event("ProposalCreated", { id: 0n, action, a, b: zeroAddress, amount, proposer, note }, BLOCK - 100n);
+  const proposed = (action: number, a: Address, amount: bigint, proposer: Address, note = "") =>
+    english({ events: [proposal(action, a, amount, proposer, note)], proposals: new Map([[0n, open]]) })[0]!;
+
+  it("says each movement in English, with amounts as ARS, newest first, the agent in first person", () => {
+    const items = english({
+      events: [
+        event("Contribution", { member: BETO, token: USDT, amount: 10n * USDT_UNIT, creditedWars: 16_070n * WARS }, BLOCK - 600n),
+        event("Conversion", { usdtIn: 10n * USDT_UNIT, warsOut: 16_050n * WARS }, BLOCK - 500n),
+        event("Contribution", { member: ANA, token: WARS_TOKEN, amount: 10_000n * WARS, creditedWars: 10_000n * WARS }, BLOCK - 400n),
+        event("Reimbursement", { member: ANA, amount: 45_000n * WARS, ref: pad("0x01", { size: 32 }), week: 2n }, BLOCK - 300n),
+      ],
+    });
+    expect(items.map((i) => [i.actor, i.text])).toEqual([
+      [{ kind: "agent" }, ars("I paid Ana back ARS 45,000 for la cancha. This week's cap has ARS 15,000 left.")],
+      [{ kind: "member", name: "Ana" }, ars("Ana contributed ARS 10,000.")],
+      [{ kind: "agent" }, ars("I changed the 10 USDT that came in into pesos: ARS 16,050.")],
+      [{ kind: "member", name: "Beto" }, ars("Beto contributed 10 USDT.")],
+    ]);
+    expect(items[0]!.text.startsWith(`I paid Ana back ARS${NBSP}45,000 for la cancha.`)).toBe(true);
+    expect(items[0]?.detail).toBe(ars("It was la cancha, which I pay back without a vote up to ARS 60,000 per week."));
+  });
+
+  it("writes amounts the English way, with the point for decimals", () => {
+    const items = english({
+      events: [
+        event("Contribution", { member: BETO, token: USDT, amount: 10_500_000n, creditedWars: 16_070n * WARS }, BLOCK - 200n),
+        event("Conversion", { usdtIn: 10_500_000n, warsOut: 16_050n * WARS + 37n * 10n ** 16n }, BLOCK - 100n),
+      ],
+    });
+    expect(items.map((i) => i.text)).toEqual([
+      ars("I changed the 10.5 USDT that came in into pesos: ARS 16,050.37."),
+      ars("Beto contributed 10.5 USDT."),
+    ]);
+  });
+
+  it("explains the conversion in plain words, without naming the exchange or the price feed (spec, 9)", () => {
+    const [conversion] = english({ events: [event("Conversion", { usdtIn: 10n * USDT_UNIT, warsOut: 16_050n * WARS }, BLOCK - 500n)] });
+    expect(conversion?.detail).toBe(
+      "I changed them into pesos and checked that the price wasn't more than 2 % away from the dollar's reference price, as my rules say.",
+    );
+    expect(conversion?.detail).not.toMatch(/\b(uniswap|chainlink|oracle|pool|gas|hash|wallet|blockchain|token|exchange)\b/i);
+  });
+
+  it("uses the weekly cap that held at the time, and says 'that week' for an older week", () => {
+    const items = english({
+      events: [
+        event("Reimbursement", { member: ANA, amount: 20_000n * WARS, ref: pad("0x01", { size: 32 }), week: 1n }, BLOCK - 700_000n),
+        event("WeeklyCapChanged", { cap: 80_000n * WARS }, BLOCK - 600_000n),
+        event("Reimbursement", { member: BETO, amount: 50_000n * WARS, ref: pad("0x02", { size: 32 }), week: 2n }, BLOCK - 100n),
+      ],
+    });
+    expect(items.map((i) => i.text)).toEqual([
+      ars("I paid Beto back ARS 50,000 for la cancha. This week's cap has ARS 30,000 left."),
+      ars("The weekly cap for la cancha is now ARS 80,000."),
+      ars("I paid Ana back ARS 20,000 for la cancha. That week's cap had ARS 40,000 left."),
+    ]);
+  });
+
+  it("says why it didn't convert in English", () => {
+    const at = new Date(NOW.getTime() - 60_000);
+    const hold = (code: string | null) => english({ conversionHold: { usdt: 5n * USDT_UNIT, code, at } });
+    expect(hold("price-reference")).toEqual([
+      {
+        id: "conversion-hold",
+        at,
+        actor: { kind: "agent" },
+        text: ars("I haven't changed 5 USDT into pesos yet: the dollar's reference price isn't up to date. I'll try again in a few minutes."),
+      },
+    ]);
+    expect(hold("daily-limit")[0]?.text).toContain(": I've already changed all I can change in a day for this fund.");
+    expect(hold("pool-depth")[0]?.text).toContain(": the market where I change them doesn't have enough pesos.");
+    expect(hold("price-gap")[0]?.text).toContain(": the market price is more than 2 % away from the reference.");
+    expect(hold("price-floor")[0]?.text).toContain(": the market pays less than my rules allow.");
+    // Blocked, or a code this web doesn't know yet.
+    expect(hold(null)[0]?.text).toContain(": I couldn't make the trade.");
+    expect(hold("something-new")[0]?.text).toContain(": I couldn't make the trade.");
+  });
+
+  it("says each kind of proposal, in first person when the agent makes it and in third when a member does", () => {
+    expect(proposed(0, CARO, 30_000n * WARS, AGENT, "la pelota nueva").text).toBe(
+      ars("I proposed paying Caro ARS 30,000 for la pelota nueva. It has 1 of 2 votes."),
+    );
+    expect(proposed(0, CARO, 30_000n * WARS, AGENT).text).toBe(ars("I proposed paying Caro ARS 30,000. It has 1 of 2 votes."));
+    expect(proposed(1, zeroAddress, 0n, BETO).text).toBe("Beto proposed adding a new account to the fund. It has 1 of 2 votes.");
+    expect(proposed(2, CARO, 0n, BETO).text).toBe("Beto proposed removing Caro from the fund. It has 1 of 2 votes.");
+    expect(proposed(3, CARO, 0n, BETO).text).toBe("Beto proposed changing Caro's account. It has 1 of 2 votes.");
+    expect(proposed(4, zeroAddress, 80_000n * WARS, BETO).text).toBe(
+      ars("Beto proposed changing the weekly cap for la cancha to ARS 80,000. It has 1 of 2 votes."),
+    );
+    expect(proposed(5, zeroAddress, 3n, BETO).text).toBe("Beto proposed requiring 3 votes for anything that isn't la cancha. It has 1 of 2 votes.");
+    expect(proposed(6, zeroAddress, 0n, BETO).text).toBe("Beto proposed changing the agent. It has 1 of 2 votes.");
+    expect(proposed(7, zeroAddress, 0n, BETO).text).toBe("Beto proposed closing the fund and splitting the balance. It has 1 of 2 votes.");
+    expect(proposed(0, CARO, 30_000n * WARS, AGENT).detail).toBe("What I can't pay back on my own has to be voted on: 2 votes are needed.");
+    expect(proposed(7, zeroAddress, 0n, BETO).detail).toBeUndefined();
+  });
+
+  it("says where a proposal stands: voting, ready to carry out, short of pesos, approved, expired", () => {
+    const pay = proposal(0, CARO, 30_000n * WARS, AGENT, "la pelota nueva");
+    const stand = (state: ProposalState, change: Partial<Parameters<typeof buildTimeline>[0]> = {}) =>
+      english({ events: [pay], proposals: new Map([[0n, state]]), ...change })[0]!;
+    const head = "I proposed paying Caro ARS 30,000 for la pelota nueva.";
+    const ready = { votes: 2, executed: false, deadline: CLOCK.timestamp + 86_400n, voted: true };
+
+    expect(stand(open)).toMatchObject({
+      text: ars(`${head} It has 1 of 2 votes.`),
+      action: { kind: "vote", proposalId: 0n, votes: 1, required: 2, canVote: true, voted: false, completes: true },
+    });
+    expect(stand(ready)).toMatchObject({
+      text: ars(`${head} It has the votes: it still needs to be carried out.`),
+      action: { kind: "execute", proposalId: 0n, canExecute: true },
+    });
+    expect(stand(ready, { warsBalance: 20_000n * WARS }).text).toBe(ars(`${head} It has the votes, but the fund needs ARS 10,000 more to pay it.`));
+    expect(stand({ ...ready, executed: true }).text).toBe(ars(`${head} It was approved.`));
+    expect(stand({ ...ready, deadline: CLOCK.timestamp - 1n }).text).toBe(ars(`${head} It expired without being carried out.`));
+    expect(stand({ ...open, deadline: CLOCK.timestamp - 1n }).text).toBe(ars(`${head} It expired without the votes it needed.`));
+  });
+
+  it("tells what the group did: a payment it voted, a member added, replaced or removed, the rules changed, the fund closed", () => {
+    const items = english({
+      events: [
+        event("Payment", { member: CARO, amount: 30_000n * WARS }, BLOCK - 900n),
+        event("MemberAdded", { member: ANA }, BLOCK - 800n),
+        event("MemberAdded", { member: "0x000000000000000000000000000000000000dEaD" }, BLOCK - 700n),
+        event("MemberReplaced", { oldMember: BETO, newMember: ANA }, BLOCK - 600n),
+        event("MemberRemoved", { member: CARO, warsReturned: 0n, usdtReturned: 0n }, BLOCK - 500n),
+        event("WeeklyCapChanged", { cap: 80_000n * WARS }, BLOCK - 400n),
+        event("VotesRequiredChanged", { votes: 3 }, BLOCK - 300n),
+        event("AgentChanged", { agent: BETO }, BLOCK - 200n),
+        event("FundClosed", { warsBalance: 1n, usdtBalance: 0n }, BLOCK - 100n),
+      ],
+    });
+    expect(items.map((i) => [i.actor.kind, i.text])).toEqual([
+      ["group", "The fund was closed and the balance was split according to what each person contributed."],
+      ["group", "The fund's agent was changed."],
+      ["group", "Now 3 votes are needed for anything that isn't la cancha."],
+      ["group", ars("The weekly cap for la cancha is now ARS 80,000.")],
+      ["group", "Caro left the fund and took their share."],
+      ["group", "Ana switched accounts."],
+      ["group", "A new account joined the fund."],
+      ["group", "Ana joined the fund."],
+      ["group", ars("The fund paid Caro ARS 30,000: the proposal was approved.")],
+    ]);
+  });
+
+  it("leaves out a RemainderDistributed that moved only rounding dust, and says the one that didn't", () => {
+    const items = english({
+      events: [
+        event("RemainderDistributed", { warsBalance: 2n, usdtBalance: 0n }, BLOCK - 200n),
+        event("RemainderDistributed", { warsBalance: 5_000n * WARS, usdtBalance: 0n }, BLOCK - 100n),
+      ],
+    });
+    expect(items.map((i) => i.text)).toEqual(["What arrived after the fund closed was split among the members."]);
+  });
+
+  it("says a name it doesn't have as 'someone', capitalized where it starts the sentence", () => {
+    const [removed] = english({ events: [event("MemberRemoved", { member: zeroAddress, warsReturned: 0n, usdtReturned: 0n }, BLOCK - 100n)] });
+    expect(removed?.text).toBe("Someone left the fund and took their share.");
+    const [paidBack] = english({
+      events: [event("Reimbursement", { member: zeroAddress, amount: 45_000n * WARS, ref: pad("0x01", { size: 32 }), week: 2n }, BLOCK - 100n)],
+    });
+    expect(paidBack?.text).toBe(ars("I paid someone back ARS 45,000 for la cancha. This week's cap has ARS 15,000 left."));
+  });
+
+  it("says the expenses the agent still holds, one sentence for each state, with the note in the member's own words", () => {
+    const at = new Date(NOW.getTime() - 60_000);
+    const expense = (status: ExpenseStatus, id: string, note = "la cancha del jueves") => ({ id, by: "Ana", amount: 45_000n * WARS, note, status, createdAt: at });
+    const items = english({
+      expenses: [
+        expense("new", "0"),
+        expense("sending", "1"),
+        expense("waiting", "2"),
+        expense("blocked", "3"),
+        expense("rejected", "4"),
+        expense("reimbursed", "5"),
+        expense("rejected", "6", ""),
+      ],
+    });
+    const what = "the ARS 45,000 expense that Ana added (la cancha del jueves)";
+    expect(items.map((i) => [i.text, i.pending ?? false])).toEqual([
+      [ars(`I'm looking at ${what}.`), true],
+      [ars(`I'm looking at ${what}.`), true],
+      [ars(`I've saved ${what}: I'll pay it back when the fund has the pesos.`), false],
+      [ars(`I couldn't process ${what}. I'll try again in a while.`), false],
+      [ars(`I can't pay back ${what}.`), false],
+      [ars("I can't pay back the ARS 45,000 expense that Ana added."), false],
+    ]);
+  });
+
+  it("says your own operations on their way, as 'You', and leaves a pass to pesos out", () => {
+    const operation = (kind: "vote" | "execute" | "contribute" | "cash-out", amount: bigint | null = null, token: "wars" | "usdt" | null = null) => ({
+      userOpHash: `0x${kind}${token}`,
+      kind,
+      amount,
+      token,
+      createdAt: NOW,
+    });
+    const items = english({
+      pending: [
+        operation("vote"),
+        operation("execute"),
+        operation("contribute", 10n * USDT_UNIT, "usdt"),
+        operation("contribute", 10_000n * WARS, "wars"),
+        operation("cash-out", 5_000n * WARS, "wars"),
+      ],
+    });
+    expect(items.map((i) => [i.actor, i.text, i.pending])).toEqual([
+      [{ kind: "member", name: "You" }, "Your vote is on its way.", true],
+      [{ kind: "member", name: "You" }, "Your action to carry out the proposal is on its way.", true],
+      [{ kind: "member", name: "You" }, ars("Your contribution of 10 USDT is on its way."), true],
+      [{ kind: "member", name: "You" }, ars("Your contribution of ARS 10,000 is on its way."), true],
+    ]);
   });
 });

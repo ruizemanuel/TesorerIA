@@ -9,16 +9,17 @@ import { currentUser } from "../lib/current-user";
 import { getDb } from "../lib/db/client";
 import { env } from "../lib/env";
 import { fundsOf } from "../lib/funds";
-import { getMessages } from "../lib/i18n/server";
+import type { Locale } from "../lib/i18n/locales";
+import { getLocale, getMessages } from "../lib/i18n/server";
 import { loadPublicFundScreen } from "../lib/read-fund";
 
 /**
  * The real group's fund for the portada, or null: a settings or chain problem never takes the portada down, but it
  * goes to the logs, so a portada without its live week doesn't go unnoticed.
  */
-async function liveFund(address: string) {
+async function liveFund(address: string, locale: Locale) {
   try {
-    return await loadPublicFundScreen(getAddress(address));
+    return await loadPublicFundScreen(getAddress(address), locale);
   } catch (error) {
     console.error(`The portada could not read the public fund: ${shortMessage(error)}`);
     return null;
@@ -38,6 +39,7 @@ function judgesLink(href: string, label: string) {
 export default async function Home() {
   await connection(); // it depends on who's asking and reads the chain, so it's never prerendered at build time
   const m = await getMessages();
+  const locale = await getLocale();
   const user = await currentUser();
   if (user) {
     const [first] = await fundsOf(await getDb(), user.id);
@@ -45,7 +47,7 @@ export default async function Home() {
   }
   const publicFund = env().PUBLIC_FUND;
   // Without the live list it's the same page, with "Entrar" in the place of "Ver un fondo real".
-  const real = publicFund ? await liveFund(publicFund) : null;
+  const real = publicFund ? await liveFund(publicFund, locale) : null;
 
   return (
     <main className="mx-auto grid max-w-[560px] gap-8 p-4 pt-8 lg:max-w-[1120px] lg:p-7 lg:pt-12">

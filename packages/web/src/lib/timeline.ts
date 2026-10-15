@@ -4,6 +4,7 @@ import { type BlockClock, blockTime, weekAt } from "./chain-time";
 import type { ExpenseStatus } from "./db/schema";
 import { ProposalAction } from "./fund-abi";
 import { formatPesos, formatUsdt } from "./format";
+import type { Messages } from "./i18n/messages";
 
 export type Actor = { kind: "agent" } | { kind: "member"; name: string } | { kind: "group" };
 
@@ -41,23 +42,16 @@ export type TimelinePending = {
 /** The agent's latest word on the USDT the fund still holds: it skipped converting it, or couldn't (F8). */
 export type ConversionHold = { usdt: bigint; code: string | null; at: Date };
 
-/** Why, as the agent says it (spec, 9.2: no jargon). */
-const HOLD_WHY: Record<SkipCode, string> = {
-  "daily-limit": "ya cambié todo lo que puedo cambiar por día en este fondo",
-  "price-reference": "el precio de referencia del dólar no está al día",
-  "pool-depth": "en el mercado donde los cambio no hay suficientes pesos",
-  "price-gap": "el precio del mercado se alejó más de 2 % del de referencia",
-  "price-floor": "el mercado paga menos de lo que permiten mis reglas",
-};
-
-function holdWhy(code: string | null): string {
-  return code !== null && Object.hasOwn(HOLD_WHY, code) ? HOLD_WHY[code as SkipCode] : "no pude hacer la operación";
+/** Why the agent hasn't converted, as it says it (spec, 9.2: no jargon): by its skip code, or the dictionary's `other`. */
+function holdWhy(m: Messages, code: string | null): string {
+  const why = m.timeline.holdWhy;
+  return code !== null && Object.hasOwn(why, code) ? why[code as SkipCode] : why.other;
 }
 
 /**
  * The fund's movements, newest first (spec, 9.2): its events, the expenses the agent still holds, and the
  * viewer's own operations on their way. The agent speaks in first person; a member's actions are in third;
- * what the group decided is the fund's.
+ * what the group decided is the fund's. Every sentence is the dictionary's (`m`), in the page's language (spec, 9.3).
  */
 export function buildTimeline({
   events,
@@ -76,6 +70,7 @@ export function buildTimeline({
   warsBalance,
   viewerIsMember,
   now,
+  m,
 }: {
   /** In chain order, oldest first, as readFundEvents gives them: the weekly cap in force is tracked along the way. */
   events: readonly FundEvent[];
@@ -99,9 +94,12 @@ export function buildTimeline({
   warsBalance: bigint;
   viewerIsMember: boolean;
   now: Date;
+  /** The page's dictionary: its sentences, and `m.locale` for the amounts. */
+  m: Messages;
 }): TimelineItem[] {
+  const t = m.timeline;
   const items: TimelineItem[] = [];
-  const who = (address: Address) => names.get(getAddress(address)) ?? "alguien";
+  const who = (address: Address) => names.get(getAddress(address)) ?? t.someone;
   const nowSeconds = BigInt(Math.floor(now.getTime() / 1000));
   const currentWeek = weekAt(now, startTime);
   const spent = new Map<bigint, bigint>();
@@ -118,8 +116,8 @@ export function buildTimeline({
     switch (event.eventName) {
       case "Contribution": {
         const { member, token, amount } = event.args;
-        const what = isAddressEqual(token, USDT) ? formatUsdt(amount) : formatPesos(amount);
-        items.push({ ...base, actor: { kind: "member", name: who(member) }, text: `${who(member)} aportó ${what}.` });
+        const what = isAddressEqual(token, USDT) ? formatUsdt(amount, m.locale) : formatPesos(amount, m.locale);
+        items.push({ ...base, actor: { kind: "member", name: who(member) }, text: t.contributed(who(member), what) });
         break;
       }
       case "Conversion": {
@@ -127,9 +125,8 @@ export function buildTimeline({
         items.push({
           ...base,
           actor: { kind: "agent" },
-          text: `Pasé a pesos los ${formatUsdt(usdtIn)} que entraron: ${formatPesos(warsOut)}.`,
-          // Plain words, no jargon (spec, 9): the exchange and the price feed stay out of what people read.
-          detail: "Los cambié a pesos y revisé que el precio no se alejara más de 2 % del precio de referencia del dólar, como dicen mis reglas.",
+          text: t.converted(formatUsdt(usdtIn, m.locale), formatPesos(warsOut, m.locale)),
+          detail: t.convertedDetail,
         });
         break;
       }
@@ -137,37 +134,37 @@ export function buildTimeline({
         const { member, amount, week } = event.args;
         const total = (spent.get(week) ?? 0n) + amount;
         spent.set(week, total);
-        const left = formatPesos(cap > total ? cap - total : 0n);
-        const tail = week === currentWeek ? `Quedan ${left} del tope de esta semana.` : `Quedaban ${left} del tope de esa semana.`;
+        const left = formatPesos(cap > total ? cap - total : 0n, m.locale);
+        const tail = week === currentWeek ? t.reimbursedLeftThisWeek(left) : t.reimbursedLeftThatWeek(left);
         items.push({
           ...base,
           actor: { kind: "agent" },
-          text: `Le devolví ${formatPesos(amount)} a ${who(member)} por ${agreedExpense}. ${tail}`,
-          detail: `Era ${agreedExpense}, que devuelvo sin votación hasta ${formatPesos(cap)} por semana.`,
+          text: `${t.reimbursed(formatPesos(amount, m.locale), who(member), agreedExpense)} ${tail}`,
+          detail: t.reimbursedDetail(agreedExpense, formatPesos(cap, m.locale)),
         });
         break;
       }
       case "ProposalCreated": {
         const { id, action, a, amount, proposer, note } = event.args;
-        const what = proposalText(action, a, amount, note, who, agreedExpense);
+        const what = proposalText(m, action, a, amount, note, who, agreedExpense);
         const byAgent = isAddressEqual(proposer, agent);
         const state = proposals.get(id);
         let tail = "";
         let proposalAction: TimelineAction | undefined;
         if (state !== undefined) {
           const hasVotes = state.votes >= votesRequired;
-          if (state.executed) tail = " Se aprobó.";
-          else if (state.deadline <= nowSeconds) tail = hasVotes ? " Venció sin ejecutarse." : " Venció sin los votos necesarios.";
+          if (state.executed) tail = t.proposal.approved;
+          else if (state.deadline <= nowSeconds) tail = hasVotes ? t.proposal.expiredWithVotes : t.proposal.expiredWithoutVotes;
           else if (hasVotes) {
             // The vote that completed the count couldn't execute it then (castVote): the fund may still be short.
             const short = action === ProposalAction.Pay && amount > warsBalance ? amount - warsBalance : 0n;
-            if (short > 0n) tail = ` Tiene los votos, pero al fondo le faltan ${formatPesos(short)} para pagarlo.`;
+            if (short > 0n) tail = t.proposal.short(formatPesos(short, m.locale));
             else {
-              tail = " Tiene los votos: falta ejecutarla.";
+              tail = t.proposal.needsCarryingOut;
               proposalAction = { kind: "execute", proposalId: id, canExecute: viewerIsMember && !executeOnItsWay };
             }
           } else {
-            tail = ` Lleva ${state.votes} de ${votesRequired} votos.`;
+            tail = t.proposal.votes(state.votes, votesRequired);
             proposalAction = {
               kind: "vote",
               proposalId: id,
@@ -184,46 +181,46 @@ export function buildTimeline({
           id: base.id,
           at: base.at,
           actor: byAgent ? { kind: "agent" } : { kind: "member", name: who(proposer) },
-          text: `${byAgent ? "Propuse" : `${who(proposer)} propuso`} ${what}.${tail}`,
-          detail: byAgent ? `Lo que no puedo devolver por mi cuenta lo tienen que votar: hacen falta ${votesRequired} votos.` : undefined,
+          text: joined(byAgent ? t.proposal.byAgent(what) : t.proposal.byMember(who(proposer), what), tail),
+          detail: byAgent ? t.proposal.agentDetail(votesRequired) : undefined,
           action: proposalAction,
         });
         break;
       }
       case "Payment": {
         const { member, amount } = event.args;
-        items.push({ ...base, actor: { kind: "group" }, text: `El fondo le pagó ${formatPesos(amount)} a ${who(member)}: la propuesta se aprobó.` });
+        items.push({ ...base, actor: { kind: "group" }, text: t.paid(formatPesos(amount, m.locale), who(member)) });
         break;
       }
       case "MemberAdded": {
-        const name = names.get(getAddress(event.args.member)) ?? "una cuenta nueva";
-        items.push({ ...base, actor: { kind: "group" }, text: `Se sumó ${name} al fondo.` });
+        const name = names.get(getAddress(event.args.member)) ?? t.newAccount;
+        items.push({ ...base, actor: { kind: "group" }, text: t.memberAdded(name) });
         break;
       }
       case "MemberRemoved":
-        items.push({ ...base, actor: { kind: "group" }, text: `${who(event.args.member)} dejó el fondo y se llevó su parte.` });
+        items.push({ ...base, actor: { kind: "group" }, text: t.memberRemoved(who(event.args.member)) });
         break;
       case "MemberReplaced":
-        items.push({ ...base, actor: { kind: "group" }, text: `${who(event.args.newMember)} cambió de cuenta.` });
+        items.push({ ...base, actor: { kind: "group" }, text: t.memberReplaced(who(event.args.newMember)) });
         break;
       case "WeeklyCapChanged":
         cap = event.args.cap;
-        items.push({ ...base, actor: { kind: "group" }, text: `El tope semanal de ${agreedExpense} ahora es ${formatPesos(cap)}.` });
+        items.push({ ...base, actor: { kind: "group" }, text: t.weeklyCapChanged(agreedExpense, formatPesos(cap, m.locale)) });
         break;
       case "VotesRequiredChanged":
-        items.push({ ...base, actor: { kind: "group" }, text: `Ahora hacen falta ${event.args.votes} votos para lo que no es ${agreedExpense}.` });
+        items.push({ ...base, actor: { kind: "group" }, text: t.votesRequiredChanged(event.args.votes, agreedExpense) });
         break;
       case "AgentChanged":
-        items.push({ ...base, actor: { kind: "group" }, text: "Cambió el agente del fondo." });
+        items.push({ ...base, actor: { kind: "group" }, text: t.agentChanged });
         break;
       case "FundClosed":
-        items.push({ ...base, actor: { kind: "group" }, text: "Se cerró el fondo y se repartió el saldo según lo que aportó cada uno." });
+        items.push({ ...base, actor: { kind: "group" }, text: t.fundClosed });
         break;
       case "RemainderDistributed": {
         // Rounding dust after closing, which anyone can "distribute" over and over (spec, 7.3).
         const dust = BigInt(memberCount);
         if (event.args.warsBalance < dust && event.args.usdtBalance < dust) break;
-        items.push({ ...base, actor: { kind: "group" }, text: "Se repartió lo que llegó después del cierre." });
+        items.push({ ...base, actor: { kind: "group" }, text: t.remainderDistributed });
         break;
       }
       // VoteCast and ProposalExecuted are folded into their proposal.
@@ -235,18 +232,18 @@ export function buildTimeline({
       id: "conversion-hold",
       at: conversionHold.at,
       actor: { kind: "agent" },
-      text: `Todavía no pasé a pesos ${formatUsdt(conversionHold.usdt)}: ${holdWhy(conversionHold.code)}. Lo vuelvo a intentar en unos minutos.`,
+      text: t.hold(formatUsdt(conversionHold.usdt, m.locale), holdWhy(m, conversionHold.code)),
     });
   }
 
   for (const expense of expenses) {
-    const what = `el gasto de ${formatPesos(expense.amount)} que cargó ${expense.by}${expense.note ? ` (${expense.note})` : ""}`;
+    const what = t.expense.what(formatPesos(expense.amount, m.locale), expense.by, expense.note);
     const text: Partial<Record<ExpenseStatus, string>> = {
-      new: `Estoy mirando ${what}.`,
-      sending: `Estoy mirando ${what}.`,
-      waiting: `Guardé ${what}: lo devuelvo cuando el fondo tenga los pesos.`,
-      blocked: `No pude procesar ${what}. Lo vuelvo a intentar en un rato.`,
-      rejected: `No puedo devolver ${what}.`,
+      new: t.expense.looking(what),
+      sending: t.expense.looking(what),
+      waiting: t.expense.waiting(what),
+      blocked: t.expense.blocked(what),
+      rejected: t.expense.rejected(what),
     };
     const sentence = text[expense.status];
     if (sentence === undefined) continue; // reimbursed or proposed: the chain tells it
@@ -259,17 +256,25 @@ export function buildTimeline({
     if (operation.kind === "create-fund" || operation.kind === "cash-out") continue;
     const text =
       operation.kind === "vote"
-        ? "Tu voto está en camino."
+        ? t.onItsWay.vote
         : operation.kind === "execute"
-          ? "Tu ejecución de la propuesta está en camino."
-          : `Tu aporte de ${operation.token === "usdt" ? formatUsdt(operation.amount ?? 0n) : formatPesos(operation.amount ?? 0n)} está en camino.`;
-    items.push({ id: `op:${operation.userOpHash}`, at: operation.createdAt, actor: { kind: "member", name: "Vos" }, text, pending: true });
+          ? t.onItsWay.execute
+          : t.onItsWay.contribution(
+              operation.token === "usdt" ? formatUsdt(operation.amount ?? 0n, m.locale) : formatPesos(operation.amount ?? 0n, m.locale),
+            );
+    items.push({ id: `op:${operation.userOpHash}`, at: operation.createdAt, actor: { kind: "member", name: t.you }, text, pending: true });
   }
 
   return items.sort((x, y) => y.at.getTime() - x.at.getTime());
 }
 
+/** A sentence and, when there is one, the one that goes after it. */
+function joined(sentence: string, after: string): string {
+  return after === "" ? sentence : `${sentence} ${after}`;
+}
+
 function proposalText(
+  m: Messages,
   action: number,
   a: Address,
   amount: bigint,
@@ -277,22 +282,23 @@ function proposalText(
   who: (address: Address) => string,
   agreedExpense: string,
 ): string {
+  const t = m.timeline.proposal;
   switch (action) {
     case ProposalAction.Pay:
-      return `pagarle ${formatPesos(amount)} a ${who(a)}${note ? ` por ${note}` : ""}`;
+      return t.pay(formatPesos(amount, m.locale), who(a), note);
     case ProposalAction.AddMember:
-      return "sumar a una cuenta nueva al fondo";
+      return t.addMember;
     case ProposalAction.RemoveMember:
-      return `sacar a ${who(a)} del fondo`;
+      return t.removeMember(who(a));
     case ProposalAction.ReplaceMember:
-      return `cambiar la cuenta de ${who(a)}`;
+      return t.replaceMember(who(a));
     case ProposalAction.SetWeeklyCap:
-      return `cambiar el tope semanal de ${agreedExpense} a ${formatPesos(amount)}`;
+      return t.setWeeklyCap(agreedExpense, formatPesos(amount, m.locale));
     case ProposalAction.SetVotesRequired:
-      return `pedir ${amount} votos para lo que no es ${agreedExpense}`;
+      return t.setVotesRequired(Number(amount), agreedExpense);
     case ProposalAction.SetAgent:
-      return "cambiar el agente";
+      return t.setAgent;
     default:
-      return "cerrar el fondo y repartir el saldo";
+      return t.close;
   }
 }

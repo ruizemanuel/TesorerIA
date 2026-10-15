@@ -111,7 +111,7 @@ async function main(address: Address, position: number) {
   if (person === undefined) throw new CheckError(`The fund has ${people.length} members`);
   const viewer = { id: person.id, name: person.name, account: getAddress(person.account) };
 
-  const screen = await loadFundScreen(address, viewer);
+  const screen = await loadFundScreen(address, viewer, { locale: "es" }); // for now the chat reads the fund in Spanish
   if (screen === null) throw new CheckError("The fund's screen could not be loaded for that member");
   const brief = fundBrief(screen, viewer.name, new Date());
   console.log(`Brief: ${brief.length} characters.${showBrief ? `\n${brief}` : ""}`);

@@ -1,6 +1,8 @@
 import { type Address, getAddress } from "viem";
 import { describe, expect, it } from "vitest";
 import { buildFundView } from "../src/lib/fund-view";
+import { en } from "../src/lib/i18n/en";
+import { es } from "../src/lib/i18n/es";
 import { ANA, BETO, CARO, WARS, snapshot } from "./support/fixtures";
 
 const NAMES = new Map<Address, string>([
@@ -8,7 +10,7 @@ const NAMES = new Map<Address, string>([
   [BETO, "Beto"],
 ]);
 
-function view(change: Parameters<typeof snapshot>[0] = {}, viewer: Address | null = ANA, joined = new Map<Address, bigint>()) {
+function view(change: Parameters<typeof snapshot>[0] = {}, viewer: Address | null = ANA, joined = new Map<Address, bigint>(), m = es) {
   return buildFundView({
     snapshot: snapshot(change),
     name: "Fútbol de los jueves",
@@ -18,6 +20,7 @@ function view(change: Parameters<typeof snapshot>[0] = {}, viewer: Address | nul
     joined,
     names: NAMES,
     viewer,
+    m,
   });
 }
 
@@ -34,6 +37,11 @@ describe("buildFundView", () => {
       { position: 3, member: CARO, name: "Miembro 3", isMe: false, owed: 20_000n * WARS },
     ]);
     expect(me?.owed).toBe(0n);
+  });
+
+  it("names a member without a name in the page's language: Member N in English", () => {
+    const { rows } = view({}, ANA, new Map(), en);
+    expect(rows.map((row) => row.name)).toEqual(["Ana", "Beto", "Member 3"]);
   });
 
   it("counts a later member's fees from the week they joined", () => {

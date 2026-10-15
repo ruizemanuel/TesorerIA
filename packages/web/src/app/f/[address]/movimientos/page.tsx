@@ -7,6 +7,7 @@ import { TimelineList } from "../../../../components/timeline-list";
 import { Card, CardTitle } from "../../../../components/ui";
 import { chatEnabled } from "../../../../lib/chat/model";
 import { currentUser } from "../../../../lib/current-user";
+import { getLocale } from "../../../../lib/i18n/server";
 import { loadFundScreen } from "../../../../lib/read-fund";
 import { safeNext } from "../../../../lib/safe-next";
 
@@ -17,7 +18,7 @@ export default async function MovementsPage({ params }: { params: Promise<{ addr
   if (!isAddress(address, { strict: false })) notFound();
   const user = await currentUser();
   if (user === null) redirect(`/entrar?next=${encodeURIComponent(safeNext(`/f/${address}/movimientos`))}`);
-  const screen = await loadFundScreen(address, user);
+  const screen = await loadFundScreen(address, user, { locale: await getLocale() });
   if (screen === null) notFound();
   const { view } = screen;
   const chat = chatEnabled();

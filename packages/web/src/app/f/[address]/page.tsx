@@ -11,6 +11,7 @@ import { PanelHost } from "../../../components/panel-host";
 import { receiptPanels } from "../../../components/receipt";
 import { chatEnabled } from "../../../lib/chat/model";
 import { currentUser } from "../../../lib/current-user";
+import { getLocale } from "../../../lib/i18n/server";
 import { loadFundScreen } from "../../../lib/read-fund";
 import { safeNext } from "../../../lib/safe-next";
 
@@ -27,7 +28,7 @@ export default async function FundPage({ params, searchParams }: { params: Promi
   if (!isAddress(address, { strict: false })) notFound();
   const user = await currentUser();
   if (user === null) redirect(`/entrar?next=${encodeURIComponent(safeNext(`/f/${address}`))}`);
-  const screen = await loadFundScreen(address, user);
+  const screen = await loadFundScreen(address, user, { locale: await getLocale() });
   if (screen === null) notFound();
   const here = `/f/${screen.view.address}`;
   const chat = chatEnabled();

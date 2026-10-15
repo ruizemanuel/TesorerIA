@@ -8,6 +8,8 @@ import { type Db, getDb } from "./db/client";
 import { decisions, expenses, funds, memberships, users } from "./db/schema";
 import { memberFundAbi } from "./fund-abi";
 import { type FundView, buildFundView } from "./fund-view";
+import type { Locale } from "./i18n/locales";
+import { messagesFor } from "./i18n/messages";
 import { ttlMemo } from "./memo";
 import { cashOutPending, lastOperationBlock, pendingOperations } from "./operations";
 import { waitForBlock } from "./read-your-writes";
@@ -46,13 +48,15 @@ export function checkHistory(snapshot: FundSnapshot, events: readonly FundEvent[
 
 /**
  * Everything one screen of a live fund needs (spec, 9.2). Null when the fund isn't ours, isn't live, or the
- * viewer may not see it: a member sees their fund; anyone sees a fund whose public view is on.
+ * viewer may not see it: a member sees their fund; anyone sees a fund whose public view is on. What the server writes
+ * on it (the movements, the names of a public view) is in `locale`, the page's language (spec, 9.3).
  */
 export async function loadFundScreen(
   address: Address,
   viewer: CurrentUser | null,
-  { publicView = false }: { publicView?: boolean } = {},
+  { publicView = false, locale }: { publicView?: boolean; locale: Locale },
 ): Promise<FundScreen | null> {
+  const m = messagesFor(locale);
   const db = await getDb();
   const [fund] = await db
     .select()
@@ -83,7 +87,7 @@ export async function loadFundScreen(
 
   // Names by account. A public view without the group's OK shows "Miembro N", in the contract's order.
   const names = new Map<Address, string>();
-  if (publicView && !fund.publicNames) snapshot.members.forEach((m, i) => names.set(getAddress(m), `Miembro ${i + 1}`));
+  if (publicView && !fund.publicNames) snapshot.members.forEach((member, i) => names.set(getAddress(member), m.common.member(i + 1)));
   else for (const p of people) names.set(getAddress(p.account), p.name);
 
   const joined = joinWeeks(events, (e) => weekAt(blockTime(e.blockNumber, clock), snapshot.startTime));
@@ -111,6 +115,7 @@ export async function loadFundScreen(
     joined,
     names,
     viewer: publicView ? null : (viewer?.account ?? null),
+    m,
   });
   const timeline = buildTimeline({
     events,
@@ -129,6 +134,7 @@ export async function loadFundScreen(
     warsBalance: snapshot.warsBalance,
     viewerIsMember: !publicView && viewerIsMember,
     now: new Date(Number(clock.timestamp) * 1000),
+    m,
   });
   const contributionOnItsWay = pending.some((operation) => operation.kind === "contribute");
   const cashOutOnItsWay = !publicView && viewer !== null && viewerIsMember ? await cashOutPending(db, viewer.id) : false;
@@ -136,16 +142,20 @@ export async function loadFundScreen(
 }
 
 /**
- * The public screen of the fund at `address` (spec, 9.2), read at most once every 45 seconds per fund: the portada
- * and /publico are open to anyone, and every hit would otherwise read the chain. It's the same for every viewer,
- * which is why only it is kept; a member's screens are always read fresh.
+ * The public screen of a fund (spec, 9.2), read at most once every 45 seconds per fund and per language: the portada
+ * and /publico are open to anyone, and every hit would otherwise read the chain. It's the same for every viewer of a
+ * language, which is why only it is kept; a member's screens are always read fresh. The key carries the language
+ * because the screen's sentences are written on the server (spec, 9.3): without it, a visitor in English could be
+ * handed the one written in Spanish for someone else.
  */
-const publicFundScreen = ttlMemo("public-fund-screen", 45_000, (address) =>
-  loadFundScreen(address as Address, null, { publicView: true }),
-);
+const publicFundScreen = ttlMemo("public-fund-screen", 45_000, (key) => {
+  const [locale, address] = key.split(":") as [Locale, Address];
+  return loadFundScreen(address, null, { publicView: true, locale });
+});
 
-export function loadPublicFundScreen(address: Address): Promise<FundScreen | null> {
-  return publicFundScreen(getAddress(address));
+/** The public screen of a fund, kept per fund and per language: its sentences are written on the server (spec, 9.3). */
+export function loadPublicFundScreen(address: Address, locale: Locale): Promise<FundScreen | null> {
+  return publicFundScreen(`${locale}:${getAddress(address)}`);
 }
 
 /**

@@ -1,6 +1,9 @@
 import type { ReactNode } from "react";
 import type { Messages } from "./es";
 
+/** A name, or the stand-in for one ("someone"), where it starts a sentence. */
+const sentenceStart = (name: string) => `${name.charAt(0).toUpperCase()}${name.slice(1)}`;
+
 /** Everything the web says, in English (spec, 9.3): the voice and the glossary of the spec, never a word of jargon. */
 export const en: Messages = {
   locale: "en",
@@ -14,6 +17,7 @@ export const en: Messages = {
     you: " (you)",
     confirm: "Confirm with your fingerprint, face or PIN",
     sending: "Sending…",
+    member: (n: number) => `Member ${n}`,
   },
   errors: {
     logIn: "Log in with your passkey.",
@@ -169,5 +173,66 @@ export const en: Messages = {
     beingCreated: "This fund is already being created.",
     running: "This fund is already running.",
     goToFund: "Go to the fund",
+  },
+  timeline: {
+    someone: "someone",
+    newAccount: "a new account",
+    you: "You",
+    contributed: (who: string, what: string) => `${sentenceStart(who)} contributed ${what}.`,
+    converted: (usdt: string, pesos: string) => `I changed the ${usdt} that came in into pesos: ${pesos}.`,
+    convertedDetail: "I changed them into pesos and checked that the price wasn't more than 2 % away from the dollar's reference price, as my rules say.",
+    reimbursed: (amount: string, who: string, expense: string) => `I paid ${who} back ${amount} for ${expense}.`,
+    reimbursedLeftThisWeek: (left: string) => `This week's cap has ${left} left.`,
+    reimbursedLeftThatWeek: (left: string) => `That week's cap had ${left} left.`,
+    reimbursedDetail: (expense: string, cap: string) => `It was ${expense}, which I pay back without a vote up to ${cap} per week.`,
+    proposal: {
+      byAgent: (what: string) => `I proposed ${what}.`,
+      byMember: (who: string, what: string) => `${sentenceStart(who)} proposed ${what}.`,
+      agentDetail: (votes: number) => `What I can't pay back on my own has to be voted on: ${votes} votes are needed.`,
+      pay: (amount: string, who: string, note: string) => `paying ${who} ${amount}${note ? ` for ${note}` : ""}`,
+      addMember: "adding a new account to the fund",
+      removeMember: (who: string) => `removing ${who} from the fund`,
+      replaceMember: (who: string) => `changing ${who}'s account`,
+      setWeeklyCap: (expense: string, cap: string) => `changing the weekly cap for ${expense} to ${cap}`,
+      setVotesRequired: (votes: number, expense: string) => `requiring ${votes} votes for anything that isn't ${expense}`,
+      setAgent: "changing the agent",
+      close: "closing the fund and splitting the balance",
+      approved: "It was approved.",
+      expiredWithVotes: "It expired without being carried out.",
+      expiredWithoutVotes: "It expired without the votes it needed.",
+      short: (amount: string) => `It has the votes, but the fund needs ${amount} more to pay it.`,
+      needsCarryingOut: "It has the votes: it still needs to be carried out.",
+      votes: (votes: number, required: number) => `It has ${votes} of ${required} votes.`,
+    },
+    paid: (amount: string, who: string) => `The fund paid ${who} ${amount}: the proposal was approved.`,
+    memberAdded: (who: string) => `${sentenceStart(who)} joined the fund.`,
+    memberRemoved: (who: string) => `${sentenceStart(who)} left the fund and took their share.`,
+    memberReplaced: (who: string) => `${sentenceStart(who)} switched accounts.`,
+    weeklyCapChanged: (expense: string, cap: string) => `The weekly cap for ${expense} is now ${cap}.`,
+    votesRequiredChanged: (votes: number, expense: string) => `Now ${votes} votes are needed for anything that isn't ${expense}.`,
+    agentChanged: "The fund's agent was changed.",
+    fundClosed: "The fund was closed and the balance was split according to what each person contributed.",
+    remainderDistributed: "What arrived after the fund closed was split among the members.",
+    hold: (usdt: string, why: string) => `I haven't changed ${usdt} into pesos yet: ${why}. I'll try again in a few minutes.`,
+    holdWhy: {
+      "daily-limit": "I've already changed all I can change in a day for this fund",
+      "price-reference": "the dollar's reference price isn't up to date",
+      "pool-depth": "the market where I change them doesn't have enough pesos",
+      "price-gap": "the market price is more than 2 % away from the reference",
+      "price-floor": "the market pays less than my rules allow",
+      other: "I couldn't make the trade",
+    },
+    expense: {
+      what: (amount: string, by: string, note: string) => `the ${amount} expense that ${by} added${note ? ` (${note})` : ""}`,
+      looking: (what: string) => `I'm looking at ${what}.`,
+      waiting: (what: string) => `I've saved ${what}: I'll pay it back when the fund has the pesos.`,
+      blocked: (what: string) => `I couldn't process ${what}. I'll try again in a while.`,
+      rejected: (what: string) => `I can't pay back ${what}.`,
+    },
+    onItsWay: {
+      vote: "Your vote is on its way.",
+      execute: "Your action to carry out the proposal is on its way.",
+      contribution: (what: string) => `Your contribution of ${what} is on its way.`,
+    },
   },
 };

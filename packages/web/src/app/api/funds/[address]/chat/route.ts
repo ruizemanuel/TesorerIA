@@ -50,7 +50,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ add
   // brief, the history as the model reads it, and the model itself.
   let screen: FundScreen | null;
   try {
-    screen = await loadFundScreen(address, user);
+    screen = await loadFundScreen(address, user, { locale: "es" }); // for now the chat reads the fund in Spanish
   } catch (error) {
     console.error(`The chat could not read fund ${address}: ${shortMessage(error)}`);
     return jsonError(503, CHAT_UNAVAILABLE);

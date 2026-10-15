@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { BRIEF_MOVEMENTS, BRIEF_TAG, briefText, fundBrief } from "../src/lib/chat/brief";
 import { formatPesos } from "../src/lib/format";
 import { buildFundView } from "../src/lib/fund-view";
+import { es } from "../src/lib/i18n/es";
 import type { FundScreen } from "../src/lib/read-fund";
 import type { TimelineItem } from "../src/lib/timeline";
 import { ANA, BETO, BLOCK, CARO, NOW, WARS, snapshot } from "./support/fixtures";
@@ -22,6 +23,7 @@ function screen(timeline: TimelineItem[] = [], contributed = [30_000n * WARS, 20
     joined: new Map(),
     names,
     viewer: ANA,
+    m: es,
   });
   return { fundId: "fund", block: BLOCK, view, timeline, viewerIsMember: true, publicView: false, contributionOnItsWay: false, cashOutOnItsWay: false };
 }

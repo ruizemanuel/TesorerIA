@@ -7,7 +7,7 @@ import type { Db } from "../src/lib/db/client";
 import { decisions, expenses, funds, operations } from "../src/lib/db/schema";
 import { formatPesos } from "../src/lib/format";
 import { finishOperation, recordOperation } from "../src/lib/operations";
-import { HistoryGapError, loadFundScreen, loadPublicFundScreen } from "../src/lib/read-fund";
+import { HistoryGapError, loadFundScreen as loadScreen, loadPublicFundScreen } from "../src/lib/read-fund";
 import { addLiveFund, addUser, randomAccount, testDb } from "./support/db";
 import { BLOCK, CLOCK, USDT_UNIT, WARS, event, snapshot } from "./support/fixtures";
 
@@ -37,6 +37,10 @@ vi.mock("@tesoreria/agent", async (importOriginal) => ({
 
 const waitForBlock = vi.hoisted(() => vi.fn(async () => true));
 vi.mock("../src/lib/read-your-writes", () => ({ waitForBlock }));
+
+/** The screens these tests read are in Spanish, unless a test says otherwise. */
+const loadFundScreen = (address: Address, viewer: CurrentUser | null, options: Partial<Parameters<typeof loadScreen>[2]> = {}) =>
+  loadScreen(address, viewer, { locale: "es", ...options });
 
 type Person = Awaited<ReturnType<typeof addUser>>;
 const asViewer = (person: Person): CurrentUser => ({ id: person.id, name: person.name, account: getAddress(person.account) });
@@ -154,8 +158,8 @@ describe("loadFundScreen: the public view", () => {
 
   it("is read once for many hits within 45 seconds, by address however it's written, and a member's screen never is", async () => {
     const address = await liveFund({ publicView: true });
-    const hits = await Promise.all([loadPublicFundScreen(address), loadPublicFundScreen(address.toLowerCase() as Address)]);
-    expect(await loadPublicFundScreen(address)).toBe(hits[0]);
+    const hits = await Promise.all([loadPublicFundScreen(address, "es"), loadPublicFundScreen(address.toLowerCase() as Address, "es")]);
+    expect(await loadPublicFundScreen(address, "es")).toBe(hits[0]);
     expect(hits[1]).toBe(hits[0]);
     expect(hits[0]).toMatchObject({ publicView: true });
     expect(agent.readFund).toHaveBeenCalledTimes(1);
@@ -165,11 +169,36 @@ describe("loadFundScreen: the public view", () => {
     expect(agent.readFund).toHaveBeenCalledTimes(3);
   });
 
+  it("keeps the public screen apart per language, each read once within 45 seconds", async () => {
+    const address = await liveFund({ publicView: true, publicNames: false });
+    agent.readFundEvents.mockResolvedValue([paidByBeto()]);
+    const spanish = (await loadPublicFundScreen(address, "es"))!;
+    const english = (await loadPublicFundScreen(address, "en"))!;
+    expect(spanish.view.rows[0]!.name).toBe("Miembro 1");
+    expect(english.view.rows[0]!.name).toBe("Member 1");
+    expect(texts(spanish)).toEqual([`Miembro 2 aportó ${formatPesos(10_000n * WARS)}.`]);
+    expect(texts(english)).toEqual([`Member 2 contributed ${formatPesos(10_000n * WARS, "en")}.`]);
+
+    // Each language is its own entry: asking again gives each its own screen back, without reading the chain again.
+    expect(await loadPublicFundScreen(address, "es")).toBe(spanish);
+    expect(await loadPublicFundScreen(address, "en")).toBe(english);
+    expect(await loadPublicFundScreen(address.toLowerCase() as Address, "en")).toBe(english);
+    expect(agent.readFund).toHaveBeenCalledTimes(2);
+  });
+
+  it("writes a member's own screen in the language asked, the names and the amounts too", async () => {
+    const address = await liveFund();
+    agent.readFundEvents.mockResolvedValue([paidByBeto()]);
+    const screen = (await loadFundScreen(address, asViewer(ana), { locale: "en" }))!;
+    expect(texts(screen)).toEqual([`Beto contributed ${formatPesos(10_000n * WARS, "en")}.`]);
+    expect(screen.view.rows.map((row) => row.name)).toEqual(["Ana", "Beto", "Caro"]);
+  });
+
   it("keeps no public screen of a fund that doesn't have one, so turning it on shows at once", async () => {
     const address = await liveFund({ publicView: false });
-    expect(await loadPublicFundScreen(address)).toBeNull();
+    expect(await loadPublicFundScreen(address, "es")).toBeNull();
     await db.update(funds).set({ publicView: true }).where(eq(funds.address, address));
-    expect(await loadPublicFundScreen(address)).toMatchObject({ publicView: true });
+    expect(await loadPublicFundScreen(address, "es")).toMatchObject({ publicView: true });
   });
 
   it("shows the names once the group says so, and still no one in particular is 'you'", async () => {

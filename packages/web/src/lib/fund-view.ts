@@ -1,5 +1,6 @@
 import { type FundSnapshot, memberDues } from "@tesoreria/agent";
 import { type Address, getAddress } from "viem";
+import type { Messages } from "./i18n/messages";
 
 export type MemberRow = {
   /** 1-based, in the contract's order: the founders as they joined, then whoever was added. */
@@ -49,6 +50,7 @@ export function buildFundView({
   joined,
   names,
   viewer,
+  m,
 }: {
   snapshot: FundSnapshot;
   name: string;
@@ -57,15 +59,17 @@ export function buildFundView({
   weeklyFee: bigint;
   /** The week each member joined, from joinWeeks; founders are left out (week 0). */
   joined: ReadonlyMap<Address, bigint>;
-  /** First names by checksummed account; a member without one shows as "Miembro N". */
+  /** First names by checksummed account; a member without one shows as "Miembro N" ("Member N" in English). */
   names: ReadonlyMap<Address, string>;
   viewer: Address | null;
+  /** The page's dictionary, for that name. */
+  m: Messages;
 }): FundView {
   const me = viewer === null ? null : getAddress(viewer);
   const dues = memberDues({ fund: snapshot, weeklyFee, joined });
   const rows = dues.map(({ member, owed }, i) => {
     const address = getAddress(member);
-    return { position: i + 1, member: address, name: names.get(address) ?? `Miembro ${i + 1}`, isMe: address === me, owed };
+    return { position: i + 1, member: address, name: names.get(address) ?? m.common.member(i + 1), isMe: address === me, owed };
   });
   const mine = rows.find((row) => row.isMe);
   let share = 0n;
