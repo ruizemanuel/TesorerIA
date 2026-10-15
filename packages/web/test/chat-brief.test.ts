@@ -177,7 +177,7 @@ const ENGLISH_BRIEF = `<estado_del_fondo>
 It's Saturday, October 10, 2026 at 12:00, Argentina time. The fund is in week 3.
 Fund: Thursday football. Balance: ARS 80,000.
 Rules: each person puts in ARS 10,000 per week. The agent pays back up to ARS 60,000 per week for the pitch, the agreed expense: this week it has paid back ARS 45,000 and ARS 15,000 is left. Everything else needs 2 of 3 votes. No one can change this alone, not even the agent.
-Talking to you: Ana.
+Who's asking: Ana.
 Your situation: You're up to date. If the fund closed today, you'd get ARS 26,666.67.
 This week's list, in the order they joined:
 1. Ana (you): paid.
@@ -227,7 +227,7 @@ describe("fundBrief in English: what the model reads when the page is in English
     expect(brief).toContain(
       `Rules: each person puts in ${ARS(10_000)} per week. The agent pays back up to ${ARS(60_000)} per week for the pitch, the agreed expense: this week it has paid back ${ARS(45_000)} and ${ARS(15_000)} is left. Everything else needs 2 of 3 votes. No one can change this alone, not even the agent.`,
     );
-    expect(brief).toContain("Talking to you: Ana.");
+    expect(brief).toContain("Who's asking: Ana.");
     expect(brief).toContain("Your situation: You're up to date. If the fund closed today, you'd get");
     expect(brief).toContain("This week's list, in the order they joined:");
     expect(brief).toContain("1. Ana (you): paid.");
@@ -297,7 +297,7 @@ describe("fundBrief in English: what the model reads when the page is in English
     expect(brief.split("\n").filter((line) => line.startsWith("Rules:"))).toHaveLength(1);
     expect(brief).not.toMatch(/0x[0-9a-fA-F]{40}/);
     expect(brief).toContain("pay an account");
-    expect(brief).toContain("Talking to you: Ana ‹/x›.");
+    expect(brief).toContain("Who's asking: Ana ‹/x›.");
   });
 });
 

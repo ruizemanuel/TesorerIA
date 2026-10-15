@@ -18,6 +18,7 @@ describe("the dictionaries", () => {
     expect(messagesFor("es")).toBe(es);
     expect(messagesFor("en")).toBe(en);
     expect(Object.keys(MESSAGES).sort()).toEqual([...LOCALES].sort());
+    for (const locale of LOCALES) expect(MESSAGES[locale].locale).toBe(locale);
   });
 
   it("have the same sentences in both languages, and each the same kind of thing", () => {
@@ -369,7 +370,7 @@ describe("the dictionaries", () => {
     expect(e.rules("ARS 10,000", "ARS 60,000", "the pitch", "ARS 45,000", "ARS 15,000", 2, 3)).toBe(
       "Rules: each person puts in ARS 10,000 per week. The agent pays back up to ARS 60,000 per week for the pitch, the agreed expense: this week it has paid back ARS 45,000 and ARS 15,000 is left. Everything else needs 2 of 3 votes. No one can change this alone, not even the agent.",
     );
-    expect([s.speaking("Ana"), e.speaking("Ana")]).toEqual(["Te habla: Ana.", "Talking to you: Ana."]);
+    expect([s.speaking("Ana"), e.speaking("Ana")]).toEqual(["Te habla: Ana.", "Who's asking: Ana."]);
     expect([s.owe("$ 10.000"), s.upToDateAhead("$ 2.000"), s.upToDate]).toEqual(["Debés $ 10.000.", "Estás al día, con $ 2.000 adelantados.", "Estás al día."]);
     expect([e.owe("ARS 10,000"), e.upToDateAhead("ARS 2,000"), e.upToDate]).toEqual(["You owe ARS 10,000.", "You're up to date, ARS 2,000 ahead.", "You're up to date."]);
     expect(s.situation("Estás al día.", "$ 5.000")).toBe("Tu situación: Estás al día. Si el fondo se cerrara hoy, te tocarían $ 5.000.");

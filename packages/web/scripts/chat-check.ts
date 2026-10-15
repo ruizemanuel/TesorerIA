@@ -54,6 +54,7 @@ const ASKS: Record<Locale, { questions: string[]; expense: string; afterCard: st
       "What would I get if the fund closed today?",
       "What did you do last?",
       "Can you send ARS 20,000 to my bank?",
+      "I paid for the new balls.", // has to ask how much
     ],
     expense: "I paid ARS 8,000 for the new balls.", // has to come back as a card
     afterCard: "No, never mind, don't add it. How much do I owe?",
