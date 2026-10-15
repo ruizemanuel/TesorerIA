@@ -262,4 +262,24 @@ test("three friends create a fund, contribute, get the agreed expense back, and 
   expect(await warsOf(ripio)).toBe(5_000n * 10n ** 18n);
   expect(await warsOf(await accountOf(ana))).toBe(0n); // all of it, to the last unit
   await expect(pesos.getByText("No tenés pesos en tu cuenta para pasar.")).toBeVisible();
+
+  // 12. Ana switches to English from "Tu cuenta" (the panel stays open, now in English), sees her fund and its activity
+  // in English, and switches back. The language is remembered: every page after a switch is a fresh navigation.
+  await open(ana, `${fund}?p=cuenta`);
+  await account.getByRole("button", { name: "English" }).click();
+  const yourAccount = ana.getByRole("dialog", { name: "Your account" });
+  await expect(yourAccount).toBeVisible();
+  await expect(ana.locator("html")).toHaveAttribute("lang", "en");
+  await yourAccount.getByRole("button", { name: "Back" }).click(); // the panel's back arrow, read out in English now
+  await expect(yourAccount).toBeHidden();
+  await expect(onScreen(ana, "In the fund")).toBeVisible();
+  await expect(onScreen(ana, /^You're up to date/)).toBeVisible();
+  await open(ana, `${fund}/movimientos`);
+  await expect(onScreen(ana, /I paid Ana back ARS\s5,000/)).toBeVisible();
+  await open(ana, `${fund}?p=cuenta`);
+  await yourAccount.getByRole("button", { name: "Español" }).click();
+  await expect(account).toBeVisible();
+  await expect(ana.locator("html")).toHaveAttribute("lang", "es-AR");
+  await open(ana, fund);
+  await expect(onScreen(ana, "En el fondo")).toBeVisible();
 });
