@@ -1,3 +1,5 @@
+"use client";
+
 import { useMessages } from "../lib/i18n/client";
 import { FIELD } from "./ui";
 
