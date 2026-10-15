@@ -148,7 +148,7 @@ export async function joinFund(
   const draft = await draftByInvite(db, code);
   if (draft === null) return fail(404, m.funds.badInvite);
   const joined = { ok: true, fundId: draft.id, status: "draft", address: null } as const;
-  if (draft.members.some((m) => m.userId === userId)) {
+  if (draft.members.some((member) => member.userId === userId)) {
     return draft.status === "live" ? { ok: true, fundId: draft.id, status: "live", address: draft.address } : joined;
   }
   if (draft.status === "live") return fail(409, m.funds.alreadyLive);
@@ -554,7 +554,7 @@ export async function deployStep(
   if (draft === null) return fail(404, m.errors.fundNotFound);
   if (draft.creatorId !== userId) return fail(403, m.funds.onlyCreator);
   if (draft.status === "live" && draft.address !== null) return { ok: true, address: draft.address };
-  const creator = draft.members.find((m) => m.userId === draft.creatorId)?.account;
+  const creator = draft.members.find((member) => member.userId === draft.creatorId)?.account;
   const [sent] = await db
     .select({
       userOpHash: operations.userOpHash,

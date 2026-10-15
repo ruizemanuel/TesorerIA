@@ -132,7 +132,7 @@ describe("sendCalls", () => {
 
     expect(error).toBeInstanceOf(OnItsWayError);
     expect(userMessage(error, es)).toMatch(/en camino/);
-    expect(error.message).not.toMatch(/prob[aá] de nuevo/i);
+    expect(userMessage(error, es)).not.toMatch(/prob[aá] de nuevo/i);
     expect(posted()).toEqual([
       ["/api/operations", expect.objectContaining({ userOpHash: OP })],
       ["/api/operations", expect.objectContaining({ userOpHash: OP })],

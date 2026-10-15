@@ -297,9 +297,14 @@ describe("chatInstructions: one fixed variant per language (spec, 9.3)", () => {
     expect(chatInstructions("en")).toBe(text);
   });
 
-  it("is always the same text, so each language's prompt cache holds", () => {
-    expect(chatInstructions("es")).toBe(chatInstructions("es"));
-    expect(chatInstructions("en")).toBe(chatInstructions("en"));
+  it("sends the same instructions whatever the fund's brief says, so each language's prompt cache holds", () => {
+    const model = "anthropic/claude-sonnet-5.5";
+    for (const locale of ["es", "en"] as const) {
+      const one = chatCall({ model, brief: `<${BRIEF_TAG}>\nthe first fund\n</${BRIEF_TAG}>`, locale });
+      const other = chatCall({ model, brief: `<${BRIEF_TAG}>\nanother fund, another week\n</${BRIEF_TAG}>`, locale });
+      expect(one.instructions[0]).toEqual(other.instructions[0]);
+      expect(one.instructions[0]).toMatchObject({ content: chatInstructions(locale) });
+    }
     expect(chatInstructions("en")).not.toBe(chatInstructions("es"));
   });
 

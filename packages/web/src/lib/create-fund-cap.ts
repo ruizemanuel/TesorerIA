@@ -64,7 +64,7 @@ export type CreateFundRoom = "ok" | "account" | "day";
 
 /**
  * Whether `claimCreateFundNonce` would sign `userId`'s createFund on `nonce` now, and if not, which cap stops it,
- * without claiming anything (M5): "Crear fondo" asks before it freezes the draft, so the creator reads why in Spanish
+ * without claiming anything (M5): "Crear fondo" asks before it freezes the draft, so the creator reads why in their language
  * instead of a generic failure from the paymaster. The creator's own cap first: the day's would send them back
  * tomorrow for nothing. Only a hint: the claim still decides, and someone may take the day's last one in between.
  */

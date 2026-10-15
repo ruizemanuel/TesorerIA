@@ -24,7 +24,10 @@ export const es = {
     /** The name of a member the fund has no name for (a public view without the group's OK shows them all this way). */
     member: (n: number) => `Miembro ${n}`,
   },
-  /** What the API answers when a request fails (spec, 9.3): the browser shows each as the route wrote it. */
+  /**
+   * What the API answers when a request fails (spec, 9.3): the browser shows each as the route wrote it. It also holds the
+   * browser's own errors, which `ErrorKey` names (`onItsWay`, `cancelled`, `generic`, `noPasskey`, `wrongPasskey`, `notCompleted`).
+   */
   errors: {
     logIn: "Entrá con tu passkey.",
     fundNotFound: "No encontramos ese fondo.",

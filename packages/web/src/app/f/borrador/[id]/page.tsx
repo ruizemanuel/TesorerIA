@@ -16,7 +16,7 @@ export default async function DraftPage({ params }: { params: Promise<{ id: stri
   const user = await currentUser();
   if (user === null) redirect(`/entrar?next=${encodeURIComponent(safeNext(`/f/borrador/${id}`))}`);
   const draft = await draftById(await getDb(), id);
-  if (draft === null || !draft.members.some((m) => m.userId === user.id)) notFound();
+  if (draft === null || !draft.members.some((member) => member.userId === user.id)) notFound();
   if (draft.status === "live" && draft.address) redirect(`/f/${draft.address}`);
   const m = await getMessages();
   const isCreator = draft.creatorId === user.id;
