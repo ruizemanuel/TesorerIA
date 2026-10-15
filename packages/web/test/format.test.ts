@@ -89,3 +89,73 @@ describe("initials", () => {
     expect(initials("  ")).toBe("?");
   });
 });
+
+describe("in English (spec, 9.3)", () => {
+  it("writes pesos as ARS, with commas for thousands and a point for cents", () => {
+    expect(formatPesos(87_500n * WARS_UNIT, "en")).toBe(`ARS${NBSP}87,500`);
+    expect(formatPesos(16_050n * WARS_UNIT + 37n * 10n ** 16n, "en")).toBe(`ARS${NBSP}16,050.37`);
+    expect(formatPesos(10n * WARS_UNIT + 5n * 10n ** 15n, "en")).toBe(`ARS${NBSP}10.01`);
+    expect(formatPesos(-45_000n * WARS_UNIT, "en")).toBe(`-ARS${NBSP}45,000`);
+    expect(formatPesos(0n, "en")).toBe(`ARS${NBSP}0`);
+  });
+
+  it("writes USDT with a point", () => {
+    expect(formatUsdt(10_500_000n, "en")).toBe(`10.5${NBSP}USDT`);
+    expect(formatUsdt(1_000n * USDT_UNIT, "en")).toBe(`1,000${NBSP}USDT`);
+  });
+
+  it("says what an account holds the English way", () => {
+    expect(heldAmounts({ wars: 45_000n * WARS_UNIT, usdt: 1_200_000n }, "en")).toEqual([`ARS${NBSP}45,000`, `1.2${NBSP}USDT`]);
+  });
+
+  it("reads amounts the way they're written in English, and rejects the ambiguous ones", () => {
+    expect(parsePesos("10,000", "en")).toBe(10_000n * WARS_UNIT);
+    expect(parsePesos("10000", "en")).toBe(10_000n * WARS_UNIT);
+    expect(parsePesos("10,000.50", "en")).toBe(10_000n * WARS_UNIT + 50n * 10n ** 16n);
+    expect(parsePesos("10000.5", "en")).toBe(10_000n * WARS_UNIT + 50n * 10n ** 16n);
+    expect(parsePesos("ARS 10,000", "en")).toBe(10_000n * WARS_UNIT);
+    expect(parsePesos(`ARS${NBSP}45,000`, "en")).toBe(45_000n * WARS_UNIT);
+    expect(parsePesos("1,000,000", "en")).toBe(1_000_000n * WARS_UNIT);
+    // A comma is always thousands, and a point always decimals: anything else is refused, never guessed.
+    for (const bad of ["10.000", "10,00", "10.000,50", "1,0000", "1,000.555", "0,500", "01,000", "10.5.5", "$ 10,000", "abc", "", "0", "0.00", "-5", "1e3"]) {
+      expect(parsePesos(bad, "en"), bad).toBeNull();
+    }
+  });
+
+  it("reads USDT written the English way", () => {
+    expect(parseUsdt("6.25", "en")).toBe(6_250_000n);
+    expect(parseUsdt(`6.25${NBSP}USDT`, "en")).toBe(6_250_000n);
+    expect(parseUsdt("1,000.5", "en")).toBe(1_000_500_000n);
+    expect(parseUsdt("6,25", "en")).toBeNull();
+    expect(parseUsdt("6.255", "en")).toBeNull();
+  });
+
+  it("says today, yesterday, the weekday and then the month in letters, in Buenos Aires time", () => {
+    const now = new Date("2026-10-10T15:00:00Z");
+    expect(formatWhen(new Date("2026-10-10T13:15:00Z"), now, "en")).toBe("Today, 10:15");
+    expect(formatWhen(new Date("2026-10-10T03:05:00Z"), now, "en")).toBe("Today, 0:05");
+    expect(formatWhen(new Date("2026-10-10T02:59:00Z"), now, "en")).toBe("Yesterday, 23:59");
+    expect(formatWhen(new Date("2026-10-05T12:00:00Z"), now, "en")).toBe("Monday, 9:00");
+    expect(formatWhen(new Date("2026-10-03T12:00:00Z"), now, "en")).toBe("Oct 3");
+  });
+});
+
+describe("an amount typed in one language and read in the other (Review Focus 2)", () => {
+  // A page shown in one language can be posted after the cookie changed in another tab: the server then reads the
+  // amount with the other language's rules. Only digits read the same in both, so anything else must be refused by
+  // one of them: never read as a different amount.
+  it("is refused, or read as the same amount", () => {
+    const written = ["10.000", "10,000", "10.5", "10,5", "1.000,50", "1,000.50", "1.5", "1,50", "100", "0,5", "0.5", "1.000.000", "1,000,000", "12.34", "12,34"];
+    let seed = 42;
+    const next = () => (seed = (seed * 1_103_515_245 + 12_345) % 2_147_483_648);
+    for (let i = 0; i < 5_000; i++) {
+      const length = 1 + (next() % 9);
+      written.push(Array.from({ length }, () => "0123456789.,"[next() % 12]).join(""));
+    }
+    for (const text of written) {
+      const es = parsePesos(text, "es");
+      const en = parsePesos(text, "en");
+      if (es !== null && en !== null) expect(en, text).toBe(es);
+    }
+  });
+});

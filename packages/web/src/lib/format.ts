@@ -1,3 +1,5 @@
+import type { Locale } from "./i18n/locales";
+
 /** A space that never breaks a line: "$ 87.500" stays in one piece (spec, 9.1). */
 export const NBSP = "\u00A0";
 export const WARS_UNIT = 10n ** 18n;
@@ -11,62 +13,83 @@ export const WARS_SPECK = CENT / 2n;
 export const USDT_SPECK = 5_000n;
 export const TIME_ZONE = "America/Argentina/Buenos_Aires";
 
-function thousands(digits: string): string {
-  return digits.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+/** How each language writes amounts and dates (spec, 9.3). The time is Buenos Aires's in both: the fund's. */
+const STYLE: Record<Locale, { intl: string; thousands: string; decimal: string; pesos: string; today: string; yesterday: string }> = {
+  es: { intl: "es-AR", thousands: ".", decimal: ",", pesos: "$", today: "Hoy", yesterday: "Ayer" },
+  en: { intl: "en-US", thousands: ",", decimal: ".", pesos: "ARS", today: "Today", yesterday: "Yesterday" },
+};
+
+function thousands(digits: string, separator: string): string {
+  return digits.replace(/\B(?=(\d{3})+(?!\d))/g, separator);
 }
 
-/** Pesos from wARS units: "$ 87.500", or "$ 16.050,37" when there are cents, rounded half up (spec, 9.1). */
-export function formatPesos(units: bigint): string {
+/**
+ * Pesos from wARS units: "$ 87.500" or "$ 16.050,37" in Spanish, "ARS 87,500" or "ARS 16,050.37" in English, rounded
+ * half up (spec, 9.1 and 9.3). In English "$" would read as dollars.
+ */
+export function formatPesos(units: bigint, locale: Locale = "es"): string {
+  const style = STYLE[locale];
   const negative = units < 0n;
   const cents = ((negative ? -units : units) + CENT / 2n) / CENT;
   const rest = cents % 100n;
-  const text = `$${NBSP}${thousands((cents / 100n).toString())}${rest === 0n ? "" : `,${rest.toString().padStart(2, "0")}`}`;
+  const whole = thousands((cents / 100n).toString(), style.thousands);
+  const text = `${style.pesos}${NBSP}${whole}${rest === 0n ? "" : `${style.decimal}${rest.toString().padStart(2, "0")}`}`;
   return negative ? `-${text}` : text;
 }
 
-/** USDT from its 6-decimal units: "10 USDT", "10,5 USDT". */
-export function formatUsdt(units: bigint): string {
+/** USDT from its 6-decimal units: "10 USDT", "10,5 USDT" ("10.5 USDT" in English). */
+export function formatUsdt(units: bigint, locale: Locale = "es"): string {
+  const style = STYLE[locale];
   const cents = (units + 5_000n) / 10_000n;
   const rest = cents % 100n;
-  const decimals = rest === 0n ? "" : `,${rest.toString().padStart(2, "0").replace(/0$/, "")}`;
-  return `${thousands((cents / 100n).toString())}${decimals}${NBSP}USDT`;
+  const decimals = rest === 0n ? "" : `${style.decimal}${rest.toString().padStart(2, "0").replace(/0$/, "")}`;
+  return `${thousands((cents / 100n).toString(), style.thousands)}${decimals}${NBSP}USDT`;
 }
 
 /**
  * What a member's own account holds, as the inicio says it ("En tu cuenta tenés …"): pesos, then USDT, leaving out
  * what rounds to zero, since a speck of either says nothing.
  */
-export function heldAmounts({ wars, usdt }: { wars: bigint; usdt: bigint }): string[] {
+export function heldAmounts({ wars, usdt }: { wars: bigint; usdt: bigint }, locale: Locale = "es"): string[] {
   const amounts: string[] = [];
-  if (wars >= WARS_SPECK) amounts.push(formatPesos(wars));
-  if (usdt >= USDT_SPECK) amounts.push(formatUsdt(usdt));
+  if (wars >= WARS_SPECK) amounts.push(formatPesos(wars, locale));
+  if (usdt >= USDT_SPECK) amounts.push(formatUsdt(usdt, locale));
   return amounts;
 }
 
+/** What an amount looks like in each language: thousands in groups of three, then up to two decimals. */
+const AMOUNT: Record<Locale, { prefix: RegExp; shape: RegExp }> = {
+  es: { prefix: /^\$/, shape: /^([1-9]\d{0,2}(?:\.\d{3})+|\d+)(?:,(\d{1,2}))?$/ },
+  en: { prefix: /^ARS/i, shape: /^([1-9]\d{0,2}(?:,\d{3})+|\d+)(?:\.(\d{1,2}))?$/ },
+};
+
 /**
- * An amount typed in pesos, as wARS units, or null. The Argentine way: dots for thousands (in groups of three)
- * and a comma for up to two decimals. A dot that isn't a thousands separator ("10.5") is refused instead of
- * guessed, and so is a group that starts with a zero ("0.500" is not 500), and anything that isn't more than zero.
+ * An amount typed in pesos, as wARS units, or null. Each language has its own way: in Spanish dots for thousands and
+ * a comma for up to two decimals ("10.000,50"); in English the other way around ("10,000.50"). A separator that
+ * can't be what the language says it is ("10.5" in Spanish, "10.000" in English) is refused instead of guessed, and
+ * so is a group that starts with a zero, and anything that isn't more than zero. The screen's own prefix ("$" or
+ * "ARS") may come along, so an amount copied out of the app reads back.
  */
-export function parsePesos(input: string): bigint | null {
+export function parsePesos(input: string, locale: Locale = "es"): bigint | null {
+  const { prefix, shape } = AMOUNT[locale];
   // `\s` takes the no-break space too, so "$ 45.000" copied out of the app's own screens reads back.
-  const text = input.replace(/\s/g, "").replace(/^\$/, "");
-  const match = /^([1-9]\d{0,2}(?:\.\d{3})+|\d+)(?:,(\d{1,2}))?$/.exec(text);
+  const text = input.replace(/\s/g, "").replace(prefix, "");
+  const match = shape.exec(text);
   if (match === null) return null;
-  const whole = (match[1] ?? "").replaceAll(".", "");
+  const whole = (match[1] ?? "").replace(/\D/g, "");
   const decimals = (match[2] ?? "").padEnd(2, "0");
   const units = BigInt(whole) * WARS_UNIT + BigInt(decimals) * CENT;
   return units > 0n ? units : null;
 }
 
-/** An amount typed in USDT, as USDT units, or null: written like pesos (parsePesos), to the cent, with or without "USDT". */
-export function parseUsdt(input: string): bigint | null {
-  const asPesos = parsePesos(input.replace(/\s*USDT\s*$/i, ""));
+/** An amount typed in USDT, as USDT units, or null: written like pesos in that language (parsePesos), to the cent, with or without "USDT". */
+export function parseUsdt(input: string, locale: Locale = "es"): bigint | null {
+  const asPesos = parsePesos(input.replace(/\s*USDT\s*$/i, ""), locale);
   return asPesos === null ? null : asPesos / 10n ** 12n;
 }
 
-function parts(date: Date, options: Intl.DateTimeFormatOptions): Record<string, string> {
-  const formatted = new Intl.DateTimeFormat("es-AR", { timeZone: TIME_ZONE, ...options }).formatToParts(date);
+function parts(date: Date, options: Intl.DateTimeFormatOptions, intl = "es-AR"): Record<string, string> {
+  const formatted = new Intl.DateTimeFormat(intl, { timeZone: TIME_ZONE, ...options }).formatToParts(date);
   return Object.fromEntries(formatted.map((part) => [part.type, part.value]));
 }
 
@@ -75,16 +98,25 @@ function dayNumber(date: Date): number {
   return Date.UTC(Number(year), Number(month) - 1, Number(day)) / 86_400_000;
 }
 
-/** "Hoy, 10:15", "Ayer, 18:02", "Lunes, 9:00" within the last week, then "12/10" (spec, 9.2). */
-export function formatWhen(date: Date, now: Date): string {
+/**
+ * "Hoy, 10:15", "Ayer, 18:02", "Lunes, 9:00" within the last week, then "12/10" (spec, 9.2); in English "Today, 10:15",
+ * "Yesterday, 18:02", "Monday, 9:00", then "Oct 12", since "12/10" reads differently in England and in the US (9.3).
+ * Always on a 24-hour clock, in Buenos Aires time.
+ */
+export function formatWhen(date: Date, now: Date, locale: Locale = "es"): string {
+  const style = STYLE[locale];
   const { hour, minute } = parts(date, { hour: "numeric", minute: "2-digit", hourCycle: "h23" });
   const time = `${Number(hour)}:${minute}`;
   const daysAgo = dayNumber(now) - dayNumber(date);
-  if (daysAgo === 0) return `Hoy, ${time}`;
-  if (daysAgo === 1) return `Ayer, ${time}`;
+  if (daysAgo === 0) return `${style.today}, ${time}`;
+  if (daysAgo === 1) return `${style.yesterday}, ${time}`;
   if (daysAgo > 1 && daysAgo < 7) {
-    const { weekday = "" } = parts(date, { weekday: "long" });
+    const { weekday = "" } = parts(date, { weekday: "long" }, style.intl);
     return `${weekday.charAt(0).toUpperCase()}${weekday.slice(1)}, ${time}`;
+  }
+  if (locale === "en") {
+    const { day, month } = parts(date, { day: "numeric", month: "short" }, style.intl);
+    return `${month} ${day}`;
   }
   const { day, month } = parts(date, { day: "numeric", month: "numeric" });
   return `${day}/${month}`;
