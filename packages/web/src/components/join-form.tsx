@@ -48,13 +48,11 @@ export function JoinForm({ code, loggedIn }: { code: string; loggedIn: boolean }
       {!hasAccount && (
         <>
           <PersonFields />
-          <p className="text-[13px] text-muted">
-            Tu cuenta se protege con una passkey: tu huella, tu cara o el PIN del teléfono. No hay contraseña ni frase para guardar.
-          </p>
+          <p className="text-[13px] text-muted">{m.invitation.passkeyNote}</p>
         </>
       )}
       <Button type="submit" disabled={busy}>
-        {busy ? "Confirmá con tu huella, tu cara o el PIN" : "Sumarme"}
+        {busy ? m.common.confirm : m.invitation.join}
       </Button>
       <p role="alert" className="text-sm text-owe">
         {error}

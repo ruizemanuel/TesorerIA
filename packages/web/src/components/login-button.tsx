@@ -30,7 +30,7 @@ export function LoginButton({ next = "/" }: { next?: string }) {
           }
         }}
       >
-        {busy ? "Confirmá con tu huella, tu cara o el PIN" : "Entrar con mi passkey"}
+        {busy ? m.common.confirm : m.login.button}
       </Button>
       <p role="alert" className="text-sm text-owe">
         {error}

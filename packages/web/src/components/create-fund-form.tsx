@@ -52,24 +52,24 @@ export function CreateFundForm({ loggedIn }: { loggedIn: boolean }) {
     >
       {!hasAccount && <PersonFields />}
       <label className="grid gap-1">
-        <span className="font-semibold">Nombre del fondo</span>
-        <input className={FIELD} name="name" required maxLength={40} placeholder="Fútbol de los jueves" />
+        <span className="font-semibold">{m.create.fundName}</span>
+        <input className={FIELD} name="name" required maxLength={40} placeholder={m.create.defaults.fundNamePlaceholder} />
       </label>
       <label className="grid gap-1">
-        <span className="font-semibold">Cuota de cada uno por semana</span>
-        <input className={`${FIELD} money`} name="weeklyFee" required inputMode="decimal" defaultValue="10.000" />
+        <span className="font-semibold">{m.create.weeklyFee}</span>
+        <input className={`${FIELD} money`} name="weeklyFee" required inputMode="decimal" defaultValue={m.create.defaults.weeklyFee} />
       </label>
       <label className="grid gap-1">
-        <span className="font-semibold">Gasto acordado</span>
-        <input className={FIELD} name="agreedExpense" required maxLength={40} defaultValue="la cancha" />
-        <span className="text-[13px] text-muted">El agente lo devuelve sin votación, hasta el tope de cada semana.</span>
+        <span className="font-semibold">{m.create.agreedExpense}</span>
+        <input className={FIELD} name="agreedExpense" required maxLength={40} defaultValue={m.create.defaults.agreedExpense} />
+        <span className="text-[13px] text-muted">{m.create.agreedExpenseHint}</span>
       </label>
       <label className="grid gap-1">
-        <span className="font-semibold">Tope por semana para ese gasto</span>
-        <input className={`${FIELD} money`} name="weeklyCap" required inputMode="decimal" defaultValue="60.000" />
+        <span className="font-semibold">{m.create.weeklyCap}</span>
+        <input className={`${FIELD} money`} name="weeklyCap" required inputMode="decimal" defaultValue={m.create.defaults.weeklyCap} />
       </label>
       <Button type="submit" disabled={busy}>
-        {busy ? "Creando…" : hasAccount ? "Crear fondo" : "Crear mi passkey y el fondo"}
+        {busy ? m.create.creating : hasAccount ? m.create.submit : m.create.submitWithPasskey}
       </Button>
       <p role="alert" className="text-sm text-owe">
         {error}

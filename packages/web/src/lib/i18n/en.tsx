@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import type { Messages } from "./es";
 
 /** Everything the web says, in English (spec, 9.3): the voice and the glossary of the spec, never a word of jargon. */
@@ -8,6 +9,11 @@ export const en: Messages = {
   },
   language: {
     label: "Language",
+  },
+  common: {
+    you: " (you)",
+    confirm: "Confirm with your fingerprint, face or PIN",
+    sending: "Sending…",
   },
   errors: {
     logIn: "Log in with your passkey.",
@@ -67,5 +73,101 @@ export const en: Messages = {
     amountZero: "The amount has to be more than zero.",
     amountTooBig: (max: string) => `The amount can't be more than ${max}.`,
     noteTooLong: (max: number) => `The note can be up to ${max} letters long.`,
+  },
+  home: {
+    title: "The group's treasury, without a treasurer.",
+    lead: "A fund in pesos for your group, run by an agent with limits that no one can change alone.",
+    create: "Create a fund",
+    seeReal: "See a real fund",
+    logIn: "Log in",
+    haveFund: "I already have a fund: log in",
+    live: (name: ReactNode) => <>{name}, live.</>,
+    howItWorks: "How it works",
+    steps: [
+      "You set up the fund and add your friends with a link.",
+      "Each one puts in their weekly dues, in pesos or in USDT.",
+      "The agent pays back what was agreed, keeps track of who is behind, and everything else is voted on.",
+    ],
+    judges: (celo: ReactNode, contract: ReactNode, agent: ReactNode, code: ReactNode) => (
+      <>
+        Runs on {celo}, with {contract}, {agent} and {code}.
+      </>
+    ),
+    judgesLinks: {
+      celo: "Celo mainnet",
+      contract: "the verified contract",
+      agent: "the agent registered in ERC-8004 (#9887)",
+      code: "the open-source code",
+    },
+  },
+  notFound: {
+    title: "We couldn't find that page",
+    body: "The link may be wrong, or you may not be part of this fund.",
+    home: "Go to the home page",
+  },
+  login: {
+    title: "Log in to your fund",
+    lead: "Use the passkey you created when you joined. Your phone will ask for it.",
+    firstTime: (create: ReactNode) => <>First time here? Open the invitation link you were sent, or {create}.</>,
+    createLink: "create a fund",
+    button: "Log in with my passkey",
+    logOut: "Log out",
+  },
+  create: {
+    title: "Set up the group's fund",
+    lead: "Next we'll give you a link to send on WhatsApp. When at least 3 people have joined, you create the fund. The votes needed are chosen at that point.",
+    fundName: "Fund name",
+    weeklyFee: "Each person's weekly dues",
+    agreedExpense: "Agreed expense",
+    agreedExpenseHint: "The agent pays it back without a vote, up to each week's cap.",
+    weeklyCap: "Weekly cap for that expense",
+    defaults: {
+      fundNamePlaceholder: "Thursday football",
+      weeklyFee: "10,000",
+      agreedExpense: "the pitch",
+      weeklyCap: "60,000",
+    },
+    creating: "Creating…",
+    submit: "Create fund",
+    submitWithPasskey: "Create my passkey and the fund",
+  },
+  deploy: {
+    joined: "Who has joined",
+    shareTitle: "Share this link with the group",
+    waitingForMembers: "When at least 3 people have joined, you'll be able to create the fund.",
+    waitingForCreator: (creator: string) => `When everyone is in, ${creator} creates the fund and it gets going.`,
+    votesNeeded: "Votes needed for anything that isn't the agreed expense",
+    votesOption: (n: number, members: number) => `${n} of ${members}`,
+    creating: "Creating fund…",
+    submit: "Create fund",
+  },
+  share: {
+    whatsApp: (fundName: string, url: string) => `Join the fund "${fundName}" on TesorerIA: ${url}`,
+    send: "Send on WhatsApp",
+    copy: "Copy the link",
+    copied: "Copied",
+  },
+  person: {
+    name: "Your name",
+  },
+  invitation: {
+    title: (creator: string, fund: ReactNode) => (
+      <>
+        {creator} invited you to {fund}
+      </>
+    ),
+    rules: (fee: ReactNode, cap: ReactNode, expense: string) => (
+      <>
+        Each person puts in {fee} per week. The agent pays back up to {cap} per week for {expense}. Everything else is voted on. No one can change this
+        alone, not even the agent.
+      </>
+    ),
+    passkeyNote: "Your account is protected by a passkey: your fingerprint, your face or your phone's PIN. There's no password or phrase to keep.",
+    join: "Join",
+    alreadyJoined: (names: string) => `Already joined: ${names}.`,
+    full: "This fund is already full.",
+    beingCreated: "This fund is already being created.",
+    running: "This fund is already running.",
+    goToFund: "Go to the fund",
   },
 };

@@ -50,7 +50,7 @@ export function DeployForm({ fundId, memberCount, chosenVotes }: { fundId: strin
   return (
     <div className="grid gap-3">
       <label className="grid gap-1">
-        <span className="font-semibold">Votos necesarios para lo que no es el gasto acordado</span>
+        <span className="font-semibold">{m.deploy.votesNeeded}</span>
         <select
           className="min-h-12 rounded-[14px] border border-field-line bg-surface px-3"
           value={votes}
@@ -58,7 +58,7 @@ export function DeployForm({ fundId, memberCount, chosenVotes }: { fundId: strin
         >
           {options.map((n) => (
             <option key={n} value={n}>
-              {n} de {memberCount}
+              {m.deploy.votesOption(n, memberCount)}
             </option>
           ))}
         </select>
@@ -88,7 +88,7 @@ export function DeployForm({ fundId, memberCount, chosenVotes }: { fundId: strin
           }
         }}
       >
-        {step === "signing" ? "Confirmá con tu huella, tu cara o el PIN" : step === "sending" ? "Creando fondo…" : "Crear fondo"}
+        {step === "signing" ? m.common.confirm : step === "sending" ? m.deploy.creating : m.deploy.submit}
       </Button>
       <p role="alert" className="text-sm text-owe">
         {error}

@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import type { Locale } from "./locales";
 
 /**
@@ -14,6 +15,12 @@ export const es = {
   },
   language: {
     label: "Idioma",
+  },
+  /** What more than one screen says. */
+  common: {
+    you: " (vos)",
+    confirm: "Confirmá con tu huella, tu cara o el PIN",
+    sending: "Enviando…",
   },
   /** What the API answers when a request fails (spec, 9.3): the browser shows each as the route wrote it. */
   errors: {
@@ -78,6 +85,117 @@ export const es = {
     amountZero: "El monto tiene que ser más que cero.",
     amountTooBig: (max: string) => `El monto no puede pasar de ${max}.`,
     noteTooLong: (max: number) => `La nota puede tener hasta ${max} letras.`,
+  },
+  /** The portada (spec, 9.2). */
+  home: {
+    title: "La plata del grupo, sin tesorero.",
+    lead: "Un fondo en pesos para tu grupo, que administra un agente con límites que nadie puede cambiar solo.",
+    create: "Crear un fondo",
+    seeReal: "Ver un fondo real",
+    logIn: "Entrar",
+    haveFund: "Ya tengo un fondo: entrar",
+    /** Above the real group's week: `name` stands out. */
+    live: (name: ReactNode) => <>{name}, en vivo.</>,
+    howItWorks: "Cómo funciona",
+    steps: [
+      "Armás el fondo y sumás a tus amigos con un link.",
+      "Cada uno aporta su cuota, en pesos o en USDT.",
+      "El agente devuelve lo acordado, lleva la cuenta de quién debe, y lo demás se vota.",
+    ],
+    /** For the judges: each argument is a link, the text of which is in `judgesLinks`. */
+    judges: (celo: ReactNode, contract: ReactNode, agent: ReactNode, code: ReactNode) => (
+      <>
+        Corre en {celo}, con {contract}, {agent} y {code}.
+      </>
+    ),
+    judgesLinks: {
+      celo: "Celo mainnet",
+      contract: "el contrato verificado",
+      agent: "el agente registrado en ERC-8004 (#9887)",
+      code: "el código abierto",
+    },
+  },
+  /** Every `notFound()` of the app. */
+  notFound: {
+    title: "No encontramos esa página",
+    body: "Puede que el link esté mal o que no seas parte de este fondo.",
+    home: "Ir al inicio",
+  },
+  /** Logging in and out. */
+  login: {
+    title: "Entrá a tu fondo",
+    lead: "Usá la passkey que creaste cuando te sumaste. Tu teléfono te la va a pedir.",
+    /** `create` is the link to create a fund, with `createLink` as its text. */
+    firstTime: (create: ReactNode) => <>¿Es tu primera vez? Entrá con el link de invitación que te pasaron, o {create}.</>,
+    createLink: "creá un fondo",
+    button: "Entrar con mi passkey",
+    logOut: "Salir",
+  },
+  /** Creating a fund (spec, 9, screen 7). */
+  create: {
+    title: "Armá el fondo del grupo",
+    lead: "Después te damos un link para pasar por WhatsApp. Cuando se sumen al menos 3, lo creás. Los votos necesarios se eligen en ese momento.",
+    fundName: "Nombre del fondo",
+    weeklyFee: "Cuota de cada uno por semana",
+    agreedExpense: "Gasto acordado",
+    agreedExpenseHint: "El agente lo devuelve sin votación, hasta el tope de cada semana.",
+    weeklyCap: "Tope por semana para ese gasto",
+    /** What the form starts with. The amounts are written the way this language writes them: `readDraft` reads them back. */
+    defaults: {
+      fundNamePlaceholder: "Fútbol de los jueves",
+      weeklyFee: "10.000",
+      agreedExpense: "la cancha",
+      weeklyCap: "60.000",
+    },
+    creating: "Creando…",
+    submit: "Crear fondo",
+    submitWithPasskey: "Crear mi passkey y el fondo",
+  },
+  /** The draft: who joined, the link, and creating the fund (spec, 9). */
+  deploy: {
+    joined: "Se sumaron",
+    shareTitle: "Compartí este link en el grupo",
+    waitingForMembers: "Cuando se sumen al menos 3 personas, vas a poder crear el fondo.",
+    waitingForCreator: (creator: string) => `Cuando estén todos, ${creator} crea el fondo y empieza a andar.`,
+    votesNeeded: "Votos necesarios para lo que no es el gasto acordado",
+    votesOption: (n: number, members: number) => `${n} de ${members}`,
+    creating: "Creando fondo…",
+    submit: "Crear fondo",
+  },
+  /** The invitation link, to copy or send. */
+  share: {
+    /** What goes in the WhatsApp message: in the language of whoever shares. */
+    whatsApp: (fundName: string, url: string) => `Sumate al fondo "${fundName}" en TesorerIA: ${url}`,
+    send: "Mandar por WhatsApp",
+    copy: "Copiar el link",
+    copied: "Copiado",
+  },
+  /** The fields of someone without an account yet. */
+  person: {
+    name: "Tu nombre",
+  },
+  /** The invitation (spec, 9, screen 1). */
+  invitation: {
+    /** `fund` stands out (the fund's name, in italics). */
+    title: (creator: string, fund: ReactNode) => (
+      <>
+        {creator} te invitó a {fund}
+      </>
+    ),
+    /** The fund's rules: `fee` and `cap` stand out as amounts; `expense` is what the creator wrote. */
+    rules: (fee: ReactNode, cap: ReactNode, expense: string) => (
+      <>
+        Cada uno pone {fee} por semana. El agente devuelve hasta {cap} por semana por {expense}. Todo lo demás se vota. Nadie puede cambiar esto solo, ni
+        el agente.
+      </>
+    ),
+    passkeyNote: "Tu cuenta se protege con una passkey: tu huella, tu cara o el PIN del teléfono. No hay contraseña ni frase para guardar.",
+    join: "Sumarme",
+    alreadyJoined: (names: string) => `Ya se sumaron: ${names}.`,
+    full: "Este fondo ya está completo.",
+    beingCreated: "Este fondo ya se está creando.",
+    running: "Este fondo ya está andando.",
+    goToFund: "Ir al fondo",
   },
 };
 

@@ -1,9 +1,11 @@
 import { notFound } from "next/navigation";
 import { JoinForm } from "../../../components/join-form";
+import { LanguageSwitch } from "../../../components/language-switch";
 import { ButtonLink, Card, Logo, Money } from "../../../components/ui";
 import { currentUser } from "../../../lib/current-user";
 import { getDb } from "../../../lib/db/client";
 import { draftByInvite } from "../../../lib/funds";
+import { getLocale, getMessages } from "../../../lib/i18n/server";
 import { invitationFor } from "../../../lib/invitation";
 
 /** The invitation (spec, 9, screen 1). */
@@ -11,18 +13,23 @@ export default async function InvitePage({ params }: { params: Promise<{ code: s
   const { code } = await params;
   const draft = await draftByInvite(await getDb(), code);
   if (draft === null) notFound();
+  const [locale, m] = await Promise.all([getLocale(), getMessages()]);
   const user = await currentUser();
-  const invitation = invitationFor(draft, user?.id ?? null);
+  const invitation = invitationFor(draft, user?.id ?? null, m);
   return (
     <main className="mx-auto grid max-w-[560px] gap-4 p-4 pt-8">
-      <Logo />
+      <div className="flex items-center justify-between">
+        <Logo />
+        <LanguageSwitch />
+      </div>
       <Card className="grid gap-4">
-        <h1 className="text-2xl font-bold [font-stretch:87%]">
-          {draft.creatorName} te invitó a <em>{draft.name}</em>
-        </h1>
+        <h1 className="text-2xl font-bold [font-stretch:87%]">{m.invitation.title(draft.creatorName, <em>{draft.name}</em>)}</h1>
         <p>
-          Cada uno pone <Money units={draft.weeklyFee} /> por semana. El agente devuelve hasta <Money units={draft.weeklyCap} /> por semana por{" "}
-          {draft.agreedExpense}. Todo lo demás se vota. Nadie puede cambiar esto solo, ni el agente.
+          {m.invitation.rules(
+            <Money units={draft.weeklyFee} locale={locale} />,
+            <Money units={draft.weeklyCap} locale={locale} />,
+            draft.agreedExpense,
+          )}
         </p>
         {invitation.kind === "join" ? (
           <JoinForm code={code} loggedIn={user !== null} />
@@ -35,7 +42,7 @@ export default async function InvitePage({ params }: { params: Promise<{ code: s
           </>
         )}
       </Card>
-      <p className="text-sm text-muted">Ya se sumaron: {draft.members.map((m) => m.name).join(", ")}.</p>
+      <p className="text-sm text-muted">{m.invitation.alreadyJoined(draft.members.map((member) => member.name).join(", "))}</p>
     </main>
   );
 }

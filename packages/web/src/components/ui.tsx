@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { ComponentProps } from "react";
 import { formatPesos } from "../lib/format";
+import type { Locale } from "../lib/i18n/locales";
 
 // One radius for buttons and cards (14 px), 48 px tall buttons, one primary per screen (spec, 9.1).
 // Height and padding live in each variant, so the link's 44 px never fights a base class.
@@ -44,6 +45,7 @@ export function CardTitle({ className = "", ...props }: ComponentProps<"h2">) {
   return <h2 className={`text-base font-bold [font-stretch:87%] ${className}`} {...props} />;
 }
 
-export function Money({ units, className = "" }: { units: bigint; className?: string }) {
-  return <span className={`money ${className}`}>{formatPesos(units)}</span>;
+/** An amount of pesos in the page's language: it works in server and browser components, so `locale` comes from the caller. */
+export function Money({ units, locale, className = "" }: { units: bigint; locale: Locale; className?: string }) {
+  return <span className={`money ${className}`}>{formatPesos(units, locale)}</span>;
 }

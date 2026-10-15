@@ -1,3 +1,4 @@
+import { useMessages } from "../lib/i18n/client";
 import { FIELD } from "./ui";
 
 /**
@@ -5,9 +6,10 @@ import { FIELD } from "./ui";
  * (spec, 12): the server still takes one, for when it's entered from the account panel.
  */
 export function PersonFields() {
+  const m = useMessages();
   return (
     <label className="grid gap-1">
-      <span className="font-semibold">Tu nombre</span>
+      <span className="font-semibold">{m.person.name}</span>
       <input className={FIELD} name="person" required maxLength={30} autoComplete="given-name" />
     </label>
   );
