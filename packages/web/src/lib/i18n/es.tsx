@@ -1,8 +1,14 @@
 import type { ReactNode } from "react";
 import type { Locale } from "./locales";
 
+const SOMEONE = "alguien";
+
+/** Capitalizes the stand-in where it starts a sentence, and leaves a member's name as they wrote it (spec, 9.3). */
+const sentenceStart = (who: string) => (who === SOMEONE ? "Alguien" : who);
+
 /**
- * Everything the web says, in Rioplatense Spanish (spec, 9.3): the texts it always had, moved here word for word.
+ * Everything the web says, in Rioplatense Spanish (spec, 9.3): the texts it always had, moved here word for word
+ * (except that "alguien" now starts a sentence capitalized).
  * `en` has this same shape (Messages), so a sentence missing in English doesn't compile. A fixed sentence is a
  * string; one with values is a function that takes them already formatted; a value that stands out on screen comes
  * in as a ReactNode, and the sentence is a fragment around it.
@@ -212,11 +218,11 @@ export const es = {
    */
   timeline: {
     /** For an account the fund has no name for. */
-    someone: "alguien",
+    someone: SOMEONE,
     newAccount: "una cuenta nueva",
     /** Who the viewer's own operations on their way are. */
     you: "Vos",
-    contributed: (who: string, what: string) => `${who} aportó ${what}.`,
+    contributed: (who: string, what: string) => `${sentenceStart(who)} aportó ${what}.`,
     converted: (usdt: string, pesos: string) => `Pasé a pesos los ${usdt} que entraron: ${pesos}.`,
     // Plain words, no jargon (spec, 9): the exchange and the price feed stay out of what people read.
     convertedDetail: "Los cambié a pesos y revisé que el precio no se alejara más de 2 % del precio de referencia del dólar, como dicen mis reglas.",
@@ -227,7 +233,7 @@ export const es = {
     /** A proposal: how it's told, what it is (`what` comes from the ones below), and where it stands. */
     proposal: {
       byAgent: (what: string) => `Propuse ${what}.`,
-      byMember: (who: string, what: string) => `${who} propuso ${what}.`,
+      byMember: (who: string, what: string) => `${sentenceStart(who)} propuso ${what}.`,
       agentDetail: (votes: number) => `Lo que no puedo devolver por mi cuenta lo tienen que votar: hacen falta ${votes} votos.`,
       pay: (amount: string, who: string, note: string) => `pagarle ${amount} a ${who}${note ? ` por ${note}` : ""}`,
       addMember: "sumar a una cuenta nueva al fondo",
@@ -246,8 +252,8 @@ export const es = {
     },
     paid: (amount: string, who: string) => `El fondo le pagó ${amount} a ${who}: la propuesta se aprobó.`,
     memberAdded: (who: string) => `Se sumó ${who} al fondo.`,
-    memberRemoved: (who: string) => `${who} dejó el fondo y se llevó su parte.`,
-    memberReplaced: (who: string) => `${who} cambió de cuenta.`,
+    memberRemoved: (who: string) => `${sentenceStart(who)} dejó el fondo y se llevó su parte.`,
+    memberReplaced: (who: string) => `${sentenceStart(who)} cambió de cuenta.`,
     weeklyCapChanged: (expense: string, cap: string) => `El tope semanal de ${expense} ahora es ${cap}.`,
     votesRequiredChanged: (votes: number, expense: string) => `Ahora hacen falta ${votes} votos para lo que no es ${expense}.`,
     agentChanged: "Cambió el agente del fondo.",

@@ -231,7 +231,8 @@ describe("buildTimeline", () => {
   });
 });
 
-// The sentences the cases above don't reach, in Spanish: every one is as it was before the dictionary (Messages).
+// The sentences the cases above don't reach, in Spanish: every one is as it was before the dictionary (Messages),
+// except that "alguien" now starts a sentence capitalized.
 describe("buildTimeline: the other sentences, in Spanish", () => {
   const OPEN: ProposalState = { votes: 1, executed: false, deadline: CLOCK.timestamp + 86_400n, voted: false };
   const proposed = (action: number, a: Address, amount: bigint, proposer: Address, note = "") =>
@@ -252,9 +253,24 @@ describe("buildTimeline: the other sentences, in Spanish", () => {
     expect(proposed(7, zeroAddress, 0n, BETO).detail).toBeUndefined();
   });
 
-  it("says a name it doesn't have as 'alguien', and the viewer's own operations on their way as 'Vos'", () => {
-    const [byStranger] = timeline({ events: [event("MemberRemoved", { member: zeroAddress, warsReturned: 0n, usdtReturned: 0n }, BLOCK - 100n)] });
-    expect(byStranger?.text).toBe("alguien dejó el fondo y se llevó su parte.");
+  it("says a name it doesn't have as 'alguien', capitalized where it starts the sentence, and the viewer's own operations on their way as 'Vos'", () => {
+    const at = (events: Parameters<typeof buildTimeline>[0]["events"], proposals: Parameters<typeof buildTimeline>[0]["proposals"] = new Map()) =>
+      timeline({ events, proposals })[0]?.text;
+    const stranger = "0x000000000000000000000000000000000000dEaD";
+
+    expect(at([event("MemberRemoved", { member: stranger, warsReturned: 0n, usdtReturned: 0n }, BLOCK - 100n)])).toBe(
+      "Alguien dejó el fondo y se llevó su parte.",
+    );
+    expect(at([event("Contribution", { member: stranger, token: WARS_TOKEN, amount: 10_000n * WARS, creditedWars: 10_000n * WARS }, BLOCK - 100n)])).toBe(
+      $("Alguien aportó $ 10.000."),
+    );
+    expect(proposed(6, zeroAddress, 0n, stranger).text).toBe("Alguien propuso cambiar el agente. Lleva 1 de 2 votos.");
+    expect(at([event("MemberReplaced", { oldMember: ANA, newMember: stranger }, BLOCK - 100n)])).toBe("Alguien cambió de cuenta.");
+    // Inside a sentence it stays as it is.
+    expect(at([event("Reimbursement", { member: stranger, amount: 45_000n * WARS, ref: pad("0x01", { size: 32 }), week: 2n }, BLOCK - 100n)])).toBe(
+      $("Le devolví $ 45.000 a alguien por la cancha. Quedan $ 15.000 del tope de esta semana."),
+    );
+
     const vote = { userOpHash: "0xv", kind: "vote" as const, amount: null, token: null, createdAt: NOW };
     expect(timeline({ pending: [vote] })[0]?.actor).toEqual({ kind: "member", name: "Vos" });
   });
