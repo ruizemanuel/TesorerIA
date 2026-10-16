@@ -107,6 +107,7 @@ describe("the dictionaries", () => {
       pesos: "Pasar a pesos",
       agente: "Agente",
       comprobante: "Comprobante",
+      resumen: "Resumen de la semana",
     });
     expect(en.panels.titles).toEqual({
       aportar: "Contribute",
@@ -115,6 +116,7 @@ describe("the dictionaries", () => {
       pesos: "Cash out to pesos",
       agente: "Agent",
       comprobante: "Receipt",
+      resumen: "Week summary",
     });
     expect([es.nav.home, es.nav.activity, es.nav.agent, es.nav.account]).toEqual(["Inicio", "Movimientos", "Agente", "Tu cuenta"]);
     expect([en.nav.home, en.nav.activity, en.nav.agent, en.nav.account]).toEqual(["Home", "Activity", "Agent", "Your account"]);

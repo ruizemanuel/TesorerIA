@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { createPublicClient, http } from "viem";
 import { generatePrivateKey, privateKeyToAddress } from "viem/accounts";
 import { celo } from "viem/chains";
-import { FORK_PORT, FORK_RPC, give } from "./support.ts";
+import { FORK_PORT, FORK_RPC, HEARTBEAT_SECRET, give } from "./support.ts";
 
 const WEB_PORT = 3000;
 const FORK_URLS = (process.env.FORK_URLS ?? "https://forno.celo.org,https://celo-rpc.publicnode.com").split(",");
@@ -105,7 +105,8 @@ const next = spawn(process.execPath, [nextBin, "dev", "--port", String(WEB_PORT)
     AGENT_PRIVATE_KEY: agentKey,
     // The kill switch, on: on the fork the agent sends (the deployed default is off).
     AGENT_SEND: "on",
-    HEARTBEAT_SECRET: randomBytes(32).toString("hex"),
+    // Known to the test, which calls the heartbeat to close a week (fund.spec, step 13).
+    HEARTBEAT_SECRET,
     // The chat, with the scripted model: the real one is never asked from a test (spec, 11).
     CHAT_MODEL: "mock",
   },

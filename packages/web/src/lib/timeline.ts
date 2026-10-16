@@ -11,7 +11,9 @@ export type Actor = { kind: "agent" } | { kind: "member"; name: string } | { kin
 export type TimelineAction =
   | { kind: "receipt"; tx: Hash }
   | { kind: "vote"; proposalId: bigint; votes: number; required: number; canVote: boolean; voted: boolean; completes: boolean }
-  | { kind: "execute"; proposalId: bigint; canExecute: boolean };
+  | { kind: "execute"; proposalId: bigint; canExecute: boolean }
+  /** A week's summary (spec, 9.4), by the contract's week: "Ver el resumen". */
+  | { kind: "summary"; week: number };
 
 export type TimelineItem = {
   id: string;
@@ -67,6 +69,7 @@ export function buildTimeline({
   expenses,
   pending,
   conversionHold = null,
+  summaries = [],
   warsBalance,
   viewerIsMember,
   now,
@@ -90,6 +93,8 @@ export function buildTimeline({
   pending: readonly TimelinePending[];
   /** Why the USDT waiting hasn't been converted yet, or null (read-fund.ts, conversionHold). */
   conversionHold?: ConversionHold | null;
+  /** The agent's summary of each week that closed (spec, 9.4): the contract's week, and when the agent wrote it. */
+  summaries?: readonly { week: number; at: Date }[];
   /** The wARS the fund holds now: a payment over it can't be executed yet. */
   warsBalance: bigint;
   viewerIsMember: boolean;
@@ -233,6 +238,16 @@ export function buildTimeline({
       at: conversionHold.at,
       actor: { kind: "agent" },
       text: t.hold(formatUsdt(conversionHold.usdt, m.locale), holdWhy(m, conversionHold.code)),
+    });
+  }
+
+  for (const summary of summaries) {
+    items.push({
+      id: `summary:${summary.week}`,
+      at: summary.at,
+      actor: { kind: "agent" },
+      text: t.weekClosed(summary.week + 1),
+      action: { kind: "summary", week: summary.week },
     });
   }
 

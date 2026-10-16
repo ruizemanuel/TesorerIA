@@ -1,6 +1,6 @@
 import { type Page, type Request, type Route, expect, test } from "@playwright/test";
 import { generatePrivateKey, privateKeyToAddress } from "viem/accounts";
-import { accountOf, give, onScreen, open, phone, warsOf } from "./support";
+import { HEARTBEAT_SECRET, accountOf, advanceClock, give, onScreen, open, phone, warsOf } from "./support";
 
 /** The server renders (React Server Components) a page asks for while `act` runs; a link's prefetch isn't one. */
 async function serverRenders(page: Page, act: () => Promise<void>): Promise<string[]> {
@@ -282,4 +282,36 @@ test("three friends create a fund, contribute, get the agreed expense back, and 
   await expect(ana.locator("html")).toHaveAttribute("lang", "es-AR");
   await open(ana, fund);
   await expect(onScreen(ana, "En el fondo")).toBeVisible();
+
+  // 13. A week later (the fork's clock moves on), the heartbeat closes the fund's week 0: the agent leaves its summary
+  // in Movimientos, and its panel shows it as it goes to the group, with WhatsApp's link carrying that same text
+  // (spec, 9.4). Last, because the clock doesn't come back. Everything above happened in week 0.
+  await advanceClock(604_800);
+  await expect(async () => {
+    const beat = await ana.request.post("/api/agent/heartbeat", { headers: { authorization: `Bearer ${HEARTBEAT_SECRET}` } });
+    expect(beat.status()).toBe(200); // 202 while a run after a vote still holds the agent
+  }).toPass({ timeout: 60_000 });
+  await open(ana, `${fund}/movimientos`);
+  await expect(onScreen(ana, "Cerré la semana 1. Te dejo el resumen para el grupo.")).toBeVisible();
+  await ana.getByRole("link", { name: "Ver el resumen" }).click();
+  const summary = ana.getByRole("dialog", { name: "Resumen de la semana" });
+  const written = (await summary.locator("p", { hasText: "TesorerIA ·" }).textContent()) ?? "";
+  expect(written).toMatch(/^TesorerIA · Fútbol de los jueves\nResumen de la semana 1 \(del \d{1,2}\/\d{1,2} al \d{1,2}\/\d{1,2}\)\n/);
+  expect(written).toMatch(/\nEn el fondo hay \$\s[\d.]+(,\d{2})?\.\n/);
+  // Ana and Caro put in their $ 10.000 and Beto went over: nobody owes.
+  expect(written).toContain("\nTodos pagaron la cuota.\n");
+  expect(written).toMatch(/\n· Aportaron \$\s[\d.]+(,\d{2})? entre todos\.\n/);
+  expect(written).toMatch(/\n· Le devolví \$\s5\.000 a Ana por la cancha\.\n/);
+  expect(written).toMatch(/\n· Se aprobó pagarle \$\s3\.000 a Caro por la pelota nueva\.\n/);
+  expect(written).toMatch(/\n· Se aprobó pagarle \$\s12\.000 a Caro por el asado\.\n/);
+  expect(written).toMatch(/\n· Se aprobó pagarle \$\s12\.000 a Caro por las camisetas\.\n/);
+  expect(written).not.toMatch(/Pelotas nuevas/); // Beto's proposal from the chat was never carried out
+  expect(written).toMatch(new RegExp(`\\nPara aportar: http://localhost:3000${fund}$`, "i"));
+  const send = await summary.getByRole("link", { name: "Mandar por WhatsApp" }).getAttribute("href");
+  expect(new URL(send!).searchParams.get("text")).toBe(written);
+  // "Copiar" puts that same text on the clipboard, and says so. (Windows' clipboard keeps line breaks as CRLF.)
+  await ana.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+  await summary.getByRole("button", { name: "Copiar" }).click();
+  await expect(summary.getByRole("button", { name: "Copiado" })).toBeVisible();
+  expect((await ana.evaluate(() => navigator.clipboard.readText())).replaceAll("\r\n", "\n")).toBe(written);
 });

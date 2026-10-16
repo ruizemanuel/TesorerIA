@@ -69,6 +69,14 @@ export function TimelineList({
                   {m.movements.viewReceipt}
                 </PanelLink>
               )}
+              {item.action?.kind === "summary" && (
+                <PanelLink
+                  href={`${basePath}?p=resumen&semana=${item.action.week + 1}`}
+                  className="-mb-3 -mt-1.5 inline-flex min-h-11 items-center text-[13px] font-bold text-primary"
+                >
+                  {m.movements.viewSummary}
+                </PanelLink>
+              )}
               {item.action?.kind === "vote" && !readOnly && !closed && item.action.canVote && (
                 <VoteButton fund={fund} proposalId={item.action.proposalId.toString()} completes={item.action.completes} />
               )}

@@ -173,6 +173,7 @@ export const en: Messages = {
     approvedPayment: (what: string) => `${what.charAt(0).toUpperCase()}${what.slice(1)} was approved.`,
     nothing: "No activity this week.",
     toContribute: (link: string) => `To contribute: ${link}`,
+    copy: "Copy",
   },
   person: {
     name: "Your name",
@@ -229,6 +230,7 @@ export const en: Messages = {
     },
     paid: (amount: string, who: string) => `The fund paid ${who} ${amount}: the proposal was approved.`,
     memberAdded: (who: string) => `${sentenceStart(who)} joined the fund.`,
+    weekClosed: (week: number) => `I closed week ${week}. Here's the summary for the group.`,
     memberRemoved: (who: string) => `${sentenceStart(who)} left the fund and took their share.`,
     memberReplaced: (who: string) => `${sentenceStart(who)} switched accounts.`,
     weeklyCapChanged: (expense: string, cap: string) => `The weekly cap for ${expense} is now ${cap}.`,
@@ -302,6 +304,7 @@ export const en: Messages = {
     empty: "No activity yet. The first one can be your contribution.",
     onItsWay: "On its way",
     viewReceipt: "View receipt",
+    viewSummary: "See the summary",
     voted: "You voted",
   },
   receipt: {
@@ -323,6 +326,7 @@ export const en: Messages = {
       pesos: "Cash out to pesos",
       agente: "Agent",
       comprobante: "Receipt",
+      resumen: "Week summary",
     },
   },
   account: {

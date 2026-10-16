@@ -1,13 +1,14 @@
-import { WARS as WARS_TOKEN } from "@tesoreria/agent";
+import { WARS as WARS_TOKEN, type WeekSummaryFacts } from "@tesoreria/agent";
 import { eq } from "drizzle-orm";
 import { type Address, type Hash, getAddress, pad } from "viem";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CurrentUser } from "../src/lib/current-user";
 import type { Db } from "../src/lib/db/client";
-import { decisions, expenses, funds, operations } from "../src/lib/db/schema";
+import { decisions, expenses, funds, operations, weekSummaries } from "../src/lib/db/schema";
 import { formatPesos } from "../src/lib/format";
 import { finishOperation, recordOperation } from "../src/lib/operations";
 import { HistoryGapError, loadFundScreen as loadScreen, loadPublicFundScreen } from "../src/lib/read-fund";
+import { storeFacts } from "../src/lib/week-summaries";
 import { addLiveFund, addUser, randomAccount, testDb } from "./support/db";
 import { BLOCK, CLOCK, USDT_UNIT, WARS, event, snapshot } from "./support/fixtures";
 
@@ -37,6 +38,9 @@ vi.mock("@tesoreria/agent", async (importOriginal) => ({
 
 const waitForBlock = vi.hoisted(() => vi.fn(async () => true));
 vi.mock("../src/lib/read-your-writes", () => ({ waitForBlock }));
+
+// The summary's link to the fund (spec, 9.4) is the site's own origin.
+vi.mock("../src/lib/env", () => ({ env: () => ({ ORIGIN: "https://tesoreriaia.vercel.app" }) }));
 
 /** The screens these tests read are in Spanish, unless a test says otherwise. */
 const loadFundScreen = (address: Address, viewer: CurrentUser | null, options: Partial<Parameters<typeof loadScreen>[2]> = {}) =>
@@ -397,4 +401,55 @@ it("explains the USDT waiting only with the agent's conversion decisions on this
   // A reimbursement the agent couldn't send: blocked too, but about the expense, not the USDT.
   await db.insert(decisions).values({ fund: address, expenseId, kind: "blocked", reason: "The agent holds 0 USDT for gas" });
   expect(await holds()).toEqual([]);
+});
+
+describe("loadFundScreen: the week summaries (spec, 9.4)", () => {
+  /** Week 1 (the people's 2) of Ana, Beto and Caro, as the agent kept it: Beto owes a week. */
+  const facts = (): WeekSummaryFacts => ({
+    week: 1n,
+    block: BLOCK - 604_800n,
+    startsAt: 1_791_764_388n + 604_800n,
+    endsAt: 1_791_764_388n + 2n * 604_800n,
+    balance: 20_000n * WARS,
+    dues: [ana, beto, caro].map((person) => ({ member: getAddress(person.account), owed: person === beto ? 10_000n * WARS : 0n })),
+    contributed: 20_000n * WARS,
+    reimbursements: [],
+    payments: [],
+    joined: [],
+  });
+
+  async function withSummary(change: Partial<typeof funds.$inferInsert> = {}) {
+    const address = await liveFund(change);
+    const [fund] = await db.select().from(funds).where(eq(funds.address, address));
+    await db.insert(weekSummaries).values({ fundId: fund!.id, week: 1, block: BLOCK - 604_800n, facts: storeFacts(facts()) });
+    return address;
+  }
+
+  it("gives a member each summary as the text for the group, with the link to the fund, and its movement", async () => {
+    const address = await withSummary();
+    const screen = await loadFundScreen(address, asViewer(ana));
+    expect(screen?.weekSummaries).toHaveLength(1);
+    const [summary] = screen!.weekSummaries;
+    expect(summary?.week).toBe(1);
+    expect(summary?.text).toContain("Resumen de la semana 2 (del 18/10 al 25/10)");
+    expect(summary?.text).toContain(`· Beto, ${formatPesos(10_000n * WARS, "es")}`);
+    expect(summary?.text.endsWith(`Para aportar: https://tesoreriaia.vercel.app/f/${address}`)).toBe(true);
+    const item = screen?.timeline.find((i) => i.id === "summary:1");
+    expect(item).toMatchObject({ actor: { kind: "agent" }, text: "Cerré la semana 2. Te dejo el resumen para el grupo.", action: { kind: "summary", week: 1 } });
+  });
+
+  it("shows the public view the same summary with 'Miembro N', and no link", async () => {
+    const address = await withSummary({ publicView: true });
+    const screen = await loadFundScreen(address, null, { publicView: true });
+    const text = screen?.weekSummaries[0]?.text ?? "";
+    expect(text).toContain(`· Miembro 2, ${formatPesos(10_000n * WARS, "es")}`);
+    expect(text).not.toContain("Beto");
+    expect(text).not.toContain("Para aportar");
+  });
+
+  it("writes them in the page's language", async () => {
+    const address = await withSummary();
+    const screen = await loadFundScreen(address, asViewer(ana), { locale: "en" });
+    expect(screen?.weekSummaries[0]?.text).toContain("Week 2 summary (Oct 18 to Oct 25)");
+  });
 });

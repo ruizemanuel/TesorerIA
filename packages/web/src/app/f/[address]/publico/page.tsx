@@ -4,6 +4,7 @@ import { isAddress } from "viem";
 import { FundScreenView } from "../../../../components/fund-screen";
 import { PanelHost } from "../../../../components/panel-host";
 import { receiptPanels } from "../../../../components/receipt";
+import { summaryPanels } from "../../../../components/summary-panels";
 import { getLocale, getMessages } from "../../../../lib/i18n/server";
 import { loadPublicFundScreen } from "../../../../lib/read-fund";
 
@@ -17,6 +18,7 @@ export default async function PublicFundPage({ params }: { params: Promise<{ add
   const screen = await loadPublicFundScreen(address, locale);
   if (screen === null) notFound();
   const receipts = receiptPanels(screen.timeline, new Date(), m, locale);
-  const panel = <PanelHost closeHref={`/f/${screen.view.address}/publico`} receipts={receipts} />;
+  const summaries = summaryPanels(screen.weekSummaries, { shareable: false });
+  const panel = <PanelHost closeHref={`/f/${screen.view.address}/publico`} receipts={receipts} summaries={summaries} />;
   return <FundScreenView screen={screen} user={null} panel={panel} />;
 }

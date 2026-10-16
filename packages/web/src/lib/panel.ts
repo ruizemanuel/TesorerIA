@@ -5,9 +5,11 @@ export type PanelState =
   | { kind: "cuenta" }
   | { kind: "pesos" }
   | { kind: "agente" }
-  | { kind: "comprobante"; id: string };
+  | { kind: "comprobante"; id: string }
+  /** A week's summary (spec, 9.4): `week` is the contract's, from 0; the URL says it as people count it, from 1. */
+  | { kind: "resumen"; week: number };
 
-/** Which panel the URL opens: none without `p`, with one this screen doesn't know, or with a comprobante and no id. */
+/** Which panel the URL opens: none without `p`, with one this screen doesn't know, or one that lacks what it names (a comprobante's id, a summary's week). */
 export function readPanel(search: { get(name: string): string | null }): PanelState | null {
   switch (search.get("p")) {
     case "aportar":
@@ -24,14 +26,20 @@ export function readPanel(search: { get(name: string): string | null }): PanelSt
       const id = search.get("id");
       return id ? { kind: "comprobante", id } : null;
     }
+    case "resumen": {
+      const week = search.get("semana");
+      return week !== null && /^[1-9]\d{0,4}$/.test(week) ? { kind: "resumen", week: Number(week) - 1 } : null;
+    }
     default:
       return null;
   }
 }
 
-/** What a panel shows, as one string: its kind, or a comprobante with its item's id, so two comprobantes differ. */
+/** What a panel shows, as one string: its kind, or a comprobante with its item's id, or a summary with its week, so two of them differ. */
 export function panelKey(state: PanelState): string {
-  return state.kind === "comprobante" ? `comprobante:${state.id}` : state.kind;
+  if (state.kind === "comprobante") return `comprobante:${state.id}`;
+  if (state.kind === "resumen") return `resumen:${state.week}`;
+  return state.kind;
 }
 
 /** Whether the URL (its query) asks for the panel `key` (panelKey) to be open. */

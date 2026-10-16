@@ -543,4 +543,12 @@ describe("buildTimeline in English", () => {
       [{ kind: "member", name: "You" }, ars("Your contribution of ARS 10,000 is on its way."), true],
     ]);
   });
+
+  it("tells the summary of a week that closed, with the panel that shows it (spec, 9.4)", () => {
+    const at = new Date(NOW.getTime() - 3_600_000);
+    expect(timeline({ summaries: [{ week: 0, at }] })).toEqual([
+      { id: "summary:0", at, actor: { kind: "agent" }, text: "Cerré la semana 1. Te dejo el resumen para el grupo.", action: { kind: "summary", week: 0 } },
+    ]);
+    expect(timeline({ summaries: [{ week: 2, at }], m: en })[0]?.text).toBe("I closed week 3. Here's the summary for the group.");
+  });
 });

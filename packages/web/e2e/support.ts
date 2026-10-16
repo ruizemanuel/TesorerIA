@@ -15,6 +15,18 @@ export const POOL: Address = "0x5D8ef8B839be522b9E3d60a51EDB5837CD0b2391"; // Un
 export const USDT: Address = "0x48065fbBE25f71C9282ddf5e1cD6D6A887483D5e";
 export const WARS: Address = "0x0DC4F92879B7670e5f4e4e6e3c801D229129D90D";
 
+/**
+ * The heartbeat's secret on the fork: serve.ts gives it to the web, and the test calls the heartbeat with it. Only
+ * for this local fork, which nobody else reaches.
+ */
+export const HEARTBEAT_SECRET = "e2e-heartbeat-secret-on-the-local-fork-only-0000000000000000000";
+
+/** Moves the fork's clock `seconds` ahead and mines a block on it: how a week ends on the fork (spec, 9.4). */
+export async function advanceClock(seconds: number): Promise<void> {
+  await test.increaseTime({ seconds });
+  await test.mine({ blocks: 1 });
+}
+
 /** A person's phone: a page with a virtual platform authenticator that verifies the user (CDP, Chromium only). */
 export async function phone(context: BrowserContext): Promise<Page> {
   const page = await context.newPage();

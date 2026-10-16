@@ -9,6 +9,7 @@ import { ExpensePanel } from "../../../components/expense-panel";
 import { FundScreenView } from "../../../components/fund-screen";
 import { PanelHost } from "../../../components/panel-host";
 import { receiptPanels } from "../../../components/receipt";
+import { summaryPanels } from "../../../components/summary-panels";
 import { chatEnabled } from "../../../lib/chat/model";
 import { currentUser } from "../../../lib/current-user";
 import { getLocale, getMessages } from "../../../lib/i18n/server";
@@ -66,6 +67,7 @@ export default async function FundPage({ params, searchParams }: { params: Promi
         ) : undefined,
       }}
       receipts={receiptPanels(screen.timeline, new Date(), m, locale)}
+      summaries={summaryPanels(screen.weekSummaries, { shareable: true })}
     />
   );
 

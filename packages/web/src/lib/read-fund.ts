@@ -5,7 +5,8 @@ import { celoClient, logReader } from "./chain";
 import { blockTime, weekAt } from "./chain-time";
 import type { CurrentUser } from "./current-user";
 import { type Db, getDb } from "./db/client";
-import { decisions, expenses, funds, memberships, users } from "./db/schema";
+import { decisions, expenses, funds, memberships, users, weekSummaries } from "./db/schema";
+import { env } from "./env";
 import { memberFundAbi } from "./fund-abi";
 import { type FundView, buildFundView } from "./fund-view";
 import { checkHistory } from "./history";
@@ -15,6 +16,7 @@ import { ttlMemo } from "./memo";
 import { cashOutPending, lastOperationBlock, pendingOperations } from "./operations";
 import { waitForBlock } from "./read-your-writes";
 import { type ConversionHold, type ProposalState, type TimelineItem, buildTimeline } from "./timeline";
+import { readFacts, weekSummaryText } from "./week-summaries";
 
 export type FundScreen = {
   fundId: string;
@@ -22,6 +24,8 @@ export type FundScreen = {
   block: bigint;
   view: FundView;
   timeline: TimelineItem[];
+  /** The agent's summary of each week that closed (spec, 9.4), newest first: the text that goes to the group. */
+  weekSummaries: { week: number; text: string }[];
   viewerIsMember: boolean;
   publicView: boolean;
   /** The viewer has a contribution here that went out and has no receipt yet: Aportar must not offer to send another. */
@@ -93,6 +97,19 @@ export async function loadFundScreen(
 
   const hold = await conversionHold(db, snapshot);
 
+  // The agent's photos of the weeks that closed (spec, 9.4), newest first, written in the page's language with the
+  // screen's names. The link to the fund goes only to a member: the public view has nobody to send it to.
+  const summaryRows = await db
+    .select({ week: weekSummaries.week, facts: weekSummaries.facts, createdAt: weekSummaries.createdAt })
+    .from(weekSummaries)
+    .where(eq(weekSummaries.fundId, fund.id))
+    .orderBy(desc(weekSummaries.week));
+  const link = publicView ? null : `${env().ORIGIN}/f/${snapshot.address}`;
+  const summaryTexts = summaryRows.map((row) => ({
+    week: row.week,
+    text: weekSummaryText(readFacts(row.facts), { fundName: fund.name, agreedExpense: fund.agreedExpense, names, link }, m),
+  }));
+
   const view = buildFundView({
     snapshot,
     name: fund.name,
@@ -118,6 +135,7 @@ export async function loadFundScreen(
     expenses: expenseRows,
     pending,
     conversionHold: hold,
+    summaries: summaryRows.map((row) => ({ week: row.week, at: row.createdAt })),
     warsBalance: snapshot.warsBalance,
     viewerIsMember: !publicView && viewerIsMember,
     now: new Date(Number(clock.timestamp) * 1000),
@@ -125,7 +143,17 @@ export async function loadFundScreen(
   });
   const contributionOnItsWay = pending.some((operation) => operation.kind === "contribute");
   const cashOutOnItsWay = !publicView && viewer !== null && viewerIsMember ? await cashOutPending(db, viewer.id) : false;
-  return { fundId: fund.id, block: snapshot.block, view, timeline, viewerIsMember, publicView, contributionOnItsWay, cashOutOnItsWay };
+  return {
+    fundId: fund.id,
+    block: snapshot.block,
+    view,
+    timeline,
+    weekSummaries: summaryTexts,
+    viewerIsMember,
+    publicView,
+    contributionOnItsWay,
+    cashOutOnItsWay,
+  };
 }
 
 /**

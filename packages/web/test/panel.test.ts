@@ -100,3 +100,18 @@ describe("isPlainClick: a click the page may handle itself", () => {
     }
   });
 });
+
+describe("readPanel: a week's summary (spec, 9.4)", () => {
+  it("reads the week as people count it, from 1, and keeps the contract's, from 0", () => {
+    expect(readPanel(search("p=resumen&semana=1"))).toEqual({ kind: "resumen", week: 0 });
+    expect(readPanel(search("p=resumen&semana=12"))).toEqual({ kind: "resumen", week: 11 });
+    for (const bad of ["p=resumen", "p=resumen&semana=", "p=resumen&semana=0", "p=resumen&semana=-1", "p=resumen&semana=1.5", "p=resumen&semana=x", "p=resumen&semana=01"]) {
+      expect(readPanel(search(bad)), bad).toBeNull();
+    }
+  });
+
+  it("tells two weeks apart, so going from one to the other opens a fresh dialog", () => {
+    expect(panelKey({ kind: "resumen", week: 0 })).toBe("resumen:0");
+    expect(hrefPanel("?p=resumen&semana=2", "http://localhost:3000/f/0x1")).toBe("resumen:1");
+  });
+});

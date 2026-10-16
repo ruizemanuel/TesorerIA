@@ -199,6 +199,8 @@ export const es = {
     approvedPayment: (what: string) => `Se aprobó ${what}.`,
     nothing: "No hubo movimientos.",
     toContribute: (link: string) => `Para aportar: ${link}`,
+    /** The panel's button: it copies the text (the invitation's says "Copiar el link"). */
+    copy: "Copiar",
   },
   /** The fields of someone without an account yet. */
   person: {
@@ -269,6 +271,8 @@ export const es = {
     },
     paid: (amount: string, who: string) => `El fondo le pagó ${amount} a ${who}: la propuesta se aprobó.`,
     memberAdded: (who: string) => `Se sumó ${who} al fondo.`,
+    /** The agent's word when a week closes (spec, 9.4): `week` counts from 1, as people do. */
+    weekClosed: (week: number) => `Cerré la semana ${week}. Te dejo el resumen para el grupo.`,
     memberRemoved: (who: string) => `${sentenceStart(who)} dejó el fondo y se llevó su parte.`,
     memberReplaced: (who: string) => `${sentenceStart(who)} cambió de cuenta.`,
     weeklyCapChanged: (expense: string, cap: string) => `El tope semanal de ${expense} ahora es ${cap}.`,
@@ -361,6 +365,7 @@ export const es = {
     empty: "Todavía no hay movimientos. El primero puede ser tu aporte.",
     onItsWay: "En camino",
     viewReceipt: "Ver comprobante",
+    viewSummary: "Ver el resumen",
     voted: "Votaste",
   },
   /** The comprobante: the only link to the chain. */
@@ -386,6 +391,7 @@ export const es = {
       pesos: "Pasar a pesos",
       agente: "Agente",
       comprobante: "Comprobante",
+      resumen: "Resumen de la semana",
     },
   },
   /** Your own account, which holds what hasn't reached the fund yet. */

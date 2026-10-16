@@ -120,6 +120,7 @@ const ARGS: Record<string, (k: Kit) => Case[]> = {
   "timeline.proposal.votes": () => [call(3, 5)],
   "timeline.paid": ({ pesos }) => [call(pesos(3_000), NAME)],
   "timeline.memberAdded": () => [call(THIRD)],
+  "timeline.weekClosed": () => [call(3)],
   "timeline.memberRemoved": ({ m }) => [call(THIRD), when("an account with no name", m.timeline.someone)],
   "timeline.memberReplaced": ({ m }) => [call(THIRD), when("an account with no name", m.timeline.someone)],
   "timeline.weeklyCapChanged": ({ expense, pesos }) => [call(expense, pesos(80_000))],
