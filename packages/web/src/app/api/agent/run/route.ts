@@ -12,10 +12,15 @@ import { localeOf } from "../../../../lib/i18n/locales";
 import { messagesFor } from "../../../../lib/i18n/messages";
 import { lastOperationBlock } from "../../../../lib/operations";
 import { waitForBlock } from "../../../../lib/read-your-writes";
+import { chainWeekSummaryDeps, writeWeekSummaries } from "../../../../lib/week-summaries";
 
 export const maxDuration = 300;
 
-/** A run right after a member's operation, so the agent acts without waiting for the heartbeat (spec, 8.3). */
+/**
+ * A run right after a member's operation, so the agent acts without waiting for the heartbeat (spec, 8.3). It runs
+ * as a heartbeat, under the same lock, so it writes the week summaries too when it is the run that gets the lock
+ * (spec, 9.4: whichever run holds the lock writes them).
+ */
 export async function POST(request: Request) {
   const m = messagesFor(localeOf(request));
   const user = await currentUser();
@@ -29,7 +34,12 @@ export async function POST(request: Request) {
   const mine = await lastOperationBlock(db, user.id);
   if (mine !== null) await waitForBlock(celoClient(), mine);
   try {
-    const run = await runAgent(db, (onSent) => agentContext(db, onSent), { heartbeat: true, txStatus, inFlight: agentInFlight });
+    const run = await runAgent(db, (onSent) => agentContext(db, onSent), {
+      heartbeat: true,
+      txStatus,
+      inFlight: agentInFlight,
+      afterHeartbeat: () => writeWeekSummaries(db, chainWeekSummaryDeps()),
+    });
     return Response.json({ ran: run.ran }, { status: 202 });
   } catch (error) {
     // The browser fires this and forgets it; the next heartbeat does what this run would have.

@@ -40,6 +40,13 @@ vi.mock("../src/lib/chain", async (importOriginal) => ({
   celoClient: () => ({}),
 }));
 
+const summaries = vi.hoisted(() => ({ write: vi.fn(async () => {}) }));
+vi.mock("../src/lib/week-summaries", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../src/lib/week-summaries")>()),
+  writeWeekSummaries: summaries.write,
+  chainWeekSummaryDeps: () => ({}),
+}));
+
 const heartbeat = await import("../src/app/api/agent/heartbeat/route");
 const run = await import("../src/app/api/agent/run/route");
 
@@ -108,6 +115,17 @@ describe("POST /api/agent/heartbeat", () => {
     expect(await response.json()).toEqual({ ran: false, reason: "agent unavailable" });
     expect(logged).toHaveBeenCalledWith(expect.stringContaining("AGENT_PRIVATE_KEY is not set"));
     logged.mockRestore();
+  });
+
+  it("writes the week summaries on a heartbeat, and on the run after a contribution too (spec, 9.4)", async () => {
+    // Both run the agent as a heartbeat under its lock, so whichever one gets the lock writes the photo.
+    summaries.write.mockClear();
+    expect((await beat(`Bearer ${SECRET}`)).status).toBe(200);
+    expect(summaries.write).toHaveBeenCalledTimes(1);
+    expect(summaries.write).toHaveBeenCalledWith(db, {});
+    expect((await afterContribution()).status).toBe(202);
+    expect(summaries.write).toHaveBeenCalledTimes(2);
+    expect(summaries.write).toHaveBeenLastCalledWith(db, {});
   });
 });
 

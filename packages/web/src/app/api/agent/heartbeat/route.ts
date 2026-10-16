@@ -4,6 +4,7 @@ import { runAgent } from "../../../../lib/agent-runner";
 import { getDb } from "../../../../lib/db/client";
 import { env } from "../../../../lib/env";
 import { isHeartbeatAuthorized } from "../../../../lib/heartbeat-auth";
+import { chainWeekSummaryDeps, writeWeekSummaries } from "../../../../lib/week-summaries";
 
 export const maxDuration = 300;
 
@@ -18,7 +19,13 @@ export async function POST(request: Request) {
   }
   try {
     const db = await getDb();
-    const run = await runAgent(db, (onSent) => agentContext(db, onSent), { heartbeat: true, txStatus, inFlight: agentInFlight });
+    const run = await runAgent(db, (onSent) => agentContext(db, onSent), {
+      heartbeat: true,
+      txStatus,
+      inFlight: agentInFlight,
+      // After the conversions, under the same lock: each fund's week that just closed (spec, 9.4).
+      afterHeartbeat: () => writeWeekSummaries(db, chainWeekSummaryDeps()),
+    });
     if (!run.ran) return Response.json({ ran: false }, { status: 202 });
     const counts: Record<string, number> = {};
     for (const d of run.decisions) counts[d.kind] = (counts[d.kind] ?? 0) + 1;

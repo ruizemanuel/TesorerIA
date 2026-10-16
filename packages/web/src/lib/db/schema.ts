@@ -203,3 +203,37 @@ export const locks = pgTable("locks", {
   owner: text("owner").notNull(),
   expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
 });
+
+/** WeekSummaryFacts (@tesoreria/agent) as JSON: every bigint as its decimal string (week-summaries.ts). */
+export type StoredWeekSummary = {
+  week: string;
+  block: string;
+  startsAt: string;
+  endsAt: string;
+  balance: string;
+  dues: { member: string; owed: string }[];
+  contributed: string;
+  reimbursements: { member: string; amount: string }[];
+  payments: { member: string; amount: string; note: string }[];
+  joined: string[];
+};
+
+/**
+ * The agent's photo of a fund's week once it closed (spec, 9.4): what the week's summary says, as it was at the
+ * week's last block. One per fund and week, written by the heartbeat (writeWeekSummaries); the web writes its text.
+ */
+export const weekSummaries = pgTable(
+  "week_summaries",
+  {
+    fundId: uuid("fund_id")
+      .notNull()
+      .references(() => funds.id),
+    /** The contract's week, from 0. */
+    week: integer("week").notNull(),
+    /** The week's last block, which every value was read at. */
+    block: units("block").notNull(),
+    facts: jsonb("facts").$type<StoredWeekSummary>().notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [primaryKey({ columns: [t.fundId, t.week] })],
+);

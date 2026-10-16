@@ -1,4 +1,4 @@
-import { type AgentContext, type Decision, handleExpense, runHeartbeat } from "@tesoreria/agent";
+import { type AgentContext, type Decision, handleExpense, runHeartbeat, shortMessage } from "@tesoreria/agent";
 import { and, asc, eq, inArray, ne, sql } from "drizzle-orm";
 import { type Address, type Hash, type Hex, getAddress } from "viem";
 import type { Db } from "./db/client";
@@ -129,14 +129,21 @@ async function processExpense(db: Db, makeContext: MakeContext, id: string, queu
 
 /**
  * Runs the agent once, under the lock (Review Focus 4): settles what earlier runs sent, handles `expenseId`
- * first, converts on a heartbeat, and then retries the queue (new and waiting; blocked too on a heartbeat),
+ * first, converts on a heartbeat and then runs `afterHeartbeat` (the week summaries, spec 9.4: a failure there is
+ * logged and cuts nothing), and then retries the queue (new and waiting; blocked too on a heartbeat),
  * without taking `expenseId` a second time. The queue takes new expenses first and then the ones tried longest
  * ago: rows that wait for pesos or stay blocked take turns, and never keep a newer expense out.
  */
 export async function runAgent(
   db: Db,
   makeContext: MakeContext,
-  { expenseId, heartbeat = false, txStatus, inFlight }: { expenseId?: string; heartbeat?: boolean; txStatus: TxStatus; inFlight: InFlight },
+  {
+    expenseId,
+    heartbeat = false,
+    txStatus,
+    inFlight,
+    afterHeartbeat,
+  }: { expenseId?: string; heartbeat?: boolean; txStatus: TxStatus; inFlight: InFlight; afterHeartbeat?: () => Promise<void> },
 ): Promise<AgentRun> {
   const queued: ExpenseStatus[] = heartbeat ? ["new", "waiting", "blocked"] : ["new", "waiting"];
   const result = await withLock(db, AGENT_LOCK, AGENT_LOCK_TTL_MS, async () => {
@@ -150,6 +157,14 @@ export async function runAgent(
       const conversions = await runHeartbeat(await makeContext());
       await saveDecisions(db, conversions);
       done.push(...conversions);
+      if (afterHeartbeat !== undefined) {
+        // Its failures are its own: the conversions are saved, and the expenses below still get their turn.
+        try {
+          await afterHeartbeat();
+        } catch (error) {
+          console.error(`The heartbeat's week summaries failed: ${shortMessage(error)}`);
+        }
+      }
     }
     const waiting = await db
       .select({ id: expenses.id })

@@ -8,6 +8,7 @@ import { type Db, getDb } from "./db/client";
 import { decisions, expenses, funds, memberships, users } from "./db/schema";
 import { memberFundAbi } from "./fund-abi";
 import { type FundView, buildFundView } from "./fund-view";
+import { checkHistory } from "./history";
 import type { Locale } from "./i18n/locales";
 import { messagesFor } from "./i18n/messages";
 import { ttlMemo } from "./memo";
@@ -29,22 +30,8 @@ export type FundScreen = {
   cashOutOnItsWay: boolean;
 };
 
-/** The history read doesn't add up: some event is missing, so nothing is shown from it. */
-export class HistoryGapError extends Error {
-  override name = "HistoryGapError";
-}
-
-/**
- * Only reimbursements add to spentInWeek (Fund.sol), so this week's Reimbursement events must sum to it.
- * If they don't, the history read has a hole.
- */
-export function checkHistory(snapshot: FundSnapshot, events: readonly FundEvent[]): void {
-  let reimbursed = 0n;
-  for (const e of events) if (e.eventName === "Reimbursement" && e.args.week === snapshot.week) reimbursed += e.args.amount;
-  if (reimbursed !== snapshot.spentThisWeek) {
-    throw new HistoryGapError(`This week's reimbursements add up to ${reimbursed}, but spentInWeek is ${snapshot.spentThisWeek}`);
-  }
-}
+// The history check lives in history.ts (week-summaries.ts needs it too); these names stay importable from here.
+export { HistoryGapError, checkHistory } from "./history";
 
 /**
  * Everything one screen of a live fund needs (spec, 9.2). Null when the fund isn't ours, isn't live, or the
