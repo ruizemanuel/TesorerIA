@@ -37,8 +37,9 @@ describe("homeTarget: where the home page takes someone logged in (spec, 9.4 C)"
     expect(homeTarget({ funds: [deploying("d3")], lastFund: undefined, requests: [] })).toBe("/f/borrador/d3");
   });
 
-  it("goes to the invitation of an open request when they're in no fund", () => {
+  it("goes to the invitation of a request when they're in no fund, the first one it's given (the newest)", () => {
     expect(homeTarget({ funds: [], lastFund: undefined, requests: [request("abc")] })).toBe("/invitacion/abc");
+    expect(homeTarget({ funds: [], lastFund: undefined, requests: [request("new", "f-new"), request("old", "f-old")] })).toBe("/invitacion/new");
   });
 
   it("prefers any fund of theirs, even a draft, to a request", () => {

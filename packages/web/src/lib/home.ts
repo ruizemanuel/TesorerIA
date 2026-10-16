@@ -20,8 +20,9 @@ function fundHref(fund: FundRow): string {
 
 /**
  * Where the home page takes someone logged in (spec, 9.4 C), or null to stay on it: the last fund they opened if
- * they're still in it, else their first live fund, their first draft, or the invitation of a request of theirs that's
- * still open. `lastFund` is the cookie, as the browser sent it: read, never trusted.
+ * they're still in it, else their first live fund, their first draft, or the invitation of a request of theirs, open
+ * or expired: `requests` is newest first, so an open one goes first. `lastFund` is the cookie, as the browser sent it:
+ * read, never trusted.
  */
 export function homeTarget({
   funds,

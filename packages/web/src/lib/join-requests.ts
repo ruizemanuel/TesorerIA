@@ -76,13 +76,22 @@ export async function joinRequestOf(db: Db, fundId: string, userId: string): Pro
   return row ?? null;
 }
 
-/** A person's open requests, in live funds, newest first: where "Tus fondos" and the portada take them (spec, 9.4). */
-export function requestsOf(db: Db, userId: string): Promise<{ fundId: string; name: string; inviteCode: string; requestedAt: Date }[]> {
+/**
+ * A person's requests to join live funds, newest first (an open request is always newer than an expired one, so it
+ * comes before it). Only the open ones by default, which is what "Tus fondos" lists (spec, 9.4 C); with
+ * `includeExpired`, the expired ones too, which is what the home page takes someone with no fund to: the invitation
+ * still admits them if a proposal carried them in after the request expired, and otherwise offers to ask again.
+ */
+export function requestsOf(
+  db: Db,
+  userId: string,
+  { includeExpired = false }: { includeExpired?: boolean } = {},
+): Promise<{ fundId: string; name: string; inviteCode: string; requestedAt: Date }[]> {
   return db
     .select({ fundId: funds.id, name: funds.name, inviteCode: funds.inviteCode, requestedAt: joinRequests.createdAt })
     .from(joinRequests)
     .innerJoin(funds, eq(funds.id, joinRequests.fundId))
-    .where(and(eq(joinRequests.userId, userId), eq(funds.status, "live"), isOpenRequest()))
+    .where(and(eq(joinRequests.userId, userId), eq(funds.status, "live"), includeExpired ? undefined : isOpenRequest()))
     .orderBy(desc(joinRequests.createdAt));
 }
 
