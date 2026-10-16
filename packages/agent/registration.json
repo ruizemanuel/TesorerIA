@@ -5,7 +5,7 @@
   "services": [
     {
       "name": "web",
-      "endpoint": "https://github.com/ruizemanuel/TesorerIA"
+      "endpoint": "https://tesoreriaia.vercel.app"
     }
   ],
   "x402Support": false,

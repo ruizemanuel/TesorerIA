@@ -32,13 +32,14 @@ describe("the ERC-8004 registration", () => {
     expect(readFileSync(REGISTRATION_JSON, "utf8")).toBe(registrationFile());
   });
 
-  it("follows registration-v1 and names the agent's wallet, the factory and the limits", () => {
+  it("follows registration-v1, names the agent's wallet, the factory and the limits, and points to the live app", () => {
     const file = agentRegistration();
     expect(file.type).toBe("https://eips.ethereum.org/EIPS/eip-8004#registration-v1");
     expect(file.description).toContain(AGENT_ADDRESS);
     expect(file.description).toContain(FUND_FACTORY);
     expect(file.description).toContain("100,000 wARS per reimbursement");
     expect(file.description).toContain("500 USDT per conversion");
+    expect(file.services).toEqual([{ name: "web", endpoint: "https://tesoreriaia.vercel.app" }]);
     expect(file.active).toBe(true);
   });
 
