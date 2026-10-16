@@ -18,7 +18,7 @@ async function serverRenders(page: Page, act: () => Promise<void>): Promise<stri
   return asked;
 }
 
-test("three friends create a fund, contribute, get the agreed expense back, and vote on and execute others, and pass what they got back on to Ripio", async ({ browser }) => {
+test("three friends create a fund, contribute, get the agreed expense back, vote on and execute others, and pass what they got back on to Ripio, and a fourth asks to join the live fund and is voted in", async ({ browser }) => {
   const ana = await phone(await browser.newContext());
   const beto = await phone(await browser.newContext());
   const caro = await phone(await browser.newContext());
