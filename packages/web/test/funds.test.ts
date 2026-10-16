@@ -146,13 +146,14 @@ describe("drafts and invitations", () => {
     expect(await deployCall(db, { fundId: "nope", userId: crypto.randomUUID(), votesRequired: 2, agent: AGENT, m: es })).toMatchObject({ ok: false, status: 404 });
   });
 
-  it("lists a person's funds, live ones first", async () => {
+  it("lists a person's funds with their names, live ones first", async () => {
     const db = await testDb();
     const { people, fundId } = await group(db);
     await addLiveFund(db, { creatorId: people[1]!.id, address: NEW_FUND, members: [people[1]!.id, people[0]!.id, people[2]!.id] });
+    await db.update(funds).set({ name: "Pádel" }).where(eq(funds.address, NEW_FUND));
     expect(await fundsOf(db, people[0]!.id)).toEqual([
-      expect.objectContaining({ status: "live", address: NEW_FUND }),
-      { id: fundId, status: "draft", address: null },
+      expect.objectContaining({ status: "live", address: NEW_FUND, name: "Pádel" }),
+      { id: fundId, status: "draft", address: null, name: "Fútbol de los jueves" },
     ]);
   });
 });

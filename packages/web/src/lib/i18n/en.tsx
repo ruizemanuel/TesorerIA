@@ -353,6 +353,9 @@ export const en: Messages = {
     reimbursementsLand: "This is where the agent's reimbursements arrive.",
     cashOut: "Cash out to pesos with Ripio",
     nothingYet: "When the agent pays you back for an expense, you'll see it here.",
+    yourFunds: "Your funds",
+    fundTags: { here: "you're here", draft: "draft", requested: "you asked to join" },
+    createAnother: "Create another fund",
   },
   contribute: {
     haveUsdt: "I have USDT",

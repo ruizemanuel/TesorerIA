@@ -425,6 +425,10 @@ export const es = {
     reimbursementsLand: "Acá llegan los reintegros del agente.",
     cashOut: "Pasar a pesos con Ripio",
     nothingYet: "Cuando el agente te devuelva un gasto, lo vas a ver acá.",
+    /** Tus fondos (spec, 9.4 C): every fund of yours, with what each one is to you after its name. */
+    yourFunds: "Tus fondos",
+    fundTags: { here: "estás acá", draft: "borrador", requested: "pediste sumarte" },
+    createAnother: "Crear otro fondo",
   },
   /** Aportar (spec, 9, pantalla 3): where to send USDT or wARS from, and the button once the money has arrived. */
   contribute: {

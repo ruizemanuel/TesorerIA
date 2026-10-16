@@ -50,14 +50,21 @@ test("three friends create a fund, contribute, get the agreed expense back, and 
   await expect(onScreen(ana, /debe/)).toHaveCount(3); // the fund's inicio, with nobody paid yet
   const fund = new URL(ana.url()).pathname;
 
-  // Ana leaves, and comes back to the fund by entering with her passkey (spec, 11: "entrar").
+  // Ana leaves, and comes back to the fund by entering with her passkey (spec, 11: "entrar"). On the way out, Tu cuenta
+  // lists her funds (spec, 9.4 C): this one, marked, and the way to create another.
   await open(ana, `${fund}?p=cuenta`);
+  const yourFunds = ana.getByRole("dialog", { name: "Tu cuenta" }).getByRole("region", { name: "Tus fondos" });
+  await expect(yourFunds.getByText(/^Fútbol de los jueves · estás acá$/)).toBeVisible();
+  await expect(yourFunds.getByRole("link", { name: "Crear otro fondo" })).toHaveAttribute("href", "/crear");
   await ana.getByRole("button", { name: "Salir" }).click();
   await expect(ana).toHaveURL(/localhost:3000\/$/);
   await ana.goto(fund);
   await expect(ana).toHaveURL(/\/entrar\?next=/);
   await ana.waitForLoadState("networkidle"); // see open()
   await ana.getByRole("button", { name: "Entrar con mi passkey" }).click();
+  await expect(ana).toHaveURL(new RegExp(`${fund}$`));
+  // The home page takes her back to the last fund she opened.
+  await open(ana, "/");
   await expect(ana).toHaveURL(new RegExp(`${fund}$`));
 
   // 3. Beto contributes 10 USDT; the run after it converts them. Aportar offers what covers his week (a little over

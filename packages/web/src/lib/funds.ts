@@ -586,10 +586,10 @@ export async function deployStep(
   return deployCall(db, { fundId, userId, votesRequired, agent, m });
 }
 
-/** The funds a person belongs to, live ones first. */
+/** The funds a person belongs to, with their names, live ones first. */
 export async function fundsOf(db: Db, userId: string) {
   const rows = await db
-    .select({ id: funds.id, status: funds.status, address: funds.address })
+    .select({ id: funds.id, status: funds.status, address: funds.address, name: funds.name })
     .from(memberships)
     .innerJoin(funds, eq(funds.id, memberships.fundId))
     .where(eq(memberships.userId, userId));

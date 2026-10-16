@@ -1,4 +1,5 @@
 import { FUND_FACTORY, shortMessage } from "@tesoreria/agent";
+import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { connection } from "next/server";
 import { getAddress } from "viem";
@@ -9,8 +10,10 @@ import { currentUser } from "../lib/current-user";
 import { getDb } from "../lib/db/client";
 import { env } from "../lib/env";
 import { fundsOf } from "../lib/funds";
+import { LAST_FUND_COOKIE, homeTarget } from "../lib/home";
 import type { Locale } from "../lib/i18n/locales";
 import { getLocale, getMessages } from "../lib/i18n/server";
+import { requestsOf } from "../lib/join-requests";
 import { loadPublicFundScreen } from "../lib/read-fund";
 
 /**
@@ -42,8 +45,10 @@ export default async function Home() {
   const locale = await getLocale();
   const user = await currentUser();
   if (user) {
-    const [first] = await fundsOf(await getDb(), user.id);
-    if (first) redirect(first.address ? `/f/${first.address}` : `/f/borrador/${first.id}`);
+    const db = await getDb();
+    const [funds, requests] = await Promise.all([fundsOf(db, user.id), requestsOf(db, user.id)]);
+    const target = homeTarget({ funds, lastFund: (await cookies()).get(LAST_FUND_COOKIE)?.value, requests });
+    if (target !== null) redirect(target);
   }
   const publicFund = env().PUBLIC_FUND;
   // Without the live list it's the same page, with "Entrar" in the place of "Ver un fondo real".
