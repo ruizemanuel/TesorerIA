@@ -7,7 +7,7 @@ import { OnItsWayError, UserFacingError } from "./errors";
 
 export type Me = { name: string; account: Address; credential: { id: string; publicKey: Hex } };
 export type OperationInfo = {
-  kind: "create-fund" | "contribute" | "vote" | "execute" | "cash-out";
+  kind: "create-fund" | "contribute" | "vote" | "execute" | "cash-out" | "propose";
   fund?: Address;
   amount?: bigint;
   token?: "wars" | "usdt";

@@ -74,6 +74,11 @@ describe("POST /api/operations", () => {
     expect(await db.select().from(operations)).toMatchObject([{ userOpHash: OP, kind: "execute", fund: FUND }]);
   });
 
+  it("keeps a proposal to add someone, like a vote, so the timeline shows it on its way (spec, 9.4)", async () => {
+    expect((await record(post("/api/operations", { userOpHash: OP, kind: "propose", fund: FUND }))).status).toBe(200);
+    expect(await db.select().from(operations)).toMatchObject([{ userOpHash: OP, kind: "propose", fund: FUND }]);
+  });
+
   it("keeps a pass to pesos, with its amount and no fund (spec, 9.2)", async () => {
     const response = await record(post("/api/operations", { userOpHash: OP, kind: "cash-out", amount: "45000000000000000000000", token: "wars" }));
     expect(response.status).toBe(200);

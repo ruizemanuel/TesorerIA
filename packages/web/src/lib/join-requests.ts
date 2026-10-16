@@ -1,6 +1,8 @@
-import { and, desc, eq, ne, not, sql } from "drizzle-orm";
+import { and, desc, eq, isNotNull, ne, not, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
+import { type Address, getAddress } from "viem";
 import { type Db, inTransaction } from "./db/client";
-import { funds, joinRequests, memberships } from "./db/schema";
+import { funds, joinRequests, memberships, users } from "./db/schema";
 import { MAX_MEMBERS } from "./fund-abi";
 import { fail, isMember, lockFund } from "./fund-rows";
 import type { FundsResult } from "./funds";
@@ -68,4 +70,28 @@ export function requestsOf(db: Db, userId: string): Promise<{ fundId: string; na
     .innerJoin(funds, eq(funds.id, joinRequests.fundId))
     .where(and(eq(joinRequests.userId, userId), eq(funds.status, "live"), isOpenRequest()))
     .orderBy(desc(joinRequests.createdAt));
+}
+
+/**
+ * The open requests in the live funds `userId` is a member of, with the account each one asked from: the only accounts
+ * that person's sponsored propose may add (checkCalls, spec 9.4). None in a fund that already has MAX_MEMBERS members,
+ * whose AddMember the contract would refuse (Review Focus 4).
+ */
+export async function sponsoredJoinRequests(db: Db, userId: string): Promise<{ fund: Address; account: Address }[]> {
+  const mine = alias(memberships, "mine");
+  const rows = await db
+    .select({ fund: funds.address, account: users.account })
+    .from(joinRequests)
+    .innerJoin(funds, eq(funds.id, joinRequests.fundId))
+    .innerJoin(users, eq(users.id, joinRequests.userId))
+    .innerJoin(mine, and(eq(mine.fundId, joinRequests.fundId), eq(mine.userId, userId)))
+    .where(
+      and(
+        eq(funds.status, "live"),
+        isNotNull(funds.address),
+        isOpenRequest(),
+        sql`${db.$count(memberships, eq(memberships.fundId, funds.id))} < ${MAX_MEMBERS}`,
+      ),
+    );
+  return rows.map((row) => ({ fund: getAddress(row.fund!), account: getAddress(row.account) }));
 }

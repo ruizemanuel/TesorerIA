@@ -15,6 +15,7 @@ export const memberFundAbi = parseAbi([
   "function contributeUsdt(uint256 amount)",
   "function vote(uint256 id)",
   "function execute(uint256 id)",
+  "function propose(uint8 action, address a, address b, uint256 amount, string note) returns (uint256 id)",
 ]);
 
 /**

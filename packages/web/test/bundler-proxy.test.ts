@@ -1,8 +1,8 @@
 import { FUND_FACTORY, USDT, WARS, fundFactoryAbi } from "@tesoreria/agent";
 import { ATTRIBUTION_SUFFIX, type Call } from "@tesoreria/wallet";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { drizzle as drizzleNeon } from "drizzle-orm/neon-http";
-import { type Address, type Hex, concat, decodeFunctionData, encodeFunctionData, erc20Abi, getAddress, numberToHex, parseAbi } from "viem";
+import { type Address, type Hex, concat, decodeFunctionData, encodeFunctionData, erc20Abi, getAddress, numberToHex, parseAbi, zeroAddress } from "viem";
 import { entryPoint07Address } from "viem/account-abstraction";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -23,11 +23,11 @@ import { contributeCalls } from "../src/lib/contribute";
 import { MAX_CREATE_FUND_NONCES, claimCreateFundNonce } from "../src/lib/create-fund-cap";
 import type { Db } from "../src/lib/db/client";
 import * as schema from "../src/lib/db/schema";
-import { createFundNonces, funds, memberships } from "../src/lib/db/schema";
-import { memberFundAbi } from "../src/lib/fund-abi";
+import { createFundNonces, funds, joinRequests, memberships } from "../src/lib/db/schema";
+import { MAX_MEMBERS, ProposalAction, memberFundAbi } from "../src/lib/fund-abi";
 import { cancelDeploy, createDraft, deployCall, frozenCreateFunds, joinFund } from "../src/lib/funds";
 import { es } from "../src/lib/i18n/es";
-import { voteCalls } from "../src/lib/vote";
+import { addMemberCalls, voteCalls } from "../src/lib/vote";
 import { AGENT } from "./support/fixtures";
 import { WARS as WARS_UNIT, addLiveFund, addUser, randomAccount, testDb } from "./support/db";
 import { MULTI_SEND, MULTI_SEND_CALL_ONLY, execute, multiSend, multiSendAbi, packed, safeCallData } from "./support/safe";
@@ -162,8 +162,8 @@ describe("operationCalls", () => {
 
 describe("checkCalls", () => {
   const creating = createFundCall();
-  const member = { liveFunds: [FUND], createFundCalls: [] };
-  const creator = { liveFunds: [], createFundCalls: [creating.data!] };
+  const member = { liveFunds: [FUND], createFundCalls: [], joinRequests: [] };
+  const creator = { liveFunds: [], createFundCalls: [creating.data!], joinRequests: [] };
   const fundCall = (to: Address, data: Hex, value = 0n): OperationCall => ({ to, value, data });
 
   it("lets a live fund's member approve it and contribute, in wARS or USDT, and vote and execute there", () => {
@@ -201,7 +201,7 @@ describe("checkCalls", () => {
     const pass = transfer(WARS, OTHER, 10n ** 18n);
     const cases: Record<string, [OperationCall[], Sponsorship]> = {
       "a pass from the creator of a fund being created, with no live fund": [[pass], creator],
-      "a pass from someone with nothing": [[pass], { liveFunds: [], createFundCalls: [] }],
+      "a pass from someone with nothing": [[pass], { liveFunds: [], createFundCalls: [], joinRequests: [] }],
       "a transfer of USDT": [[transfer(USDT, OTHER, 1n)], member],
       "two passes in a batch": [[pass, pass], member],
       "a pass in a batch with calls sponsored alone": [[pass, ...asRead(contribute(FUND))], member],
@@ -212,6 +212,50 @@ describe("checkCalls", () => {
     for (const [why, [calls, sponsorship]] of Object.entries(cases)) {
       expect(checkCalls(calls, sponsorship), why).toMatchObject({ ok: false, status: 403 });
     }
+  });
+
+  const LUCAS = getAddress("0x000000000000000000000000000000000000aaa4");
+  const asked = { liveFunds: [FUND], createFundCalls: [], joinRequests: [{ fund: FUND, account: LUCAS }] };
+  const propose = (action: number, a: Address, b: Address = zeroAddress, amount = 0n, note = "") =>
+    fundCall(FUND, encodeFunctionData({ abi: memberFundAbi, functionName: "propose", args: [action, a, b, amount, note] }));
+
+  it("lets a live fund's member propose adding someone who asked to join it, alone (spec, 9.4)", () => {
+    expect(checkCalls(asRead(addMemberCalls({ fund: FUND, account: LUCAS })), asked)).toEqual({ ok: true, createsFund: false });
+  });
+
+  it("refuses any other proposal, an account without a request there, a batch, and someone else's fund", () => {
+    const cases: Record<string, [OperationCall[], Sponsorship]> = {
+      "a payment to the one who asked": [[propose(ProposalAction.Pay, LUCAS, zeroAddress, 1n)], asked],
+      "closing the fund": [[propose(ProposalAction.Close, zeroAddress)], asked],
+      "adding an account that didn't ask": [[propose(ProposalAction.AddMember, OTHER)], asked],
+      "adding them with a second address": [[propose(ProposalAction.AddMember, LUCAS, OTHER)], asked],
+      "adding them with an amount": [[propose(ProposalAction.AddMember, LUCAS, zeroAddress, 1n)], asked],
+      "adding them with a note": [[propose(ProposalAction.AddMember, LUCAS, zeroAddress, 0n, "hola")], asked],
+      "adding them in a batch": [[propose(ProposalAction.AddMember, LUCAS), ...asRead(contribute(FUND))], asked],
+      "adding them twice in a batch": [[propose(ProposalAction.AddMember, LUCAS), propose(ProposalAction.AddMember, LUCAS)], asked],
+      "adding them on a fund they asked to join but the member isn't live in": [
+        asRead(addMemberCalls({ fund: OTHER, account: LUCAS })),
+        { ...asked, joinRequests: [{ fund: OTHER, account: LUCAS }] },
+      ],
+      "adding someone who asked to join another fund": [asRead(addMemberCalls({ fund: FUND, account: LUCAS })), { ...asked, joinRequests: [{ fund: OTHER, account: LUCAS }] }],
+      "adding them with value": [[{ ...propose(ProposalAction.AddMember, LUCAS), value: 1n }], asked],
+    };
+    for (const [why, [calls, sponsorship]] of Object.entries(cases)) {
+      expect(checkCalls(calls, sponsorship), why).toMatchObject({ ok: false, status: 403 });
+    }
+  });
+
+  it("refuses every other action shaped like an AddMember, a call with no arguments, and a byte more", () => {
+    const [add] = addMemberCalls({ fund: FUND, account: LUCAS });
+    const cases: Record<string, OperationCall[]> = {
+      "a call with no arguments": [fundCall(FUND, encodeFunctionData({ abi: memberFundAbi, functionName: "name" }))],
+      "a byte more": [fundCall(FUND, concat([add!.data!, "0x00"]))],
+    };
+    for (const [name, action] of Object.entries(ProposalAction)) {
+      if (action !== ProposalAction.AddMember) cases[`${name} on the one who asked`] = [propose(action, LUCAS)];
+    }
+    expect(Object.keys(cases)).toHaveLength(2 + Object.keys(ProposalAction).length - 1);
+    for (const [why, calls] of Object.entries(cases)) expect(checkCalls(calls, asked), why).toMatchObject({ ok: false, status: 403 });
   });
 
   it("lets only the creator of a fund being created send createFund, alone, and says it's one", () => {
@@ -225,7 +269,7 @@ describe("checkCalls", () => {
 
   it("sponsors on the factory only the createFunds it's given, byte for byte in any case", () => {
     const another = createFundCall();
-    const both = { liveFunds: [], createFundCalls: [creating.data!, another.data!] };
+    const both = { liveFunds: [], createFundCalls: [creating.data!, another.data!], joinRequests: [] };
     for (const call of [creating, another]) expect(checkCalls(asRead([call]), both)).toEqual({ ok: true, createsFund: true });
     const shouted = creating.data!.replace(/[a-f]/g, (letter) => letter.toUpperCase()) as Hex;
     expect(checkCalls([{ to: FUND_FACTORY, value: 0n, data: shouted }], creator)).toEqual({ ok: true, createsFund: true });
@@ -771,5 +815,29 @@ describe("authorizeBundlerRequest", () => {
       const claims = await Promise.all(Array.from({ length: MAX_CREATE_FUND_NONCES + 2 }, (_, i) => claimCreateFundNonce(db, ana.id, BigInt(i), DAILY_LIMIT)));
       expect(claims.filter(Boolean)).toHaveLength(MAX_CREATE_FUND_NONCES);
     });
+  });
+
+  it("sponsors proposing someone with an open request, and not once it expired or the fund has 10 members (Review Focus 4)", async () => {
+    const db: Db = await testDb();
+    const juan = await addUser(db, "Juan");
+    const lucas = await addUser(db, "Lucas");
+    const fund = await addLiveFund(db, { creatorId: juan.id, address: FUND, members: [juan.id] });
+    await db.insert(joinRequests).values({ fundId: fund.id, userId: lucas.id });
+    const callData = safeCallData(addMemberCalls({ fund: FUND, account: getAddress(lucas.account) }));
+    const sign = () =>
+      authorizeBundlerRequest(db, asUser(juan), request("pm_getPaymasterData", sponsored(juan.account, {}, MAX_OPERATION_GAS, callData)), POLICY, price, agent, DAILY_LIMIT);
+    expect(await sign()).toMatchObject({ ok: true });
+
+    // Lucas himself, who isn't in the fund, gets nothing.
+    const his = request("pm_getPaymasterData", sponsored(lucas.account, {}, MAX_OPERATION_GAS, callData));
+    expect(await authorizeBundlerRequest(db, asUser(lucas), his, POLICY, price, agent, DAILY_LIMIT)).toMatchObject({ ok: false, status: 403 });
+
+    await db.update(joinRequests).set({ createdAt: sql`now() - interval '8 days'` }).where(eq(joinRequests.userId, lucas.id));
+    expect(await sign()).toMatchObject({ ok: false, status: 403 });
+    await db.update(joinRequests).set({ createdAt: sql`now()` }).where(eq(joinRequests.userId, lucas.id));
+    expect(await sign()).toMatchObject({ ok: true });
+
+    for (let i = 1; i < MAX_MEMBERS; i++) await db.insert(memberships).values({ fundId: fund.id, userId: (await addUser(db, `M${i}`)).id });
+    expect(await sign()).toMatchObject({ ok: false, status: 403 });
   });
 });

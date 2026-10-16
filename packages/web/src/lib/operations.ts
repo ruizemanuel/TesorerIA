@@ -5,7 +5,7 @@ import { funds, operations } from "./db/schema";
 
 export type OperationInput = {
   userOpHash: Hash;
-  kind: "create-fund" | "contribute" | "vote" | "execute" | "cash-out";
+  kind: "create-fund" | "contribute" | "vote" | "execute" | "cash-out" | "propose";
   fund?: Address;
   amount?: bigint;
   token?: "wars" | "usdt";

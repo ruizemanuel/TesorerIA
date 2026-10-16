@@ -1,9 +1,9 @@
 import type { Call } from "@tesoreria/wallet";
-import { decodeFunctionData, getAddress } from "viem";
+import { decodeFunctionData, getAddress, zeroAddress } from "viem";
 import { describe, expect, it } from "vitest";
 import { OnItsWayError, UserFacingError } from "../src/lib/client/errors";
 import { memberFundAbi } from "../src/lib/fund-abi";
-import { castVote, executeCalls, voteCalls } from "../src/lib/vote";
+import { addMemberCalls, castVote, executeCalls, voteCalls } from "../src/lib/vote";
 
 const FUND = getAddress("0x00000000000000000000000000000000000f00d1");
 
@@ -23,6 +23,13 @@ describe("voteCalls", () => {
 describe("executeCalls", () => {
   it("executes a proposal that has its votes, alone", () => {
     expect(decode(executeCalls({ fund: FUND, proposalId: 3n }))).toEqual([{ functionName: "execute", args: [3n] }]);
+  });
+});
+
+describe("addMemberCalls", () => {
+  it("proposes adding the account, alone, with no second address, amount or note (spec, 9.4)", () => {
+    const LUCAS = getAddress("0x000000000000000000000000000000000000aaa4");
+    expect(decode(addMemberCalls({ fund: FUND, account: LUCAS }))).toEqual([{ functionName: "propose", args: [1, LUCAS, zeroAddress, 0n, ""] }]);
   });
 });
 

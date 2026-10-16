@@ -18,13 +18,15 @@ import {
   parseAbi,
   size,
   slice,
+  zeroAddress,
 } from "viem";
 import { entryPoint07Address } from "viem/account-abstraction";
 import { MAX_CREATE_FUND_NONCES, claimCreateFundNonce } from "./create-fund-cap";
 import type { Db } from "./db/client";
 import { funds, memberships } from "./db/schema";
-import { memberFundAbi } from "./fund-abi";
+import { ProposalAction, memberFundAbi } from "./fund-abi";
 import { frozenCreateFunds } from "./funds";
+import { sponsoredJoinRequests } from "./join-requests";
 
 /** The JSON-RPC methods a member's browser needs to send a sponsored UserOperation, and nothing else. */
 export const BUNDLER_METHODS = new Set([
@@ -162,6 +164,11 @@ export type Sponsorship = {
    * deployCall built it (`frozenCreateFunds`): the only createFunds theirs to send.
    */
   createFundCalls: Hex[];
+  /**
+   * The open requests to join those live funds, with the account each one asked from (sponsoredJoinRequests): the only
+   * accounts the person's propose may add (spec, 9.4). None in a fund that already has MAX_MEMBERS members.
+   */
+  joinRequests: { fund: Address; account: Address }[];
 };
 
 /** What a live fund's member calls on it (spec, 9): contribute, and vote and execute. */
@@ -191,6 +198,26 @@ function isCashOut(calls: OperationCall[]): boolean {
 }
 
 /**
+ * Proposing to add someone who asked to join (spec, 9.4): one `propose` alone, on a live fund of the person, to add an
+ * account that has an open request there (`joinRequests`, from the server, never from the browser), with no second
+ * address, amount or note. Alone: in a batch, the other calls would ride on it unchecked.
+ */
+function isAddMember(calls: OperationCall[], { liveFunds, joinRequests }: Sponsorship): boolean {
+  const [only] = calls;
+  if (calls.length !== 1 || only === undefined || !liveFunds.some((fund) => isAddressEqual(fund, only.to))) return false;
+  const decoded = decodeExactly(memberFundAbi, only.data);
+  if (decoded?.functionName !== "propose") return false;
+  const [action, a, b, amount, note] = decoded.args;
+  return (
+    action === ProposalAction.AddMember &&
+    isAddressEqual(b, zeroAddress) &&
+    amount === 0n &&
+    note === "" &&
+    joinRequests.some((request) => isAddressEqual(request.fund, only.to) && isAddressEqual(request.account, a))
+  );
+}
+
+/**
  * The calls the paymaster pays for, and nothing else (spec, 6: no open sponsored bundler), all with no value:
  * - FundFactory.createFund, alone, from the creator of a fund being created, and only with the exact calldata
  *   deployCall built for that frozen draft (`createFundCalls`): its members in order, its votes, the server's agent;
@@ -198,12 +225,15 @@ function isCashOut(calls: OperationCall[]): boolean {
  *   live fund the person is a member of.
  * - one transfer of the person's own wARS, alone, to any address and for more than nothing, for a member of any live
  *   fund: Pasar a pesos (isCashOut).
+ * - one propose alone, adding an account with an open request to join one of the person's live funds: Proponer
+ *   sumarlo (isAddMember, spec 9.4).
  * `createsFund` says which: it gets the larger gas ceiling.
  */
 export function checkCalls(
   calls: OperationCall[],
-  { liveFunds, createFundCalls }: Sponsorship,
+  sponsorship: Sponsorship,
 ): { ok: true; createsFund: boolean } | { ok: false; status: 403; error: string } {
+  const { liveFunds, createFundCalls } = sponsorship;
   const refuse = (error: string) => ({ ok: false, status: 403, error }) as const;
   if (calls.some((call) => call.value !== 0n)) return refuse("Sponsored calls can't send CELO");
   const [only] = calls;
@@ -215,6 +245,7 @@ export function checkCalls(
   if (isCashOut(calls)) {
     return liveFunds.length > 0 ? { ok: true, createsFund: false } : refuse("Only a live fund's member is sponsored to pass their wARS out");
   }
+  if (isAddMember(calls, sponsorship)) return { ok: true, createsFund: false };
   const isLive = (address: Address) => liveFunds.some((fund) => isAddressEqual(fund, address));
   const refused = calls.find((call) => !memberCall(call, isLive));
   if (refused !== undefined) return refuse(`Call not sponsored: ${refused.data.slice(0, 10)} on ${refused.to}`);
@@ -279,8 +310,8 @@ function operationNonce(userOp: unknown): bigint | undefined {
 }
 
 /**
- * The live funds `userId` is a member of, and the createFund of each draft they created that is being created,
- * naming `agent()`, which is called only if there's one.
+ * The live funds `userId` is a member of, the open requests to join them (sponsoredJoinRequests), and the createFund
+ * of each draft they created that is being created, naming `agent()`, which is called only if there's one.
  */
 async function sponsorshipOf(db: Db, userId: string, agent: () => Address): Promise<Sponsorship> {
   const live = await db
@@ -296,7 +327,7 @@ async function sponsorshipOf(db: Db, userId: string, agent: () => Address): Prom
     console.error(`No createFund is sponsored for now: ${shortMessage(error)}`);
     createFundCalls = [];
   }
-  return { liveFunds: live.map((row) => getAddress(row.address!)), createFundCalls };
+  return { liveFunds: live.map((row) => getAddress(row.address!)), createFundCalls, joinRequests: await sponsoredJoinRequests(db, userId) };
 }
 
 /**

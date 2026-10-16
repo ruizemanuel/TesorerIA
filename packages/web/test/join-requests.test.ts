@@ -1,12 +1,13 @@
 import { and, eq, sql } from "drizzle-orm";
+import { getAddress } from "viem";
 import { describe, expect, it } from "vitest";
 import type { Db } from "../src/lib/db/client";
-import { joinRequests, memberships } from "../src/lib/db/schema";
+import { funds, joinRequests, memberships } from "../src/lib/db/schema";
 import { MAX_MEMBERS } from "../src/lib/fund-abi";
 import { joinFund } from "../src/lib/funds";
 import { en } from "../src/lib/i18n/en";
 import { es } from "../src/lib/i18n/es";
-import { JOIN_REQUEST_DAYS, MAX_OPEN_JOIN_REQUESTS, joinRequestOf, requestToJoin, requestsOf } from "../src/lib/join-requests";
+import { JOIN_REQUEST_DAYS, MAX_OPEN_JOIN_REQUESTS, joinRequestOf, requestToJoin, requestsOf, sponsoredJoinRequests } from "../src/lib/join-requests";
 import { addLiveFund, addUser, randomAccount, recordTransactions, testDb } from "./support/db";
 
 /** A live fund of Ana, Beto and Caro, and Lucas, who isn't in it. */
@@ -128,5 +129,53 @@ describe("requestToJoin (spec, 9.4)", () => {
     expect(await requestToJoin(db, fund.id, ana.id, en)).toEqual({ ok: false, status: 409, error: "You're already in this fund." });
     expect(en.funds.liveFull).toBe("The fund already has 10 members, which is the most it can have.");
     expect(en.funds.manyRequests).toBe("Many people are already asking to join this fund. Try again in a few days.");
+  });
+});
+
+describe("sponsoredJoinRequests (spec, 9.4)", () => {
+  it("lists the open requests of a member's live funds, with the account each asked from, and nobody else's", async () => {
+    const db = await testDb();
+    const { fund, ana, lucas } = await liveFund(db);
+    await requestToJoin(db, fund.id, lucas.id, es);
+    expect(await sponsoredJoinRequests(db, ana.id)).toEqual([{ fund: fund.address, account: getAddress(lucas.account) }]);
+    expect(await sponsoredJoinRequests(db, lucas.id)).toEqual([]); // he isn't in it
+    await age(db, lucas.id, JOIN_REQUEST_DAYS + 1);
+    expect(await sponsoredJoinRequests(db, ana.id)).toEqual([]);
+  });
+
+  it("leaves out a fund that already has 10 members, whose AddMember the contract would refuse (Review Focus 4)", async () => {
+    const db = await testDb();
+    const { fund, ana, lucas } = await liveFund(db);
+    await requestToJoin(db, fund.id, lucas.id, es);
+    for (let i = 3; i < MAX_MEMBERS; i++) await db.insert(memberships).values({ fundId: fund.id, userId: (await addUser(db, `M${i}`)).id });
+    expect(await sponsoredJoinRequests(db, ana.id)).toEqual([]);
+  });
+
+  it("leaves out a request in a fund that isn't live, or has no address yet, each condition on its own", async () => {
+    const db = await testDb();
+    const { fund, ana, lucas } = await liveFund(db);
+    await requestToJoin(db, fund.id, lucas.id, es);
+    // Requests are only made in live funds, so neither state happens: they pin that the list is the live funds' alone.
+    await db.update(funds).set({ status: "deploying" }).where(eq(funds.id, fund.id));
+    expect(await sponsoredJoinRequests(db, ana.id)).toEqual([]);
+    await db.update(funds).set({ status: "live", address: null }).where(eq(funds.id, fund.id));
+    expect(await sponsoredJoinRequests(db, ana.id)).toEqual([]);
+  });
+
+  it("still lists a fund with 9 members, which has room for a tenth, and each request only to the members of its own fund", async () => {
+    const db = await testDb();
+    const { fund, ana, lucas } = await liveFund(db);
+    await requestToJoin(db, fund.id, lucas.id, es);
+    for (let i = 3; i < MAX_MEMBERS - 1; i++) await db.insert(memberships).values({ fundId: fund.id, userId: (await addUser(db, `M${i}`)).id });
+    expect(await db.$count(memberships, eq(memberships.fundId, fund.id))).toBe(MAX_MEMBERS - 1);
+    expect(await sponsoredJoinRequests(db, ana.id)).toEqual([{ fund: fund.address, account: getAddress(lucas.account) }]);
+
+    // Dani is in another live fund and Lucas asks there too: each of them sees only the request of their own fund.
+    const dani = await addUser(db, "Dani");
+    const other = await addLiveFund(db, { creatorId: dani.id, address: randomAccount(), members: [dani.id] });
+    expect(await sponsoredJoinRequests(db, dani.id)).toEqual([]);
+    await requestToJoin(db, other.id, lucas.id, es);
+    expect(await sponsoredJoinRequests(db, dani.id)).toEqual([{ fund: other.address, account: getAddress(lucas.account) }]);
+    expect(await sponsoredJoinRequests(db, ana.id)).toEqual([{ fund: fund.address, account: getAddress(lucas.account) }]);
   });
 });

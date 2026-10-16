@@ -259,6 +259,7 @@ export const en: Messages = {
     onItsWay: {
       vote: "Your vote is on its way.",
       execute: "Your action to carry out the proposal is on its way.",
+      propose: "Your proposal is on its way.",
       contribution: (what: string) => `Your contribution of ${what} is on its way.`,
     },
   },

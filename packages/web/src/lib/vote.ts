@@ -1,7 +1,7 @@
 import type { Call } from "@tesoreria/wallet";
-import { type Address, encodeFunctionData } from "viem";
+import { type Address, encodeFunctionData, zeroAddress } from "viem";
 import { isOnItsWay, wasCancelled } from "./client/errors";
-import { memberFundAbi } from "./fund-abi";
+import { ProposalAction, memberFundAbi } from "./fund-abi";
 
 type Vote = { fund: Address; proposalId: bigint; completes: boolean };
 
@@ -17,6 +17,19 @@ export function voteCalls({ fund, proposalId, completes }: Vote): Call[] {
 /** Executes a proposal that has its votes but didn't run with the last one (spec, 7.3: anyone may). */
 export function executeCalls({ fund, proposalId }: { fund: Address; proposalId: bigint }): Call[] {
   return [{ to: fund, data: encodeFunctionData({ abi: memberFundAbi, functionName: "execute", args: [proposalId] }) }];
+}
+
+/**
+ * Proposes adding `account`, who asked to join (spec, 9.4). The proposer's own vote goes with it (Fund.propose). It's
+ * the only propose the paymaster pays for (checkCalls), so its second address, amount and note are always these.
+ */
+export function addMemberCalls({ fund, account }: { fund: Address; account: Address }): Call[] {
+  return [
+    {
+      to: fund,
+      data: encodeFunctionData({ abi: memberFundAbi, functionName: "propose", args: [ProposalAction.AddMember, account, zeroAddress, 0n, ""] }),
+    },
+  ];
 }
 
 /**

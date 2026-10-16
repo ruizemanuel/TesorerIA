@@ -35,7 +35,7 @@ export type TimelineExpense = { id: string; by: string; amount: bigint; note: st
 
 export type TimelinePending = {
   userOpHash: string;
-  kind: "create-fund" | "contribute" | "vote" | "execute" | "cash-out";
+  kind: "create-fund" | "contribute" | "vote" | "execute" | "cash-out" | "propose";
   amount: bigint | null;
   token: "wars" | "usdt" | null;
   createdAt: Date;
@@ -274,9 +274,11 @@ export function buildTimeline({
         ? t.onItsWay.vote
         : operation.kind === "execute"
           ? t.onItsWay.execute
-          : t.onItsWay.contribution(
-              operation.token === "usdt" ? formatUsdt(operation.amount ?? 0n, m.locale) : formatPesos(operation.amount ?? 0n, m.locale),
-            );
+          : operation.kind === "propose"
+            ? t.onItsWay.propose
+            : t.onItsWay.contribution(
+                operation.token === "usdt" ? formatUsdt(operation.amount ?? 0n, m.locale) : formatPesos(operation.amount ?? 0n, m.locale),
+              );
     items.push({ id: `op:${operation.userOpHash}`, at: operation.createdAt, actor: { kind: "member", name: t.you }, text, pending: true });
   }
 

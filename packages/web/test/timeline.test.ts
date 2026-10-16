@@ -229,6 +229,12 @@ describe("buildTimeline", () => {
     const pass = { userOpHash: "0xpass", kind: "cash-out" as const, amount: 5_000n * WARS, token: "wars" as const, createdAt: NOW };
     expect(timeline({ pending: [pass] })).toEqual([]);
   });
+
+  it("says the viewer's own proposal on its way, in Spanish and English (spec, 9.4)", () => {
+    const pending = [{ userOpHash: "0xp", kind: "propose", amount: null, token: null, createdAt: NOW }] as const;
+    expect(timeline({ pending }).map((i) => [i.text, i.pending])).toEqual([["Tu propuesta está en camino.", true]]);
+    expect(timeline({ pending, m: en }).map((i) => i.text)).toEqual(["Your proposal is on its way."]);
+  });
 });
 
 // The sentences the cases above don't reach, in Spanish: every one is as it was before the dictionary (Messages),

@@ -306,6 +306,7 @@ export const es = {
     onItsWay: {
       vote: "Tu voto está en camino.",
       execute: "Tu ejecución de la propuesta está en camino.",
+      propose: "Tu propuesta está en camino.",
       contribution: (what: string) => `Tu aporte de ${what} está en camino.`,
     },
   },
