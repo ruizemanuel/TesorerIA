@@ -295,17 +295,32 @@ describe("admitMembers (spec, 9.4)", () => {
     expect(await admitMembers(db, fund.id, [getAddress(lucas.account).toLowerCase() as `0x${string}`])).toEqual([lucas.id]);
   });
 
-  it("lists everyone who asked, open or not, with their name and account, oldest first", async () => {
+  it("admits from a request past reach too: the chain is the only judge of who is in", async () => {
     const db = await testDb();
     const { fund, lucas } = await liveFund(db);
-    const mora = await addUser(db, "Mora");
     await requestToJoin(db, fund.id, lucas.id, es);
-    await age(db, lucas.id, JOIN_REQUEST_DAYS + 1);
-    await requestToJoin(db, fund.id, mora.id, es);
-    expect(await requestsIn(db, fund.id)).toEqual([
-      { userId: lucas.id, name: "Lucas", account: getAddress(lucas.account), requestedAt: expect.any(Date), open: false },
-      { userId: mora.id, name: "Mora", account: getAddress(mora.account), requestedAt: expect.any(Date), open: true },
-    ]);
+    await age(db, lucas.id, JOIN_REQUEST_REACH_DAYS + 3);
+    expect(await admitMembers(db, fund.id, [getAddress(lucas.account)])).toEqual([lucas.id]);
+    expect(await joinRequestOf(db, fund.id, lucas.id)).toBeNull();
+  });
+
+  it("lists everyone who asked, open or not, with their name and account, oldest first, and whether each is within reach", async () => {
+    const db = await testDb();
+    const { fund, lucas } = await liveFund(db);
+    const [mora, nico] = [await addUser(db, "Mora"), await addUser(db, "Nico")];
+    for (const person of [lucas, mora, nico]) await requestToJoin(db, fund.id, person.id, es);
+    await age(db, lucas.id, JOIN_REQUEST_REACH_DAYS + 1);
+    await age(db, mora.id, JOIN_REQUEST_DAYS + 1);
+    const row = (person: typeof lucas, open: boolean, withinReach: boolean) => ({
+      userId: person.id,
+      name: person.name,
+      account: getAddress(person.account),
+      requestedAt: expect.any(Date),
+      open,
+      withinReach,
+    });
+    // Past reach is still listed (its name is used by the proposal that named them), with withinReach false to leave it out of Movimientos.
+    expect(await requestsIn(db, fund.id)).toEqual([row(lucas, false, false), row(mora, false, true), row(nico, true, true)]);
   });
 });
 

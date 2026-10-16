@@ -1,11 +1,12 @@
 import { WARS as WARS_TOKEN, type WeekSummaryFacts } from "@tesoreria/agent";
-import { and, eq } from "drizzle-orm";
-import { type Address, type Hash, getAddress, pad } from "viem";
+import { and, eq, sql } from "drizzle-orm";
+import { type Address, type Hash, getAddress, pad, zeroAddress } from "viem";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CurrentUser } from "../src/lib/current-user";
 import type { Db } from "../src/lib/db/client";
 import { decisions, expenses, funds, joinRequests, memberships, operations, weekSummaries } from "../src/lib/db/schema";
 import { formatPesos } from "../src/lib/format";
+import { JOIN_REQUEST_REACH_DAYS } from "../src/lib/join-requests";
 import { finishOperation, recordOperation } from "../src/lib/operations";
 import { HistoryGapError, loadFundScreen as loadScreen, loadPublicFundScreen } from "../src/lib/read-fund";
 import { storeFacts } from "../src/lib/week-summaries";
@@ -26,6 +27,10 @@ vi.mock("../src/lib/chain", () => ({
     getBlock: async () => ({ timestamp: CLOCK.timestamp }),
     readContract: async ({ functionName }: { functionName: string }) => {
       if (functionName === "balanceInWars") return 87_500n * 10n ** 18n;
+      // A proposal the chain still has open, with one vote and nobody else's.
+      if (functionName === "getProposal") return { executed: false, deadline: CLOCK.timestamp + 86_400n };
+      if (functionName === "voteCount") return 1n;
+      if (functionName === "hasVoted") return false;
       throw new Error(`Unexpected read: ${functionName}`);
     },
   }),
@@ -491,6 +496,40 @@ describe("loadFundScreen: someone who asked to join (spec, 9.4)", () => {
     while (ten.length < 10) ten.push(randomAccount());
     agent.readFund.mockResolvedValue(snapshot({ address, members: ten }));
     expect(asked(await loadFundScreen(address, asViewer(ana)))?.action).toMatchObject({ canPropose: false });
+  });
+
+  it("keeps an expired request in Movimientos while a proposal made in time could still carry it out, and drops it past that", async () => {
+    const [lucas, mora, nico] = [await addUser(db, "Lucas"), await addUser(db, "Mora"), await addUser(db, "Nico")];
+    const address = await liveFund();
+    const fundId = await fundIdOf(address);
+    const askedDaysAgo = (userId: string, days: number) =>
+      db.insert(joinRequests).values({ fundId, userId, createdAt: sql`now() - ${days} * interval '1 day'` });
+    await askedDaysAgo(lucas.id, JOIN_REQUEST_REACH_DAYS - 1);
+    await askedDaysAgo(mora.id, JOIN_REQUEST_REACH_DAYS + 1);
+    await askedDaysAgo(nico.id, 1);
+
+    const screen = await loadFundScreen(address, asViewer(ana));
+    // Newest first: Nico's open request, then Lucas's, which expired 6 days ago; Mora's is past reach and gone.
+    expect(texts(screen!)).toEqual(["Nico pidió sumarse al fondo.", "Venció el pedido de Lucas."]);
+    expect(screen!.timeline.find((item) => item.text === "Venció el pedido de Lucas.")?.action).toBeUndefined();
+    // Gone from Movimientos only: the request is still there for the chain to admit whoever it took in (admitMembers).
+    expect(await db.$count(joinRequests, eq(joinRequests.fundId, fundId))).toBe(3);
+  });
+
+  it("still names a requester in the proposal to add them, whatever the age of their request", async () => {
+    const address = await liveFund();
+    const fundId = await fundIdOf(address);
+    // A proposal made in time has expired by 14 days; the names don't depend on that, nor on the request showing.
+    for (const days of [JOIN_REQUEST_REACH_DAYS - 1, JOIN_REQUEST_REACH_DAYS + 1]) {
+      const lucas = await addUser(db, "Lucas");
+      await db.insert(joinRequests).values({ fundId, userId: lucas.id, createdAt: sql`now() - ${days} * interval '1 day'` });
+      agent.readFundEvents.mockResolvedValue([
+        event("ProposalCreated", { id: 4n, action: 1, a: getAddress(lucas.account), b: zeroAddress, amount: 0n, proposer: getAddress(ana.account), note: "" }, BLOCK - 100n),
+      ]);
+      const screen = await loadFundScreen(address, asViewer(ana));
+      expect(texts(screen!), `${days} days old`).toEqual(["Ana propuso sumar a Lucas al fondo. Lleva 1 de 2 votos."]);
+      await db.delete(joinRequests).where(eq(joinRequests.userId, lucas.id));
+    }
   });
 
   it("never shows a request on the public view, nor the name of who asked", async () => {

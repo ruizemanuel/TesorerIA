@@ -95,7 +95,8 @@ export async function loadFundScreen(
   const names = new Map<Address, string>();
   if (publicView && !fund.publicNames) snapshot.members.forEach((member, i) => names.set(getAddress(member), m.common.member(i + 1)));
   else for (const p of people) names.set(getAddress(p.account), p.name);
-  // Who asked to join, for their request and its proposal: never on the public view, which shows no requests.
+  // Who asked to join, for their request and its proposal: never on the public view, which shows no requests. All of
+  // them are named, past reach too: a proposal to add someone reads with the name they asked with, however old.
   const requests = publicView ? [] : await requestsIn(db, fund.id);
   for (const request of requests) if (!names.has(request.account)) names.set(request.account, request.name);
 
@@ -152,12 +153,15 @@ export async function loadFundScreen(
     proposals,
     expenses: expenseRows,
     pending,
-    joinRequests: requests.map((request) => ({
-      account: request.account,
-      name: request.name,
-      at: request.open ? request.requestedAt : new Date(request.requestedAt.getTime() + JOIN_REQUEST_DAYS * 86_400_000),
-      open: request.open,
-    })),
+    // Movimientos shows a request while a proposal made in time could still carry it out (JOIN_REQUEST_REACH_DAYS).
+    joinRequests: requests
+      .filter((request) => request.withinReach)
+      .map((request) => ({
+        account: request.account,
+        name: request.name,
+        at: request.open ? request.requestedAt : new Date(request.requestedAt.getTime() + JOIN_REQUEST_DAYS * 86_400_000),
+        open: request.open,
+      })),
     canAddMembers: snapshot.members.length < MAX_MEMBERS,
     conversionHold: hold,
     summaries: summaryRows.map((row) => ({ week: row.week, at: row.createdAt })),

@@ -132,13 +132,25 @@ export async function sponsoredJoinRequests(db: Db, userId: string): Promise<{ f
   return rows.map((row) => ({ fund: getAddress(row.fund!), account: getAddress(row.account) }));
 }
 
-/** Everyone with a request to join `fundId`, open or not, oldest first: their name and account, for its movements. */
+/**
+ * Everyone with a request to join `fundId`, open or not, oldest first: their name and account, for its movements. Each
+ * says whether it's `open` and whether it's `withinReach` (open, or expired but not past JOIN_REQUEST_REACH_DAYS), both
+ * on the database's clock. Movimientos shows only the ones within reach; the rest are listed too because the name of
+ * a requester is also how a proposal to add them reads, long after the request stopped mattering.
+ */
 export async function requestsIn(
   db: Db,
   fundId: string,
-): Promise<{ userId: string; name: string; account: Address; requestedAt: Date; open: boolean }[]> {
+): Promise<{ userId: string; name: string; account: Address; requestedAt: Date; open: boolean; withinReach: boolean }[]> {
   const rows = await db
-    .select({ userId: users.id, name: users.name, account: users.account, requestedAt: joinRequests.createdAt, open: isOpenRequest() })
+    .select({
+      userId: users.id,
+      name: users.name,
+      account: users.account,
+      requestedAt: joinRequests.createdAt,
+      open: isOpenRequest(),
+      withinReach: isWithinReach(),
+    })
     .from(joinRequests)
     .innerJoin(users, eq(users.id, joinRequests.userId))
     .where(eq(joinRequests.fundId, fundId))
