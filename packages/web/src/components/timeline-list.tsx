@@ -10,7 +10,7 @@ import { ProposeMemberButton } from "./propose-member-button";
 import { buttonClass } from "./ui";
 import { VoteButton } from "./vote-button";
 
-/** The movements, newest first (spec, 9.2): avatar, one sentence, the time, and at most one action. */
+/** The movements, newest first (spec, 9.2): avatar, one sentence (with a heads-up under it, when it has one), the time, and at most one action. */
 export function TimelineList({
   items,
   fund,
@@ -60,6 +60,7 @@ export function TimelineList({
             <Avatar kind={actor.kind === "agent" ? "agent" : "member"} name={who} />
             <div className="min-w-0 flex-1">
               <p className="text-sm leading-snug [font-variant-numeric:lining-nums_tabular-nums]">{item.text}</p>
+              {item.headsUp && <p className="mt-0.5 text-[13px] leading-snug text-muted">{item.headsUp}</p>}
               <p className="mt-0.5 text-xs text-muted">{item.pending ? m.movements.onItsWay : formatWhen(item.at, now, locale)}</p>
               {item.action?.kind === "receipt" && (
                 // 44 px to tap: the box reaches down to the row's divider instead of making the row taller.

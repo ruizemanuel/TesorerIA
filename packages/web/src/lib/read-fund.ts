@@ -99,6 +99,9 @@ export async function loadFundScreen(
   // them are named, past reach too: a proposal to add someone reads with the name they asked with, however old.
   const requests = publicView ? [] : await requestsIn(db, fund.id);
   for (const request of requests) if (!names.has(request.account)) names.set(request.account, request.name);
+  // Who is in the fund now: the chain's list, with the names the database has. A member who left keeps their row there.
+  const onChain = new Set(snapshot.members.map((member) => getAddress(member)));
+  const memberNames = people.filter((person) => onChain.has(getAddress(person.account))).map((person) => person.name);
 
   const joined = joinWeeks(events, (e) => weekAt(blockTime(e.blockNumber, clock), snapshot.startTime));
   const proposals = await readProposals(snapshot, events, publicView ? null : (viewer?.account ?? null));
@@ -162,6 +165,7 @@ export async function loadFundScreen(
         at: request.open ? request.requestedAt : new Date(request.requestedAt.getTime() + JOIN_REQUEST_DAYS * 86_400_000),
         open: request.open,
       })),
+    memberNames,
     canAddMembers: snapshot.members.length < MAX_MEMBERS,
     conversionHold: hold,
     summaries: summaryRows.map((row) => ({ week: row.week, at: row.createdAt })),

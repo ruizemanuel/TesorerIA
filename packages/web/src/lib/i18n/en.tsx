@@ -239,6 +239,7 @@ export const en: Messages = {
     memberAdded: (who: string) => `${sentenceStart(who)} joined the fund.`,
     joinRequest: (who: string) => `${sentenceStart(who)} asked to join the fund.`,
     joinRequestExpired: (who: string) => `${sentenceStart(who)}'s request to join expired.`,
+    joinRequestSameName: (who: string) => `Heads up: someone else here is also called ${who}. Check with the group before you propose them.`,
     weekClosed: (week: number) => `I closed week ${week}. Here's the summary for the group.`,
     memberRemoved: (who: string) => `${sentenceStart(who)} left the fund and took their share.`,
     memberReplaced: (who: string) => `${sentenceStart(who)} switched accounts.`,

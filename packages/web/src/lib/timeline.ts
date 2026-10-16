@@ -5,6 +5,7 @@ import type { ExpenseStatus } from "./db/schema";
 import { ProposalAction } from "./fund-abi";
 import { formatPesos, formatUsdt } from "./format";
 import type { Messages } from "./i18n/messages";
+import { sameName } from "./same-name";
 
 export type Actor = { kind: "agent" } | { kind: "member"; name: string } | { kind: "group" };
 
@@ -27,6 +28,8 @@ export type TimelineItem = {
   action?: TimelineAction;
   /** Still on its way. */
   pending?: boolean;
+  /** A caution under the sentence, not part of it: on an open request to join, that its name is another person's here (spec, 9.4). */
+  headsUp?: string;
 };
 
 /** An open or finished proposal, as the chain has it now. */
@@ -76,6 +79,7 @@ export function buildTimeline({
   expenses,
   pending,
   joinRequests = [],
+  memberNames = [],
   canAddMembers = false,
   conversionHold = null,
   summaries = [],
@@ -102,6 +106,8 @@ export function buildTimeline({
   pending: readonly TimelinePending[];
   /** Who asked to join (members' screens only), and whether the fund has room for one more on the chain. */
   joinRequests?: readonly TimelineJoinRequest[];
+  /** The names of the fund's current members, as the database has them: an open request with one of them gets a heads-up. */
+  memberNames?: readonly string[];
   canAddMembers?: boolean;
   /** Why the USDT waiting hasn't been converted yet, or null (read-fund.ts, conversionHold). */
   conversionHold?: ConversionHold | null;
@@ -284,7 +290,13 @@ export function buildTimeline({
   }
 
   // Who asked to join, for the group to propose (spec, 9.4): never on the public view, which has no requests.
-  for (const request of viewerIsMember ? joinRequests : []) {
+  const asking = viewerIsMember ? joinRequests : [];
+  const open = asking.filter((request) => request.open);
+  // Names can't be refused, so a member who might propose the wrong account is told: the name is a member's, or another open request's.
+  const sharesName = (request: TimelineJoinRequest) =>
+    memberNames.some((member) => sameName(member, request.name)) ||
+    open.some((other) => other.account !== request.account && sameName(other.name, request.name));
+  for (const request of asking) {
     if (beingProposed.has(getAddress(request.account))) continue;
     const base = { id: `join:${request.account}`, at: request.at, actor: { kind: "member", name: request.name } as Actor };
     items.push(
@@ -293,6 +305,7 @@ export function buildTimeline({
             ...base,
             text: t.joinRequest(request.name),
             action: { kind: "propose-member", account: request.account, canPropose: canAddMembers && !proposeOnItsWay },
+            ...(sharesName(request) ? { headsUp: t.joinRequestSameName(request.name) } : {}),
           }
         : { ...base, text: t.joinRequestExpired(request.name) },
     );

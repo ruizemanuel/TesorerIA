@@ -126,6 +126,7 @@ const ARGS: Record<string, (k: Kit) => Case[]> = {
   "timeline.memberAdded": () => [call(THIRD)],
   "timeline.joinRequest": () => [call(NEWCOMER)],
   "timeline.joinRequestExpired": () => [call(NEWCOMER)],
+  "timeline.joinRequestSameName": () => [call(NEWCOMER)],
   "timeline.weekClosed": () => [call(3)],
   "timeline.memberRemoved": ({ m }) => [call(THIRD), when("an account with no name", m.timeline.someone)],
   "timeline.memberReplaced": ({ m }) => [call(THIRD), when("an account with no name", m.timeline.someone)],
