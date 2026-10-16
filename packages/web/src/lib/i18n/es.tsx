@@ -183,6 +183,23 @@ export const es = {
     copy: "Copiar el link",
     copied: "Copiado",
   },
+  /**
+   * The week's summary that goes to the group (spec, 9.4): its words, joined by weekSummaryText. The bullets, the
+   * blank lines and the first line ("TesorerIA · {fund}") are the code's. `week` counts from 1, as people do.
+   */
+  summary: {
+    heading: (week: number, from: string, to: string) => `Resumen de la semana ${week} (del ${from} al ${to})`,
+    balance: (amount: string) => `En el fondo hay ${amount}.`,
+    paid: (paid: number, members: number) => `Pagaron la cuota ${paid} de ${members}. Deben:`,
+    owes: (who: string, amount: string) => `${sentenceStart(who)}, ${amount}`,
+    allPaid: "Todos pagaron la cuota.",
+    happened: "Lo que pasó:",
+    contributed: (amount: string) => `Aportaron ${amount} entre todos.`,
+    /** `what` is timeline.proposal.pay: "pagarle $ 8.000 a Ale por las pelotas". */
+    approvedPayment: (what: string) => `Se aprobó ${what}.`,
+    nothing: "No hubo movimientos.",
+    toContribute: (link: string) => `Para aportar: ${link}`,
+  },
   /** The fields of someone without an account yet. */
   person: {
     name: "Tu nombre",

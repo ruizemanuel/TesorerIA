@@ -16,8 +16,10 @@ import { celoClient, logReader } from "./chain";
 import { blockTime, weekAt } from "./chain-time";
 import type { Db } from "./db/client";
 import { type StoredWeekSummary, funds, weekSummaries } from "./db/schema";
+import { formatDay, formatPesos } from "./format";
 import { memberFundAbi } from "./fund-abi";
 import { checkHistory } from "./history";
+import type { Messages } from "./i18n/messages";
 
 /** WeekSummaryFacts as the database keeps them (jsonb): every bigint as its decimal string. */
 export function storeFacts(facts: WeekSummaryFacts): StoredWeekSummary {
@@ -143,4 +145,46 @@ async function writeLastWeek(db: Db, deps: WeekSummaryDeps, fund: SummaryFund): 
   if (kept !== undefined) return;
   const facts = await deps.facts(fund, week, status.startTime);
   await db.insert(weekSummaries).values({ fundId: fund.id, week: Number(week), block: facts.block, facts: storeFacts(facts) }).onConflictDoNothing();
+}
+
+/**
+ * The week's summary as the text that goes to the group (spec, 9.4), in the language of `m`: the heading, the
+ * balance, who owes when the week closed, what happened, and the link to the fund. `names` are the screen's (in the
+ * public view, "Miembro N"); `link` is null where there's nobody to send it to. The reimbursements, the payments and
+ * who joined say it with the movements' own sentences, and an account with no name reads as it does there: "alguien",
+ * and "una cuenta nueva" for who joined.
+ */
+export function weekSummaryText(
+  facts: WeekSummaryFacts,
+  { fundName, agreedExpense, names, link }: { fundName: string; agreedExpense: string; names: ReadonlyMap<Address, string>; link: string | null },
+  m: Messages,
+): string {
+  const s = m.summary;
+  const t = m.timeline;
+  const who = (account: Address) => names.get(getAddress(account)) ?? t.someone;
+  const pesos = (units: bigint) => formatPesos(units, m.locale);
+  const day = (seconds: bigint) => formatDay(new Date(Number(seconds) * 1000), m.locale);
+  const owing = facts.dues.filter((d) => d.owed > 0n);
+  const dues =
+    owing.length === 0
+      ? [s.allPaid]
+      : [s.paid(facts.dues.length - owing.length, facts.dues.length), ...owing.map((d) => `· ${s.owes(who(d.member), pesos(d.owed))}`)];
+  const happened = [
+    ...(facts.contributed > 0n ? [s.contributed(pesos(facts.contributed))] : []),
+    ...facts.reimbursements.map((r) => t.reimbursed(pesos(r.amount), who(r.member), agreedExpense)),
+    ...facts.payments.map((p) => s.approvedPayment(t.proposal.pay(pesos(p.amount), who(p.member), p.note))),
+    // As the movements say a MemberAdded: a name the fund doesn't have is "una cuenta nueva", not "alguien".
+    ...facts.joined.map((member) => t.memberAdded(names.get(getAddress(member)) ?? t.newAccount)),
+  ];
+  return [
+    `TesorerIA · ${fundName}`,
+    s.heading(Number(facts.week) + 1, day(facts.startsAt), day(facts.endsAt)),
+    "",
+    s.balance(pesos(facts.balance)),
+    "",
+    ...dues,
+    "",
+    ...(happened.length === 0 ? [s.nothing] : [s.happened, ...happened.map((line) => `· ${line}`)]),
+    ...(link === null ? [] : ["", s.toContribute(link)]),
+  ].join("\n");
 }

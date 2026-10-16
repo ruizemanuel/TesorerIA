@@ -3,6 +3,7 @@ import {
   NBSP,
   USDT_UNIT,
   WARS_UNIT,
+  formatDay,
   formatPesos,
   formatUsdt,
   formatWhen,
@@ -81,6 +82,16 @@ describe("formatWhen", () => {
     expect(formatWhen(new Date("2026-10-10T02:59:00Z"), now, "es")).toBe("Ayer, 23:59");
     expect(formatWhen(new Date("2026-10-05T12:00:00Z"), now, "es")).toBe("Lunes, 9:00");
     expect(formatWhen(new Date("2026-10-03T12:00:00Z"), now, "es")).toBe("3/10");
+  });
+});
+
+describe("formatDay", () => {
+  it("writes a day as the movements do after a week, in Buenos Aires time (spec, 9.3)", () => {
+    // The real fund's startTime: 2026-10-12 00:19:48 UTC is still the 11th in Buenos Aires.
+    const start = new Date("2026-10-12T00:19:48Z");
+    expect(formatDay(start, "es")).toBe("11/10");
+    expect(formatDay(start, "en")).toBe("Oct 11");
+    expect(formatDay(new Date("2026-10-19T00:19:48Z"), "es")).toBe("18/10");
   });
 });
 

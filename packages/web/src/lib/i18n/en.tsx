@@ -161,6 +161,19 @@ export const en: Messages = {
     copy: "Copy the link",
     copied: "Copied",
   },
+  summary: {
+    heading: (week: number, from: string, to: string) => `Week ${week} summary (${from} to ${to})`,
+    balance: (amount: string) => `The fund holds ${amount}.`,
+    paid: (paid: number, members: number) => `${paid} of ${members} paid their dues. Still owing:`,
+    owes: (who: string, amount: string) => `${sentenceStart(who)}, ${amount}`,
+    allPaid: "Everyone paid their dues.",
+    happened: "What happened:",
+    contributed: (amount: string) => `Together you contributed ${amount}.`,
+    /** `what` is timeline.proposal.pay: "paying Ale ARS 8,000 for las pelotas". */
+    approvedPayment: (what: string) => `${what.charAt(0).toUpperCase()}${what.slice(1)} was approved.`,
+    nothing: "No activity this week.",
+    toContribute: (link: string) => `To contribute: ${link}`,
+  },
   person: {
     name: "Your name",
   },

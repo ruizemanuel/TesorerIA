@@ -128,8 +128,16 @@ export function formatWhen(date: Date, now: Date, locale: Locale): string {
     const { weekday = "" } = parts(date, { weekday: "long" }, style.intl);
     return `${weekday.charAt(0).toUpperCase()}${weekday.slice(1)}, ${time}`;
   }
+  return formatDay(date, locale);
+}
+
+/**
+ * A day, as the movements write it after a week (spec, 9.3): "11/10" in Spanish and "Oct 11" in English, in Buenos
+ * Aires time. The week summary's days too (spec, 9.4).
+ */
+export function formatDay(date: Date, locale: Locale): string {
   if (locale === "en") {
-    const { day, month } = parts(date, { day: "numeric", month: "short" }, style.intl);
+    const { day, month } = parts(date, { day: "numeric", month: "short" }, STYLE.en.intl);
     return `${month} ${day}`;
   }
   const { day, month } = parts(date, { day: "numeric", month: "numeric" });

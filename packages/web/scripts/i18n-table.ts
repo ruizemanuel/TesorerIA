@@ -10,7 +10,7 @@
 import { writeFileSync } from "node:fs";
 import { createElement, Fragment, isValidElement, type ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { formatPesos, formatUsdt, formatWhen, intlLocale, TIME_ZONE, USDT_UNIT, WARS_UNIT } from "../src/lib/format";
+import { formatDay, formatPesos, formatUsdt, formatWhen, intlLocale, TIME_ZONE, USDT_UNIT, WARS_UNIT } from "../src/lib/format";
 import { en } from "../src/lib/i18n/en";
 import { es, type Messages } from "../src/lib/i18n/es";
 import type { Locale } from "../src/lib/i18n/locales";
@@ -65,6 +65,7 @@ const NAME = "Ana";
 const OTHER = "Beto";
 const THIRD = "Caro";
 const INVITATION_URL = "https://tesoreria.example/invitacion/k3x9";
+const FUND_URL = "https://tesoreria.example/f/0x9A74F670F3c59Ae4B8450fdD477b0461b89D2dfD";
 
 /** Realistic arguments for every function of the dictionaries, by its path. */
 const ARGS: Record<string, (k: Kit) => Case[]> = {
@@ -86,6 +87,15 @@ const ARGS: Record<string, (k: Kit) => Case[]> = {
   "deploy.waitingForCreator": () => [call(NAME)],
   "deploy.votesOption": () => [call(5, 8)],
   "share.whatsApp": ({ fund }) => [call(fund, INVITATION_URL)],
+  "summary.heading": ({ locale }) => [
+    call(1, formatDay(new Date("2026-10-12T00:19:48Z"), locale), formatDay(new Date("2026-10-19T00:19:48Z"), locale)),
+  ],
+  "summary.balance": ({ pesos }) => [call(pesos(80_000))],
+  "summary.paid": () => [call(6, 8)],
+  "summary.owes": ({ m, pesos }) => [call(OTHER, pesos(10_000)), when("an account with no name", m.timeline.someone, pesos(10_000))],
+  "summary.contributed": ({ pesos }) => [call(pesos(60_000))],
+  "summary.approvedPayment": ({ m, pesos, note }) => [call(m.timeline.proposal.pay(pesos(8_000), THIRD, note))],
+  "summary.toContribute": () => [call(FUND_URL)],
   "invitation.title": ({ fund }) => [call(NAME, createElement("i", null, fund))],
   "invitation.rules": ({ bold, pesos, expense }) => [call(bold(pesos(10_000)), bold(pesos(60_000)), expense)],
   "invitation.alreadyJoined": () => [call(`${NAME}, ${OTHER}, ${THIRD}`)],
