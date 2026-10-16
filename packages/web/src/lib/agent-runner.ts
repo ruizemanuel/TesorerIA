@@ -129,10 +129,13 @@ async function processExpense(db: Db, makeContext: MakeContext, id: string, queu
 
 /**
  * Runs the agent once, under the lock (Review Focus 4): settles what earlier runs sent, handles `expenseId`
- * first, converts on a heartbeat and then runs `afterHeartbeat` (the week summaries, spec 9.4: a failure there is
- * logged and cuts nothing), and then retries the queue (new and waiting; blocked too on a heartbeat),
+ * first, converts on a heartbeat, and then retries the queue (new and waiting; blocked too on a heartbeat),
  * without taking `expenseId` a second time. The queue takes new expenses first and then the ones tried longest
  * ago: rows that wait for pesos or stay blocked take turns, and never keep a newer expense out.
+ *
+ * A heartbeat ends with `afterHeartbeat` (the week summaries, spec 9.4), after the queue and still under the lock:
+ * a slow summary (an explorer that times out, fund after fund) must never keep a reimbursement waiting, and it
+ * runs even if the queue threw. A failure there is logged and cuts nothing.
  */
 export async function runAgent(
   db: Db,
@@ -157,25 +160,29 @@ export async function runAgent(
       const conversions = await runHeartbeat(await makeContext());
       await saveDecisions(db, conversions);
       done.push(...conversions);
-      if (afterHeartbeat !== undefined) {
-        // Its failures are its own: the conversions are saved, and the expenses below still get their turn.
+    }
+    try {
+      const waiting = await db
+        .select({ id: expenses.id })
+        .from(expenses)
+        .where(and(inArray(expenses.status, queued), expenseId === undefined ? undefined : ne(expenses.id, expenseId)))
+        // Every attempt sets updatedAt, so the oldest one is the one tried longest ago.
+        .orderBy(sql`case when ${expenses.status} = 'new' then 0 else 1 end`, asc(expenses.updatedAt))
+        .limit(10);
+      for (const { id } of waiting) {
+        const decision = await processExpense(db, makeContext, id, queued);
+        if (decision) done.push(decision);
+      }
+    } finally {
+      // Last, so a slow summary never delays a reimbursement, and in a `finally`, so a queue that threw (the error
+      // goes on up) still gets them. Their failures are their own: logged, and they cut nothing.
+      if (heartbeat && afterHeartbeat !== undefined) {
         try {
           await afterHeartbeat();
         } catch (error) {
           console.error(`The heartbeat's week summaries failed: ${shortMessage(error)}`);
         }
       }
-    }
-    const waiting = await db
-      .select({ id: expenses.id })
-      .from(expenses)
-      .where(and(inArray(expenses.status, queued), expenseId === undefined ? undefined : ne(expenses.id, expenseId)))
-      // Every attempt sets updatedAt, so the oldest one is the one tried longest ago.
-      .orderBy(sql`case when ${expenses.status} = 'new' then 0 else 1 end`, asc(expenses.updatedAt))
-      .limit(10);
-    for (const { id } of waiting) {
-      const decision = await processExpense(db, makeContext, id, queued);
-      if (decision) done.push(decision);
     }
     return done;
   });
