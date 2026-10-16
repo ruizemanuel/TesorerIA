@@ -10,8 +10,9 @@ export const BRIEF_TAG = "estado_del_fondo";
 export const BRIEF_MOVEMENTS = 50;
 
 /**
- * Text a member wrote (a name, a note, the agreed expense), as the brief carries it: on one line, so it can't make up
- * a line of its own; with ‹ › for < >, so it can't close the brief's tag; and with no full address in it (the page's
+ * Text that anyone in the timeline wrote (a member's note or the agreed expense, or the self-chosen name of someone
+ * who only has the fund's link, as in a join request), as the brief carries it: on one line, so it can't make up a
+ * line of its own; with ‹ › for < >, so it can't close the brief's tag; and with no full address in it (the page's
  * language says what it becomes).
  */
 export function briefText(text: string, m: Messages): string {
