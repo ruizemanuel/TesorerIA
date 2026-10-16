@@ -26,6 +26,21 @@ describe("sameName", () => {
     expect(sameName("Ｌｕｃａｓ", "lucas")).toBe(true);
   });
 
+  it("ignores invisible format characters: zero-width spaces and joiners, soft hyphens, the byte order mark", () => {
+    const invisible = [0x200b, 0x200c, 0x200d, 0x2060, 0x00ad, 0xfeff].map((code) => String.fromCharCode(code));
+    for (const mark of invisible) {
+      const code = mark.charCodeAt(0).toString(16);
+      expect(sameName(`Luc${mark}as`, "Lucas"), `inside, ${code}`).toBe(true);
+      expect(sameName(`Lucas${mark}`, "Lucas"), `after, ${code}`).toBe(true);
+      expect(sameName(`${mark}Lucas`, "lucás"), `before, ${code}`).toBe(true);
+    }
+    // They are no space: they neither split a word nor join two.
+    expect(sameName(`Ana${invisible[0]}María`, "Anamaría")).toBe(true);
+    expect(sameName(`Ana${invisible[0]} María`, "Ana María")).toBe(true);
+    // A name made of nothing but invisible characters is blank.
+    expect(sameName(invisible.join(""), invisible.join(""))).toBe(false);
+  });
+
   it("tells different names apart, even close ones", () => {
     expect(sameName("Lucas", "Lucía")).toBe(false);
     expect(sameName("Juan", "Juana")).toBe(false);

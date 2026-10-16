@@ -13,7 +13,11 @@ export type TimelineAction =
   | { kind: "receipt"; tx: Hash }
   | { kind: "vote"; proposalId: bigint; votes: number; required: number; canVote: boolean; voted: boolean; completes: boolean }
   | { kind: "execute"; proposalId: bigint; canExecute: boolean }
-  | { kind: "propose-member"; account: Address; canPropose: boolean }
+  /**
+   * Proponer sumarlo, for someone who asked to join (spec, 9.4). `headsUp` goes with the button, only when it is offered:
+   * the requester's name is another person's here, so a member should check with the group before proposing.
+   */
+  | { kind: "propose-member"; account: Address; canPropose: boolean; headsUp?: string }
   /** A week's summary (spec, 9.4), by the contract's week: "Ver el resumen". */
   | { kind: "summary"; week: number };
 
@@ -28,8 +32,6 @@ export type TimelineItem = {
   action?: TimelineAction;
   /** Still on its way. */
   pending?: boolean;
-  /** A caution under the sentence, not part of it: on an open request to join, that its name is another person's here (spec, 9.4). */
-  headsUp?: string;
 };
 
 /** An open or finished proposal, as the chain has it now. */
@@ -295,17 +297,23 @@ export function buildTimeline({
   // Names can't be refused, so a member who might propose the wrong account is told: the name is a member's, or another open request's.
   const sharesName = (request: TimelineJoinRequest) =>
     memberNames.some((member) => sameName(member, request.name)) ||
-    open.some((other) => other.account !== request.account && sameName(other.name, request.name));
+    open.some((other) => !isAddressEqual(other.account, request.account) && sameName(other.name, request.name));
   for (const request of asking) {
     if (beingProposed.has(getAddress(request.account))) continue;
     const base = { id: `join:${request.account}`, at: request.at, actor: { kind: "member", name: request.name } as Actor };
+    const canPropose = canAddMembers && !proposeOnItsWay;
     items.push(
       request.open
         ? {
             ...base,
             text: t.joinRequest(request.name),
-            action: { kind: "propose-member", account: request.account, canPropose: canAddMembers && !proposeOnItsWay },
-            ...(sharesName(request) ? { headsUp: t.joinRequestSameName(request.name) } : {}),
+            // The line is for the member who is about to propose: it shows exactly when the button does.
+            action: {
+              kind: "propose-member",
+              account: request.account,
+              canPropose,
+              ...(canPropose && sharesName(request) ? { headsUp: t.joinRequestSameName(request.name) } : {}),
+            },
           }
         : { ...base, text: t.joinRequestExpired(request.name) },
     );

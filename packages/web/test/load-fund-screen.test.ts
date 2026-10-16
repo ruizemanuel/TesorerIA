@@ -532,23 +532,39 @@ describe("loadFundScreen: someone who asked to join (spec, 9.4)", () => {
     }
   });
 
-  it("warns on an open request named like a member of the fund, not like someone who left it", async () => {
+  it("warns on an open request named like a member of the fund, not like someone who left it, and only where Proponer sumarlo shows", async () => {
     const [beto2, dario, dario2] = [await addUser(db, "Betó"), await addUser(db, "Dario"), await addUser(db, "Darío")];
     const address = await liveFund();
     const fundId = await fundIdOf(address);
     // Dario is in the fund's rows but not on the chain's list: he left, and the database keeps his row.
     await db.insert(memberships).values({ fundId, userId: dario.id });
     for (const person of [beto2, dario2]) await db.insert(joinRequests).values({ fundId, userId: person.id });
+    /** The Proponer sumarlo action of the request that reads `text`. */
+    const proposing = (screen: Awaited<ReturnType<typeof loadFundScreen>>, text: string) => {
+      const action = screen!.timeline.find((entry) => entry.text === text)?.action;
+      return action?.kind === "propose-member" ? action : undefined;
+    };
 
     const screen = await loadFundScreen(address, asViewer(ana));
-    const item = (name: string) => screen!.timeline.find((entry) => entry.text === `${name} pidió sumarse al fondo.`);
-    expect(item("Betó")?.headsUp).toBe("Ojo: hay otra persona que se llama Betó. Confirmá en el grupo antes de proponerla.");
-    expect(item("Darío")).not.toHaveProperty("headsUp");
+    expect(proposing(screen, "Betó pidió sumarse al fondo.")?.headsUp).toBe(
+      "Ojo: hay otra persona que se llama Betó. Antes de proponer, confirmá en el grupo que es quien esperan.",
+    );
+    expect(proposing(screen, "Darío pidió sumarse al fondo.")).not.toHaveProperty("headsUp");
 
     const english = await loadFundScreen(address, asViewer(ana), { locale: "en" });
-    expect(english!.timeline.find((entry) => entry.text === "Betó asked to join the fund.")?.headsUp).toBe(
-      "Heads up: someone else here is also called Betó. Check with the group before you propose them.",
+    expect(proposing(english, "Betó asked to join the fund.")?.headsUp).toBe(
+      "Heads up: someone else here is also called Betó. Before you propose, check with the group that this is who you're expecting.",
     );
+
+    // A fund with its 10 members can't take another: no button, so no line.
+    const ten = [ana, beto, caro].map((person) => getAddress(person.account));
+    while (ten.length < 10) ten.push(randomAccount());
+    agent.readFund.mockResolvedValue(snapshot({ address, members: ten }));
+    expect(proposing(await loadFundScreen(address, asViewer(ana)), "Betó pidió sumarse al fondo.")).toEqual({
+      kind: "propose-member",
+      account: getAddress(beto2.account),
+      canPropose: false,
+    });
   });
 
   it("never shows a request on the public view, nor the name of who asked", async () => {

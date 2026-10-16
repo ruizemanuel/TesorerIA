@@ -10,7 +10,7 @@ import { ProposeMemberButton } from "./propose-member-button";
 import { buttonClass } from "./ui";
 import { VoteButton } from "./vote-button";
 
-/** The movements, newest first (spec, 9.2): avatar, one sentence (with a heads-up under it, when it has one), the time, and at most one action. */
+/** The movements, newest first (spec, 9.2): avatar, one sentence (with a heads-up under it, when Proponer sumarlo has one), the time, and at most one action. */
 export function TimelineList({
   items,
   fund,
@@ -55,12 +55,14 @@ export function TimelineList({
         const { actor } = item;
         // Only your own operations are pending and by a member (the agent's expenses are by the agent).
         const who = item.pending && actor.kind === "member" ? viewerName : actor.kind === "member" ? actor.name : fundName;
+        // Proponer sumarlo, when it is offered here: its heads-up (the requester's name is someone else's) shows exactly then.
+        const proposeMember = item.action?.kind === "propose-member" && !readOnly && !closed && item.action.canPropose ? item.action : null;
         return (
           <li key={item.id} className="flex gap-3 border-t border-line py-3 first:border-t-0">
             <Avatar kind={actor.kind === "agent" ? "agent" : "member"} name={who} />
             <div className="min-w-0 flex-1">
               <p className="text-sm leading-snug [font-variant-numeric:lining-nums_tabular-nums]">{item.text}</p>
-              {item.headsUp && <p className="mt-0.5 text-[13px] leading-snug text-muted">{item.headsUp}</p>}
+              {proposeMember?.headsUp && <p className="mt-0.5 text-[13px] leading-snug text-muted">{proposeMember.headsUp}</p>}
               <p className="mt-0.5 text-xs text-muted">{item.pending ? m.movements.onItsWay : formatWhen(item.at, now, locale)}</p>
               {item.action?.kind === "receipt" && (
                 // 44 px to tap: the box reaches down to the row's divider instead of making the row taller.
@@ -88,9 +90,7 @@ export function TimelineList({
               {item.action?.kind === "execute" && !readOnly && !closed && item.action.canExecute && (
                 <ExecuteButton fund={fund} proposalId={item.action.proposalId.toString()} />
               )}
-              {item.action?.kind === "propose-member" && !readOnly && !closed && item.action.canPropose && (
-                <ProposeMemberButton fund={fund} account={item.action.account} />
-              )}
+              {proposeMember && <ProposeMemberButton fund={fund} account={proposeMember.account} />}
             </div>
           </li>
         );

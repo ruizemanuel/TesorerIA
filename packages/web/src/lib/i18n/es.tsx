@@ -284,7 +284,7 @@ export const es = {
     joinRequest: (who: string) => `${sentenceStart(who)} pidió sumarse al fondo.`,
     joinRequestExpired: (who: string) => `Venció el pedido de ${who}.`,
     /** Under an open request whose name is another person's here, a member's or another request's: a member could propose the wrong account. */
-    joinRequestSameName: (who: string) => `Ojo: hay otra persona que se llama ${who}. Confirmá en el grupo antes de proponerla.`,
+    joinRequestSameName: (who: string) => `Ojo: hay otra persona que se llama ${who}. Antes de proponer, confirmá en el grupo que es quien esperan.`,
     /** The agent's word when a week closes (spec, 9.4): `week` counts from 1, as people do. */
     weekClosed: (week: number) => `Cerré la semana ${week}. Te dejo el resumen para el grupo.`,
     memberRemoved: (who: string) => `${sentenceStart(who)} dejó el fondo y se llevó su parte.`,

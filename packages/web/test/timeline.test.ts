@@ -617,61 +617,93 @@ describe("buildTimeline: asking to join a live fund (spec, 9.4)", () => {
   describe("a heads-up when the name is someone else's", () => {
     const MORA = getAddress("0x000000000000000000000000000000000000aaa5");
     const MEMBERS = ["Ana", "Beto", "Caro"];
-    const SPANISH = "Ojo: hay otra persona que se llama Lucas. Confirmá en el grupo antes de proponerla.";
-    const ENGLISH = "Heads up: someone else here is also called Lucas. Check with the group before you propose them.";
+    const SPANISH = "Ojo: hay otra persona que se llama Lucas. Antes de proponer, confirmá en el grupo que es quien esperan.";
+    const ENGLISH = "Heads up: someone else here is also called Lucas. Before you propose, check with the group that this is who you're expecting.";
     const named = (name: string, account: Address = LUCAS) => ({ ...asked, account, name });
+    /** The timeline of a fund with room for one more, which is where Proponer sumarlo is offered. */
+    const room = (change: Partial<Parameters<typeof buildTimeline>[0]> = {}) => timeline({ canAddMembers: true, ...change });
     const itemOf = (items: ReturnType<typeof timeline>, account: Address = LUCAS) => items.find((item) => item.id === `join:${account}`);
+    /** A request's heads-up, which goes with its Proponer sumarlo action. */
+    const headsUpOf = (items: ReturnType<typeof timeline>, account: Address = LUCAS) => {
+      const action = itemOf(items, account)?.action;
+      return action?.kind === "propose-member" ? action.headsUp : undefined;
+    };
 
     it("tells a request named like a member to check with the group first, in Spanish and in English", () => {
-      const items = timeline({ memberNames: [...MEMBERS, "Lucas"], joinRequests: [asked], canAddMembers: true });
-      expect(itemOf(items)?.headsUp).toBe(SPANISH);
-      expect(itemOf(timeline({ memberNames: [...MEMBERS, "Lucas"], joinRequests: [asked], canAddMembers: true, m: en }))?.headsUp).toBe(ENGLISH);
-      // The sentence and its button are as they were: the line is added, nothing else changes.
-      expect(itemOf(items)).toMatchObject({ text: "Lucas pidió sumarse al fondo.", action: { kind: "propose-member", account: LUCAS, canPropose: true } });
+      const items = room({ memberNames: [...MEMBERS, "Lucas"], joinRequests: [asked] });
+      // The sentence and the button are as they were: the line is added to the button's action, nothing else changes.
+      expect(items).toEqual([
+        {
+          id: `join:${LUCAS}`,
+          at: ASKED,
+          actor: { kind: "member", name: "Lucas" },
+          text: "Lucas pidió sumarse al fondo.",
+          action: { kind: "propose-member", account: LUCAS, canPropose: true, headsUp: SPANISH },
+        },
+      ]);
+      expect(headsUpOf(room({ memberNames: [...MEMBERS, "Lucas"], joinRequests: [asked], m: en }))).toBe(ENGLISH);
     });
 
     it("matches the name without caring for case, accents or spaces", () => {
       for (const [requester, member] of [["Lucás", "lucas"], ["LUCAS", "Lucás"]] as const) {
-        expect(itemOf(timeline({ memberNames: [member], joinRequests: [named(requester)] }))?.headsUp, `${requester} / ${member}`).toBe(
+        expect(headsUpOf(room({ memberNames: [member], joinRequests: [named(requester)] })), `${requester} / ${member}`).toBe(
           SPANISH.replace("Lucas", requester),
         );
       }
     });
 
     it("gives it to both when two open requests share a name", () => {
-      const items = timeline({ joinRequests: [named("Lucas"), named("lucás", MORA)], canAddMembers: true });
-      expect(itemOf(items)?.headsUp).toBe(SPANISH);
-      expect(itemOf(items, MORA)?.headsUp).toBe(SPANISH.replace("Lucas", "lucás"));
-      expect(itemOf(timeline({ joinRequests: [named("Lucas"), named("lucás", MORA)], m: en }), MORA)?.headsUp).toBe(ENGLISH.replace("Lucas", "lucás"));
+      const items = room({ joinRequests: [named("Lucas"), named("lucás", MORA)] });
+      expect(headsUpOf(items)).toBe(SPANISH);
+      expect(headsUpOf(items, MORA)).toBe(SPANISH.replace("Lucas", "lucás"));
+      expect(headsUpOf(room({ joinRequests: [named("Lucas"), named("lucás", MORA)], m: en }), MORA)).toBe(ENGLISH.replace("Lucas", "lucás"));
     });
 
     it("counts a request that is already being proposed as another open request with the same name", () => {
       const twin = named("Lucas", MORA);
-      const items = timeline({ memberNames: MEMBERS, joinRequests: [asked, twin], ...addLucas(OPEN) });
+      const items = room({ memberNames: MEMBERS, joinRequests: [asked, twin], ...addLucas(OPEN) });
       // Lucas's own request is told by the proposal; the other Lucas's still shows, with the line.
       expect(items.filter((item) => item.id.startsWith("join:")).map((item) => item.id)).toEqual([`join:${MORA}`]);
-      expect(itemOf(items, MORA)?.headsUp).toBe(SPANISH);
+      expect(headsUpOf(items, MORA)).toBe(SPANISH);
+    });
+
+    it("takes the same account written two ways for one person, not for two with the same name", () => {
+      const lowercase = { ...asked, account: LUCAS.toLowerCase() as Address };
+      const items = room({ memberNames: MEMBERS, joinRequests: [asked, lowercase] });
+      expect(items).toHaveLength(2);
+      expect(headsUpOf(items)).toBeUndefined();
+      expect(headsUpOf(items, lowercase.account)).toBeUndefined();
     });
 
     it("gives none to a name nobody else here has", () => {
-      const items = timeline({ memberNames: MEMBERS, joinRequests: [asked, named("Mora", MORA)], canAddMembers: true });
+      const items = room({ memberNames: MEMBERS, joinRequests: [asked, named("Mora", MORA)] });
       expect(items).toHaveLength(2);
-      expect(items.every((item) => !("headsUp" in item))).toBe(true);
-      expect(timeline({ joinRequests: [asked] })[0]).not.toHaveProperty("headsUp");
+      expect(items.every((item) => item.action?.kind === "propose-member" && !("headsUp" in item.action))).toBe(true);
     });
 
     it("gives none to an expired request, and it doesn't count as another person for an open one", () => {
       const expired = { ...named("Lucas"), open: false };
-      const [item] = timeline({ memberNames: [...MEMBERS, "Lucas"], joinRequests: [expired] });
+      const [item] = room({ memberNames: [...MEMBERS, "Lucas"], joinRequests: [expired] });
       expect(item).toEqual({ id: `join:${LUCAS}`, at: ASKED, actor: { kind: "member", name: "Lucas" }, text: "Venció el pedido de Lucas." });
 
-      const items = timeline({ memberNames: MEMBERS, joinRequests: [expired, named("Lucas", MORA)] });
-      expect(itemOf(items, MORA)).not.toHaveProperty("headsUp");
-      expect(itemOf(items)).not.toHaveProperty("headsUp");
+      const items = room({ memberNames: MEMBERS, joinRequests: [expired, named("Lucas", MORA)] });
+      expect(headsUpOf(items, MORA)).toBeUndefined();
+      expect(itemOf(items)?.action).toBeUndefined();
+    });
+
+    it("gives it only where Proponer sumarlo is offered: not in a full fund, nor with the viewer's own proposal on its way", () => {
+      const request = { memberNames: [...MEMBERS, "Lucas"], joinRequests: [asked] };
+      expect(headsUpOf(room(request))).toBe(SPANISH);
+
+      const full = timeline({ ...request, canAddMembers: false });
+      expect(itemOf(full)?.action).toEqual({ kind: "propose-member", account: LUCAS, canPropose: false });
+      const pending = [{ userOpHash: "0xp", kind: "propose", amount: null, token: null, createdAt: NOW }] as const;
+      const onItsWay = room({ ...request, pending });
+      expect(itemOf(onItsWay)?.action).toEqual({ kind: "propose-member", account: LUCAS, canPropose: false });
     });
 
     it("shows nothing on the public view, where requests never show, however the names match", () => {
-      expect(timeline({ memberNames: [...MEMBERS, "Lucas"], joinRequests: [asked, named("Lucas", MORA)], viewerIsMember: false })).toEqual([]);
+      expect(room({ memberNames: [...MEMBERS, "Lucas"], joinRequests: [asked, named("Lucas", MORA)], viewerIsMember: false })).toEqual([]);
     });
   });
 });
