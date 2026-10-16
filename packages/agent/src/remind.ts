@@ -1,6 +1,6 @@
 import { type Address, getAddress } from "viem";
 import type { FundEvent } from "./events";
-import type { FundSnapshot } from "./fund";
+import { type FundSnapshot, WEEK } from "./fund";
 
 /**
  * The week each member joined, from the fund's events: the founders in week 0 (left out of the map), an
@@ -74,4 +74,94 @@ export function closeShares(fund: FundSnapshot): { shares: CloseShare[]; spread:
   const max = amounts.reduce((a, b) => (b > a ? b : a), 0n);
   const min = amounts.reduce((a, b) => (b < a ? b : a), max);
   return { shares, spread: max - min };
+}
+
+/**
+ * What the agent keeps of a week once it closed (spec, 9.4): read at the week's last block, so it stays the photo
+ * of the close. Addresses and amounts only, never names or sentences: the web writes the text in the page's language.
+ */
+export type WeekSummaryFacts = {
+  /** The contract's week, from 0. */
+  week: bigint;
+  /** The week's last block, which the snapshot and the balance were read at. */
+  block: bigint;
+  /** Seconds: startTime + week × WEEK, and the start of the next week. */
+  startsAt: bigint;
+  endsAt: bigint;
+  /** balanceInWars at `block`, the same count as the inicio. */
+  balance: bigint;
+  /** Every member at `block`, in the contract's order, with what they owed when the week closed (memberDues). */
+  dues: { member: Address; owed: bigint }[];
+  /** The week's Contribution.creditedWars, added up. */
+  contributed: bigint;
+  reimbursements: { member: Address; amount: bigint }[];
+  /** Each payment the group approved, with its proposal's note. */
+  payments: { member: Address; amount: bigint; note: string }[];
+  /** Who joined in the week (MemberAdded). */
+  joined: Address[];
+};
+
+/**
+ * The photo of the week `fund` was read in, at its last block (spec, 9.4). `events` go from the fund's creation up to
+ * that block: the dues need every MemberAdded (joinWeeks, with the screen's `weekOf`), and a payment's note is in its
+ * proposal, which may be older than the week. Only the events from `first` on are the week's. Conversions are left
+ * out: for the group they change nothing.
+ */
+export function weekSummary({
+  fund,
+  balance,
+  weeklyFee,
+  events,
+  first,
+  weekOf,
+}: {
+  fund: FundSnapshot;
+  balance: bigint;
+  weeklyFee: bigint;
+  events: readonly FundEvent[];
+  first: bigint;
+  weekOf: (event: FundEvent) => bigint;
+}): WeekSummaryFacts {
+  const dues = memberDues({ fund, weeklyFee, joined: joinWeeks(events, weekOf) }).map(({ member, owed }) => ({ member, owed }));
+  const notes = new Map<bigint, string>();
+  for (const event of events) if (event.eventName === "ProposalCreated") notes.set(event.args.id, event.args.note);
+  const week = events.filter((event) => event.blockNumber >= first && event.blockNumber <= fund.block);
+  let contributed = 0n;
+  const reimbursements: WeekSummaryFacts["reimbursements"] = [];
+  const payments: WeekSummaryFacts["payments"] = [];
+  const joined: Address[] = [];
+  for (const event of week) {
+    switch (event.eventName) {
+      case "Contribution":
+        contributed += event.args.creditedWars;
+        break;
+      case "Reimbursement":
+        reimbursements.push({ member: getAddress(event.args.member), amount: event.args.amount });
+        break;
+      case "Payment": {
+        // Its proposal is the ProposalExecuted that follows it in the same transaction (Fund.execute emits it last).
+        const execution = week.find(
+          (other) => other.eventName === "ProposalExecuted" && other.transactionHash === event.transactionHash && other.logIndex > event.logIndex,
+        );
+        const id = execution?.eventName === "ProposalExecuted" ? execution.args.id : undefined;
+        payments.push({ member: getAddress(event.args.member), amount: event.args.amount, note: id === undefined ? "" : (notes.get(id) ?? "") });
+        break;
+      }
+      case "MemberAdded":
+        joined.push(getAddress(event.args.member));
+        break;
+    }
+  }
+  return {
+    week: fund.week,
+    block: fund.block,
+    startsAt: fund.startTime + fund.week * WEEK,
+    endsAt: fund.startTime + (fund.week + 1n) * WEEK,
+    balance,
+    dues,
+    contributed,
+    reimbursements,
+    payments,
+    joined,
+  };
 }
