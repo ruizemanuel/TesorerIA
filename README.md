@@ -4,18 +4,43 @@
 
 TesorerIA is an AI treasurer for a group's shared fund in Argentine pesos (wARS) on Celo. Members contribute to a smart contract. The agent converts USDT to wARS, reimburses the expense the group agreed on (up to a weekly cap), keeps track of who is behind, and puts everything else to a vote. The contract enforces the limits: the agent can only pay members, never above the cap, and can't change the rules.
 
+**Where the AI is, and where it isn't.** The part that signs and moves money is deterministic code with no language model ([the agent](#the-agent)): the same inputs always lead to the same transaction, and every rule it follows has a test. The AI is how the group talks to it: a chat with Claude that reads what the member sees on their screen, answers in their language, and can only offer a card to enter an expense, which the member confirms. The chat never signs anything.
+
 Built for the [Agents on Open Rails](https://www.loops.house/agents-on-open-rails) hackathon (Celo × Ripio), track Stable Agents: LatAm.
 
-Status: early development.
+- **The app:** [tesoreriaia.vercel.app](https://tesoreriaia.vercel.app), in Rioplatense Spanish or English. The browser's language picks one, and an ES · EN switch changes it.
+- **A real fund, read-only:** [Fútbol de los jueves](https://tesoreriaia.vercel.app/f/0x9A74F670F3c59Ae4B8450fdD477b0461b89D2dfD/publico), eight friends who split a football pitch every Thursday. Their names are hidden.
 
-The web speaks Rioplatense Spanish and English: the browser's language picks one, and an ES · EN switch changes it.
+<p>
+  <img src="docs/screenshots/home.png" alt="The home page in English, with the real group's week live and its members shown as Member 1 to 8" width="49%">
+  <img src="docs/screenshots/real-fund.png" alt="The real group's fund, read-only: ARS 105.10 in the fund, all eight members paid up, and the agent's activity" width="49%">
+</p>
+<p>
+  <img src="docs/screenshots/real-fund-phone.png" alt="The same fund on a phone" width="260">
+</p>
+
+## On mainnet today
+
+The first real group, as of October 15, 2026: one fund, eight members, and about ARS 80,100 contributed in its first week.
+
+- **The fund:** [`0x9A74F670F3c59Ae4B8450fdD477b0461b89D2dfD`](https://celo.blockscout.com/address/0x9A74F670F3c59Ae4B8450fdD477b0461b89D2dfD), created by the `FundFactory`. Each member pays ARS 10,000 a week. The agreed expense is the pitch, paid back up to ARS 60,000 a week, and anything else needs 5 of the 8 votes.
+- **Everyone paid their dues.** 7 of the 11 contributions came in USDT, which many Argentines save in, and the agent changed each one to pesos as it came in: for example, [a contribution](https://celo.blockscout.com/tx/0x79f7f76fbb0db90c4fcf5465f16a240ded8e479aed41b2b2b4385888dfcbf678) and [its conversion](https://celo.blockscout.com/tx/0x2bffd790f73cb61a4e69769af38bdaaf56d088cd2acdf66eb879f8bace2e2167). The fund holds, pays and settles in wARS.
+- **A member paid ARS 80,000 for the pitch and entered it as two expenses.** The agent [paid back the ARS 60,000](https://celo.blockscout.com/tx/0x36d86a543965b5449416104e5fc7f1cf9398447e3ca67edf7e854e1878658f82) entered as the agreed expense on its own, the whole weekly cap, and turned the other ARS 20,000 into [a proposal](https://celo.blockscout.com/tx/0x64e6f50da0de85cfc19c50776337ca21cb2099297ac5ecf37c61a36a046a148e). Five members voted for it, from [the first vote](https://celo.blockscout.com/tx/0xfec549cf6cdf0d8bfac0d9568df86bbf146a8f441fe1fa8cc170169e863332a4) to [the fifth](https://celo.blockscout.com/tx/0x15f59b43218aec7574e0eebf34cf2c74ff666707d15013f7a077ad37ea965b1e), which carried it out and paid the member in the same operation.
+- **Every one of these transactions carries the attribution tag `celo_fbe4d00a2cb4`:** the agent's at the end of their calldata, and the members' inside each UserOperation.
+
+## What's next
+
+- **More groups in Argentina.** The same fund works for any group that shares a recurring cost: a flat, a trip, a padel court. Growth is measured in groups, members, wARS moved, and the share of contributions paid directly in wARS (4 of 11 in the first week).
+- **The agent writing to the group.** Today the app shows who is behind. The next step is a weekly summary of who owes what, written by the agent for a member to share in the group's chat; reminders by email come once groups ask for them.
+- **Other wFIAT currencies.** The factory is fixed to wARS, USDT and their Uniswap pool, so wBRL or wMXN take a factory of their own, once a pool holds enough liquidity.
+- **MiniPay.** Opening the app inside MiniPay takes a single contract for every fund, since MiniPay only allows contracts it approved. That's the path to reach people where they already hold stablecoins.
 
 ## The agent
 
 `packages/agent` is the agent's deterministic core: TypeScript and viem, no language model. It is the only part that signs, and every transaction it sends pays its gas in USDT (CIP-64) and carries the ERC-8021 attribution suffix.
 
 - **Convert:** when a fund holds 5 USDT or more, the agent swaps them for wARS in the Uniswap v3 pool, as long as Chainlink's USD / ARS (Base) is less than 26 hours old, the pool holds at least 10 times the wARS the conversion takes, and the pool's price is within 2% of Chainlink's USD / ARS × USDT / USD. Its `minWarsOut` sits 0.5% under Uniswap's quote, not at the contract's 2% floor.
-- **Pay back the agreed expense:** when a member enters it and it fits in what's left of the week's cap, never twice for the same expense (the contract doesn't check that). Anything else becomes a payment proposal for the members to vote on.
+- **Pay back the agreed expense:** when a member enters it and it fits in what's left of the week's cap, never twice for the same expense (the contract doesn't check that). Anything else becomes a payment proposal for the members to vote on. A member could enter an expense they never paid, but the contract caps what it costs the group at the weekly cap, it only ever pays members, and every reimbursement shows on the fund's timeline for everyone to see.
 - **Dues:** it works out what each member owes at the group's weekly fee, and what each one would get if the fund closed today.
 
 Its own limits, on top of the contract's: it only pays addresses the contract lists as members, never one taken from text a person or a model wrote; at most 100,000 wARS per reimbursement and 150,000 wARS a day per fund, 500 USDT per conversion and 1,000 USDT a day, and 20 transactions a day per fund. A reimbursement over a limit becomes a proposal. Every decision, including what it didn't do and why, comes back as an entry for the fund's timeline.
