@@ -45,3 +45,24 @@ export async function addLiveFund(
   }
   return fund!;
 }
+
+/** The statements of each transaction `db` runs from now on, in order (PGlite's own transactions, under drizzle's). */
+export function recordTransactions(db: Db): string[][] {
+  type Query = (sql: string, ...rest: unknown[]) => Promise<unknown>;
+  type Client = { transaction: (fn: (tx: { query: Query }) => Promise<unknown>) => Promise<unknown> };
+  const client = (db as unknown as { $client: Client }).$client;
+  const transactions: string[][] = [];
+  const transaction = client.transaction.bind(client);
+  client.transaction = (fn) =>
+    transaction((tx) => {
+      const statements: string[] = [];
+      transactions.push(statements);
+      const query = tx.query.bind(tx);
+      tx.query = (sql, ...rest) => {
+        statements.push(sql);
+        return query(sql, ...rest);
+      };
+      return fn(tx);
+    });
+  return transactions;
+}

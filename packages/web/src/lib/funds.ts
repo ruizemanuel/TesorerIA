@@ -19,16 +19,16 @@ import { type DraftSettings, draftProblem } from "./checks";
 import { MAX_CREATE_FUND_NONCES, createFundRoom } from "./create-fund-cap";
 import { type Db, inTransaction } from "./db/client";
 import { funds, memberships, operations, users } from "./db/schema";
-import { DEFAULT_BALANCE_CAP, memberFundAbi } from "./fund-abi";
+import { DEFAULT_BALANCE_CAP, MAX_MEMBERS, memberFundAbi } from "./fund-abi";
+import { fail, isMember, lockFund } from "./fund-rows";
 import type { Messages } from "./i18n/messages";
+import { requestToJoin } from "./join-requests";
 import { PENDING_FOR_MS, finishOperation } from "./operations";
 
 export const MIN_MEMBERS = 3;
-export const MAX_MEMBERS = 10;
+export { MAX_MEMBERS };
 
 export type FundsResult<T> = ({ ok: true } & T) | { ok: false; status: number; error: string };
-
-const fail = (status: number, error: string) => ({ ok: false, status, error }) as const;
 
 export type DraftSummary = {
   id: string;
@@ -90,14 +90,6 @@ async function membersOf(db: Db, fundId: string): Promise<DraftSummary["members"
   return asMembers(await membersQuery(db, fundId));
 }
 
-/**
- * Locks the fund's row until the transaction it's in ends. A join and the deploy's freeze both take it first, so
- * they never interleave: one waits for the other to commit, and then reads what it left.
- */
-function lockFund(db: Db, fundId: string) {
-  return db.select({ id: funds.id }).from(funds).where(eq(funds.id, fundId)).for("update");
-}
-
 async function summarize(db: Db, where: SQL): Promise<DraftSummary | null> {
   const [fund] = await db.select().from(funds).where(where);
   if (fund === undefined) return null;
@@ -130,28 +122,26 @@ export function draftByInvite(db: Db, code: string): Promise<DraftSummary | null
   return summarize(db, eq(funds.inviteCode, code));
 }
 
-async function isMember(db: Db, fundId: string, userId: string): Promise<boolean> {
-  const [row] = await db
-    .select({ userId: memberships.userId })
-    .from(memberships)
-    .where(and(eq(memberships.fundId, fundId), eq(memberships.userId, userId)));
-  return row !== undefined;
-}
-
-/** Joins a draft by its link. A live fund only takes new members by a vote (part 2), so the link stops there. */
+/**
+ * Joins a draft by its link. A live fund takes new members only by a vote (spec, 9.4), so there the link asks to join
+ * (requestToJoin) and the group proposes them; a member is just taken to it.
+ */
 export async function joinFund(
   db: Db,
   userId: string,
   code: string,
   m: Messages,
-): Promise<FundsResult<{ fundId: string; status: "draft" | "live"; address: Address | null }>> {
+): Promise<FundsResult<{ fundId: string; status: "draft" | "live" | "requested"; address: Address | null }>> {
   const draft = await draftByInvite(db, code);
   if (draft === null) return fail(404, m.funds.badInvite);
   const joined = { ok: true, fundId: draft.id, status: "draft", address: null } as const;
   if (draft.members.some((member) => member.userId === userId)) {
     return draft.status === "live" ? { ok: true, fundId: draft.id, status: "live", address: draft.address } : joined;
   }
-  if (draft.status === "live") return fail(409, m.funds.alreadyLive);
+  if (draft.status === "live") {
+    const requested = await requestToJoin(db, draft.id, userId, m);
+    return requested.ok ? { ok: true, fundId: draft.id, status: "requested", address: draft.address } : requested;
+  }
   if (draft.status === "deploying") return fail(409, m.funds.beingCreated);
   if (draft.members.length >= MAX_MEMBERS) return fail(409, m.funds.full);
   // Checked again in the insert, since the read above may be stale: only while it's still a draft (a deploy that

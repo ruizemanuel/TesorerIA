@@ -23,6 +23,9 @@ export const memberFundAbi = parseAbi([
  */
 export const DEFAULT_BALANCE_CAP = 450_000n * WARS_UNIT;
 
+/** Fund.MAX_MEMBERS: the most members a fund has, at creation and after an AddMember. */
+export const MAX_MEMBERS = 10;
+
 /** `Fund.Action`, in the contract's order (spec, 16). */
 export const ProposalAction = {
   Pay: 0,

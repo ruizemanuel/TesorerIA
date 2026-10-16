@@ -88,6 +88,25 @@ export const memberships = pgTable(
   (t) => [primaryKey({ columns: [t.fundId, t.userId] })],
 );
 
+/**
+ * Someone who asked to join a live fund by its link (spec, 9.4): open for JOIN_REQUEST_DAYS from `createdAt`
+ * (join-requests.ts), and gone once the chain lists them as a member (admitMembers). Asking again once it expired
+ * renews the date; a double tap keeps the one row.
+ */
+export const joinRequests = pgTable(
+  "join_requests",
+  {
+    fundId: uuid("fund_id")
+      .notNull()
+      .references(() => funds.id),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id),
+    createdAt: createdAt(),
+  },
+  (t) => [primaryKey({ columns: [t.fundId, t.userId] })],
+);
+
 export const EXPENSE_STATUSES = ["new", "sending", "reimbursed", "proposed", "waiting", "rejected", "blocked"] as const;
 export type ExpenseStatus = (typeof EXPENSE_STATUSES)[number];
 

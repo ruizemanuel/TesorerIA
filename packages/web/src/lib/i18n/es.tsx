@@ -68,7 +68,10 @@ export const es = {
   /** Drafts, invitations and creating a fund (funds.ts). */
   funds: {
     badInvite: "Ese link de invitación no es válido.",
-    alreadyLive: "El fondo ya está en marcha: pedile a alguien del grupo que proponga sumarte.",
+    alreadyMember: "Ya sos parte de este fondo.",
+    /** A live fund, with as many members as the contract takes (spec, 9.4). */
+    liveFull: "El fondo ya tiene 10 miembros, que es el máximo.",
+    manyRequests: "Ya hay muchos pedidos para sumarse a este fondo. Probá en unos días.",
     alreadyCreated: "El fondo ya está creado.",
     onlyCreator: "Solo quien armó el fondo puede crearlo.",
     beingCreated: "El fondo se está creando en este momento. Probá en un rato.",

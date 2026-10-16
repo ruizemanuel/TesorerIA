@@ -23,7 +23,7 @@ import {
 import { en } from "../src/lib/i18n/en";
 import { es } from "../src/lib/i18n/es";
 import { PENDING_FOR_MS, finishOperation, recordOperation } from "../src/lib/operations";
-import { addLiveFund, addUser, testDb } from "./support/db";
+import { addLiveFund, addUser, recordTransactions, testDb } from "./support/db";
 import { AGENT, FUND as NEW_FUND, WARS } from "./support/fixtures";
 
 const TX: Hash = pad("0x7a", { size: 32 });
@@ -38,27 +38,6 @@ async function group(db: Db, size = 3) {
   if (!created.ok) throw new Error(created.error);
   for (const person of people.slice(1)) await joinFund(db, person.id, created.inviteCode, es);
   return { people, fundId: created.id, inviteCode: created.inviteCode };
-}
-
-/** The statements of each transaction `db` runs from now on, in order (PGlite's own transactions, under drizzle's). */
-function recordTransactions(db: Db): string[][] {
-  type Query = (sql: string, ...rest: unknown[]) => Promise<unknown>;
-  type Client = { transaction: (fn: (tx: { query: Query }) => Promise<unknown>) => Promise<unknown> };
-  const client = (db as unknown as { $client: Client }).$client;
-  const transactions: string[][] = [];
-  const transaction = client.transaction.bind(client);
-  client.transaction = (fn) =>
-    transaction((tx) => {
-      const statements: string[] = [];
-      transactions.push(statements);
-      const query = tx.query.bind(tx);
-      tx.query = (sql, ...rest) => {
-        statements.push(sql);
-        return query(sql, ...rest);
-      };
-      return fn(tx);
-    });
-  return transactions;
 }
 
 /** A receipt with these FundCreated logs, a chain where every fund has `settings`, and the EntryPoint's nonce for anyone. */
@@ -646,7 +625,7 @@ describe("in the language of the dictionary", () => {
       error: en.checks.feeTooBig(formatPesos(MAX_PESOS, "en")),
     });
 
-    // A fund that is being created takes nobody else, and one that is live sends them to the group.
+    // A fund that is being created takes nobody else, and one that is live takes their request (spec, 9.4).
     await deployCall(db, { fundId, userId: ana, votesRequired: 2, agent: AGENT, m: es });
     const late = await addUser(db, "Dani");
     expect(await joinFund(db, late.id, inviteCode, en)).toEqual({ ok: false, status: 409, error: en.funds.beingCreated });
@@ -656,7 +635,7 @@ describe("in the language of the dictionary", () => {
       error: "El fondo se está creando en este momento. Probá en un rato.",
     });
     await db.update(funds).set({ status: "live", address: NEW_FUND }).where(eq(funds.id, fundId));
-    expect(await joinFund(db, late.id, inviteCode, en)).toEqual({ ok: false, status: 409, error: en.funds.alreadyLive });
+    expect(await joinFund(db, late.id, inviteCode, en)).toEqual({ ok: true, fundId, status: "requested", address: NEW_FUND });
   });
 
   it("answers the deploy in English: who may, how many people, how many votes", async () => {

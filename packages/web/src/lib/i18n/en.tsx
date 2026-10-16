@@ -59,7 +59,9 @@ export const en: Messages = {
   },
   funds: {
     badInvite: "That invitation link isn't valid.",
-    alreadyLive: "The fund is already running: ask someone in the group to propose adding you.",
+    alreadyMember: "You're already in this fund.",
+    liveFull: "The fund already has 10 members, which is the most it can have.",
+    manyRequests: "Many people are already asking to join this fund. Try again in a few days.",
     alreadyCreated: "The fund is already created.",
     onlyCreator: "Only the person who set up the fund can create it.",
     beingCreated: "The fund is being created right now. Try again in a little while.",
