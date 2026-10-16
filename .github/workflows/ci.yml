@@ -1,0 +1,112 @@
+name: CI
+
+# Runs the tests and the typecheck on every push and pull request. It needs no secrets and no RPC.
+#
+# Left out on purpose, because they need an anvil fork of Celo mainnet (a live RPC) and are slow:
+#   - the contracts' fork tests (contracts/test/fork), which the foundry.toml `ci` profile skips;
+#   - the packages' fork tests (`pnpm test:fork`);
+#   - the Playwright end-to-end test (`pnpm --filter @tesoreria/web test:e2e`).
+# Run those on a developer machine.
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  # A new push to a branch makes the run of the previous one pointless; on main, let every run finish.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  js:
+    name: Web, agent and wallet
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      # The submodules are only for `forge build` below.
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          submodules: true
+
+      # Installs the pnpm version in the root package.json ("packageManager"). It goes before setup-node, which needs
+      # pnpm on the PATH to cache its store.
+      - uses: pnpm/action-setup@v6
+
+      # Node 24 is what the Vercel project runs.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install the dependencies
+        run: pnpm install --frozen-lockfile
+
+      # packages/agent/test/abi.test.ts compares the agent's ABIs with contracts/out and skips itself when
+      # `forge build` has not run, so without this step the check would pass by not running.
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.8.5
+          # Only fork tests would use its RPC cache, and they do not run here.
+          cache: false
+
+      - name: Compile the contracts
+        run: forge build
+        working-directory: contracts
+
+      - name: Typecheck the web
+        run: pnpm --filter @tesoreria/web typecheck
+
+      - name: Typecheck the agent
+        run: pnpm --filter @tesoreria/agent typecheck
+
+      - name: Typecheck the wallet
+        run: pnpm --filter @tesoreria/wallet typecheck
+
+      # `test` in the agent and the wallet is the unit project only; their fork project is `test:fork`.
+      - name: Test the wallet
+        run: pnpm --filter @tesoreria/wallet test
+
+      - name: Test the agent
+        run: pnpm --filter @tesoreria/agent test
+
+      # The default timeouts (a 10 s hook, a 20 s test) are tuned for a developer machine. Most files open a PGlite
+      # database in a beforeAll hook, and when the four workers start at once on a shared runner that alone can take
+      # longer than 10 s, which fails the whole file ("Hook timed out in 10000ms"). Only the timeouts change.
+      - name: Test the web
+        run: pnpm --filter @tesoreria/web test --hookTimeout=60000 --testTimeout=60000
+
+      # No environment variables: every route is rendered on request, and the settings (src/lib/env.ts) are only read
+      # and validated there, never while building.
+      - name: Build the web
+        run: pnpm --filter @tesoreria/web build
+
+  contracts:
+    name: Contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      # contracts/foundry.toml: this profile skips test/fork/*, which needs a Celo mainnet RPC. It is the
+      # unit, fuzz and invariant tests with mocks, no network.
+      FOUNDRY_PROFILE: ci
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          submodules: true
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.8.5
+          # Only fork tests would use its RPC cache, and they do not run here.
+          cache: false
+
+      - name: Test the contracts
+        run: forge test -vvv
+        working-directory: contracts
