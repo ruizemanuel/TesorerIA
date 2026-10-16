@@ -19,6 +19,10 @@ Everything else (other payments, member changes, the weekly cap, quorum, replaci
 
     FACTORY=0xdF3B0d9edCA58Aac7c9Db4F2931f3559daf82020 forge test --match-path "test/fork/*" -vv
 
+Every `Fund` the factory creates runs the same code. The real group's fund, `0x9A74F670F3c59Ae4B8450fdD477b0461b89D2dfD`, is verified on Sourcify too (exact match), with:
+
+    forge verify-contract 0x9A74F670F3c59Ae4B8450fdD477b0461b89D2dfD src/Fund.sol:Fund --verifier sourcify --chain 42220
+
 ## Security review
 
 Internal review before the first mainnet deploy, not an external audit: Slither 0.11.6 and the Pashov checklist over `src/`. It was first done on 2026-10-08 and redone after the pre-deploy changes: N below the member count, `distributeRemainder`, and a swap callback that pays at most the converted amount, once. No finding needed a code change. Line numbers are in `src/Fund.sol` unless noted.
