@@ -9,6 +9,7 @@ import { en } from "../src/lib/i18n/en";
 import { es } from "../src/lib/i18n/es";
 import {
   JOIN_REQUEST_DAYS,
+  JOIN_REQUEST_REACH_DAYS,
   MAX_OPEN_JOIN_REQUESTS,
   admitMembers,
   joinProgress,
@@ -161,16 +162,21 @@ describe("openRequestsFromOthers (spec, 9.4)", () => {
 });
 
 describe("requestsOf (spec, 9.4 C)", () => {
-  it("lists only the open requests by default, and with includeExpired the expired ones too, an open one before an older expired one", async () => {
+  it("lists only the open requests by default, and within reach also the expired ones a proposal could still carry out, an open one first", async () => {
     const db = await testDb();
-    const { fund: expiredLongAgo, ana, lucas } = await liveFund(db);
-    const expired = await addLiveFund(db, { creatorId: ana.id, address: randomAccount(), members: [ana.id] });
-    const open = await addLiveFund(db, { creatorId: ana.id, address: randomAccount(), members: [ana.id] });
+    const { fund: pastReach, ana, lucas } = await liveFund(db);
+    const [late, expired, open] = [
+      await addLiveFund(db, { creatorId: ana.id, address: randomAccount(), members: [ana.id] }),
+      await addLiveFund(db, { creatorId: ana.id, address: randomAccount(), members: [ana.id] }),
+      await addLiveFund(db, { creatorId: ana.id, address: randomAccount(), members: [ana.id] }),
+    ];
     // Asked oldest first, so a list in the order of asking would put the open one last: only newest first puts it ahead.
-    await requestToJoin(db, expiredLongAgo.id, lucas.id, es);
-    await requestToJoin(db, expired.id, lucas.id, es);
-    await requestToJoin(db, open.id, lucas.id, es);
-    for (const [fund, days] of [[expiredLongAgo, JOIN_REQUEST_DAYS + 2], [expired, JOIN_REQUEST_DAYS + 1]] as const) {
+    for (const fund of [pastReach, late, expired, open]) await requestToJoin(db, fund.id, lucas.id, es);
+    for (const [fund, days] of [
+      [pastReach, JOIN_REQUEST_REACH_DAYS + 1],
+      [late, JOIN_REQUEST_REACH_DAYS - 1],
+      [expired, JOIN_REQUEST_DAYS + 1],
+    ] as const) {
       await db
         .update(joinRequests)
         .set({ createdAt: sql`now() - ${days} * interval '1 day'` })
@@ -178,28 +184,30 @@ describe("requestsOf (spec, 9.4 C)", () => {
     }
 
     expect((await requestsOf(db, lucas.id)).map((request) => request.fundId)).toEqual([open.id]);
-    expect((await requestsOf(db, lucas.id, { includeExpired: false })).map((request) => request.fundId)).toEqual([open.id]);
-    const all = await requestsOf(db, lucas.id, { includeExpired: true });
-    expect(all).toEqual([
+    expect((await requestsOf(db, lucas.id, { withinReach: false })).map((request) => request.fundId)).toEqual([open.id]);
+    expect(await requestsOf(db, lucas.id, { withinReach: true })).toEqual([
       { fundId: open.id, name: open.name, inviteCode: open.inviteCode, requestedAt: expect.any(Date) },
       { fundId: expired.id, name: expired.name, inviteCode: expired.inviteCode, requestedAt: expect.any(Date) },
-      { fundId: expiredLongAgo.id, name: expiredLongAgo.name, inviteCode: expiredLongAgo.inviteCode, requestedAt: expect.any(Date) },
+      { fundId: late.id, name: late.name, inviteCode: late.inviteCode, requestedAt: expect.any(Date) },
     ]);
   });
 
-  it("lists an expired request in a live fund with includeExpired, and only the person's own", async () => {
+  it("drops an expired request once it's past reach, and lists only the person's own", async () => {
     const db = await testDb();
     const { fund, ana, lucas } = await liveFund(db);
     await requestToJoin(db, fund.id, lucas.id, es);
     await age(db, lucas.id, JOIN_REQUEST_DAYS + 1);
     expect(await requestsOf(db, lucas.id)).toEqual([]);
-    expect(await requestsOf(db, lucas.id, { includeExpired: true })).toEqual([
+    expect(await requestsOf(db, lucas.id, { withinReach: true })).toEqual([
       { fundId: fund.id, name: fund.name, inviteCode: fund.inviteCode, requestedAt: expect.any(Date) },
     ]);
-    expect(await requestsOf(db, ana.id, { includeExpired: true })).toEqual([]);
+    expect(await requestsOf(db, ana.id, { withinReach: true })).toEqual([]);
+
+    await age(db, lucas.id, JOIN_REQUEST_REACH_DAYS + 1);
+    expect(await requestsOf(db, lucas.id, { withinReach: true })).toEqual([]);
   });
 
-  it("leaves out a request in a fund that isn't live, open or expired, with or without includeExpired", async () => {
+  it("leaves out a request in a fund that isn't live, open or expired, with or without withinReach", async () => {
     const db = await testDb();
     const { fund, lucas } = await liveFund(db);
     await requestToJoin(db, fund.id, lucas.id, es);
@@ -207,10 +215,10 @@ describe("requestsOf (spec, 9.4 C)", () => {
       // Requests are only made in live funds, so this state doesn't happen: it pins that the list is the live funds' alone.
       await db.update(funds).set({ status }).where(eq(funds.id, fund.id));
       expect(await requestsOf(db, lucas.id), status).toEqual([]);
-      expect(await requestsOf(db, lucas.id, { includeExpired: true }), status).toEqual([]);
+      expect(await requestsOf(db, lucas.id, { withinReach: true }), status).toEqual([]);
     }
     await age(db, lucas.id, JOIN_REQUEST_DAYS + 1);
-    expect(await requestsOf(db, lucas.id, { includeExpired: true })).toEqual([]);
+    expect(await requestsOf(db, lucas.id, { withinReach: true })).toEqual([]);
   });
 });
 

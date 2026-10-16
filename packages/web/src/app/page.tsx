@@ -46,8 +46,8 @@ export default async function Home() {
   const user = await currentUser();
   if (user) {
     const db = await getDb();
-    // Expired requests too: the invitation admits someone a proposal carried in after theirs expired, or offers to ask again.
-    const [funds, requests] = await Promise.all([fundsOf(db, user.id), requestsOf(db, user.id, { includeExpired: true })]);
+    // Expired requests too, while a proposal made in time could still carry them in: the invitation admits them, or offers to ask again.
+    const [funds, requests] = await Promise.all([fundsOf(db, user.id), requestsOf(db, user.id, { withinReach: true })]);
     const target = homeTarget({ funds, lastFund: (await cookies()).get(LAST_FUND_COOKIE)?.value, requests });
     if (target !== null) redirect(target);
   }

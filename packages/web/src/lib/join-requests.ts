@@ -11,12 +11,24 @@ import type { Messages } from "./i18n/messages";
 
 /** A request to join is open for this many days from its date (spec, 9.4), on the database's clock. */
 export const JOIN_REQUEST_DAYS = 7;
+/**
+ * How long after its date a request to join can still make someone a member (spec, 9.4), on the database's clock: it
+ * is open for JOIN_REQUEST_DAYS, a member can sponsor a proposal to add them only while it's open, and the contract
+ * expires that proposal 7 days after it's made. A request's date plus this is the last moment a proposal made in time
+ * can still be carried out; past it, nothing from that request can admit anyone.
+ */
+export const JOIN_REQUEST_REACH_DAYS = 2 * JOIN_REQUEST_DAYS;
 /** The open requests a live fund holds at once: passkeys cost nothing, and a fund's link may travel past the group. */
 export const MAX_OPEN_JOIN_REQUESTS = 5;
 
 /** Whether a request (its `join_requests.created_at`) is still open: decided by the database alone, never the chain (spec, 9.4). */
 export function isOpenRequest() {
   return sql<boolean>`${joinRequests.createdAt} > now() - ${JOIN_REQUEST_DAYS} * interval '1 day'`;
+}
+
+/** Whether a request (its `join_requests.created_at`) is open, or expired but within JOIN_REQUEST_REACH_DAYS: on the database's clock too. */
+function isWithinReach() {
+  return sql<boolean>`${joinRequests.createdAt} > now() - ${JOIN_REQUEST_REACH_DAYS} * interval '1 day'`;
 }
 
 /** The open requests in `fundId` from anyone but `exceptUserId` (all of them for null): the ones the cap of MAX_OPEN_JOIN_REQUESTS counts. */
@@ -78,20 +90,21 @@ export async function joinRequestOf(db: Db, fundId: string, userId: string): Pro
 
 /**
  * A person's requests to join live funds, newest first (an open request is always newer than an expired one, so it
- * comes before it). Only the open ones by default, which is what "Tus fondos" lists (spec, 9.4 C); with
- * `includeExpired`, the expired ones too, which is what the home page takes someone with no fund to: the invitation
- * still admits them if a proposal carried them in after the request expired, and otherwise offers to ask again.
+ * comes before it). Only the open ones by default, which is what "Tus fondos" lists (spec, 9.4 C); with `withinReach`,
+ * also the expired ones within JOIN_REQUEST_REACH_DAYS, which is what the home page takes someone with no fund to: a
+ * proposal made in time may still carry them in, and the invitation admits them if it did, or offers to ask again. Past
+ * that, nothing from the request can admit them, and the home page lets them see the portada again.
  */
 export function requestsOf(
   db: Db,
   userId: string,
-  { includeExpired = false }: { includeExpired?: boolean } = {},
+  { withinReach = false }: { withinReach?: boolean } = {},
 ): Promise<{ fundId: string; name: string; inviteCode: string; requestedAt: Date }[]> {
   return db
     .select({ fundId: funds.id, name: funds.name, inviteCode: funds.inviteCode, requestedAt: joinRequests.createdAt })
     .from(joinRequests)
     .innerJoin(funds, eq(funds.id, joinRequests.fundId))
-    .where(and(eq(joinRequests.userId, userId), eq(funds.status, "live"), includeExpired ? undefined : isOpenRequest()))
+    .where(and(eq(joinRequests.userId, userId), eq(funds.status, "live"), withinReach ? isWithinReach() : isOpenRequest()))
     .orderBy(desc(joinRequests.createdAt));
 }
 
