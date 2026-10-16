@@ -1,5 +1,5 @@
 import { AGENT_ADDRESS, FUND_FACTORY, fundFactoryAbi } from "@tesoreria/agent";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { type Address, type Hash, type Hex, decodeFunctionData, encodeAbiParameters, encodeEventTopics, getAddress, pad } from "viem";
 import { generatePrivateKey, privateKeyToAddress } from "viem/accounts";
 import { describe, expect, it, vi } from "vitest";
@@ -23,7 +23,7 @@ import {
 import { en } from "../src/lib/i18n/en";
 import { es } from "../src/lib/i18n/es";
 import { PENDING_FOR_MS, finishOperation, recordOperation } from "../src/lib/operations";
-import { addLiveFund, addUser, recordTransactions, testDb } from "./support/db";
+import { addLiveFund, addUser, randomAccount, recordTransactions, testDb } from "./support/db";
 import { AGENT, FUND as NEW_FUND, WARS } from "./support/fixtures";
 
 const TX: Hash = pad("0x7a", { size: 32 });
@@ -155,6 +155,41 @@ describe("drafts and invitations", () => {
       expect.objectContaining({ status: "live", address: NEW_FUND, name: "Pádel" }),
       { id: fundId, status: "draft", address: null, name: "Fútbol de los jueves" },
     ]);
+  });
+
+  it("keeps each group in the order the person joined, whatever order the rows come out of the database in", async () => {
+    const db = await testDb();
+    const ana = await addUser(db, "Ana");
+    const joinedAt = (fundId: string, minute: number) =>
+      db
+        .update(memberships)
+        .set({ joinedAt: new Date(Date.UTC(2026, 9, 10, 12, minute)) })
+        .where(and(eq(memberships.fundId, fundId), eq(memberships.userId, ana.id)));
+    const draft = async () => {
+      const created = await createDraft(db, ana.id, DRAFT, es);
+      if (!created.ok) throw new Error(created.error);
+      return created.id;
+    };
+    // Each pair is made in one order and joined in the other, so the order they were stored in is the wrong one.
+    const laterLive = await addLiveFund(db, { creatorId: ana.id, address: randomAccount(), members: [ana.id] });
+    const earlierLive = await addLiveFund(db, { creatorId: ana.id, address: randomAccount(), members: [ana.id] });
+    const laterDraft = await draft();
+    const earlierDraft = await draft();
+    await joinedAt(laterLive.id, 30);
+    await joinedAt(earlierLive.id, 10);
+    await joinedAt(laterDraft, 40);
+    await joinedAt(earlierDraft, 20);
+    expect((await fundsOf(db, ana.id)).map((fund) => fund.id)).toEqual([earlierLive.id, laterLive.id, earlierDraft, laterDraft]);
+  });
+
+  it("breaks a tie in the join time by the fund's id, so funds joined together never swap places", async () => {
+    const db = await testDb();
+    const ana = await addUser(db, "Ana");
+    // Six of them, so the order they were stored in is the order of their (random) ids only one time in 720.
+    const ids: string[] = [];
+    for (let i = 0; i < 6; i++) ids.push((await addLiveFund(db, { creatorId: ana.id, address: randomAccount(), members: [ana.id] })).id);
+    await db.update(memberships).set({ joinedAt: new Date(Date.UTC(2026, 9, 10, 12, 0)) }).where(eq(memberships.userId, ana.id));
+    expect((await fundsOf(db, ana.id)).map((fund) => fund.id)).toEqual([...ids].sort());
   });
 });
 

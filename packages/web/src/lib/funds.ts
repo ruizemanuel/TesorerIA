@@ -586,12 +586,15 @@ export async function deployStep(
   return deployCall(db, { fundId, userId, votesRequired, agent, m });
 }
 
-/** The funds a person belongs to, with their names, live ones first. */
+/**
+ * The funds a person belongs to, with their names: live ones first, and each group in the order they joined (the fund's
+ * id breaks a tie), so "the first live fund" and the rows of Tus fondos are always the same.
+ */
 export async function fundsOf(db: Db, userId: string) {
-  const rows = await db
+  return db
     .select({ id: funds.id, status: funds.status, address: funds.address, name: funds.name })
     .from(memberships)
     .innerJoin(funds, eq(funds.id, memberships.fundId))
-    .where(eq(memberships.userId, userId));
-  return rows.sort((a, b) => Number(b.status === "live") - Number(a.status === "live"));
+    .where(eq(memberships.userId, userId))
+    .orderBy(sql`case when ${funds.status} = 'live' then 0 else 1 end`, asc(memberships.joinedAt), asc(funds.id));
 }
