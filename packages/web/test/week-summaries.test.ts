@@ -131,6 +131,21 @@ describe("writeWeekSummaries: the agent's photo of each week that closes (spec, 
     expect(logged).toHaveBeenCalledWith(expect.stringContaining("Blockscout answered HTTP 429"));
   });
 
+  it("goes on with the next fund when a stored address is malformed, and says so in the log: it never throws", async () => {
+    // The first fund (beforeEach) is read before the broken one and `third` after it, in the order the funds were made.
+    const broken = "0xnot-an-address" as Address;
+    await addLiveFund(db, { creatorId: anaId, address: broken, members: [anaId] });
+    const third = randomAccount();
+    const thirdId = (await addLiveFund(db, { creatorId: anaId, address: third, members: [anaId] })).id;
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { deps } = fakeChain(new Map([[address, inWeek(3n)], [third, inWeek(1n)]]));
+    await expect(writeWeekSummaries(db, deps)).resolves.toBeUndefined();
+    expect((await stored()).map((row) => [row.fundId, row.week])).toEqual([[thirdId, 0], [fundId, 2]]);
+    expect(logged).toHaveBeenCalledTimes(1);
+    expect(logged).toHaveBeenCalledWith(expect.stringContaining(`Could not write the week summary of ${broken}`));
+    logged.mockRestore();
+  });
+
   it("keeps one row, and logs no failure, when two heartbeats write the same week at once", async () => {
     // The primary key would keep a single row all the same: what shows the conflict is handled is a silent log.
     const logged = vi.spyOn(console, "error").mockImplementation(() => {});

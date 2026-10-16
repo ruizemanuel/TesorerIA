@@ -125,11 +125,12 @@ export async function writeWeekSummaries(db: Db, deps: WeekSummaryDeps): Promise
   }
   for (const row of live) {
     if (row.address === null) continue;
-    const fund: SummaryFund = { id: row.id, address: getAddress(row.address), createdBlock: row.createdBlock ?? FUND_FACTORY_BLOCK, weeklyFee: row.weeklyFee };
     try {
+      // Inside the try: an address that doesn't parse costs that one fund its summary, never the others'.
+      const fund: SummaryFund = { id: row.id, address: getAddress(row.address), createdBlock: row.createdBlock ?? FUND_FACTORY_BLOCK, weeklyFee: row.weeklyFee };
       await writeLastWeek(db, deps, fund);
     } catch (error) {
-      console.error(`Could not write the week summary of ${fund.address}: ${shortMessage(error)}`);
+      console.error(`Could not write the week summary of ${row.address}: ${shortMessage(error)}`);
     }
   }
 }
