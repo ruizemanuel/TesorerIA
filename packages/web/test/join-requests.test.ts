@@ -7,7 +7,16 @@ import { MAX_MEMBERS } from "../src/lib/fund-abi";
 import { joinFund } from "../src/lib/funds";
 import { en } from "../src/lib/i18n/en";
 import { es } from "../src/lib/i18n/es";
-import { JOIN_REQUEST_DAYS, MAX_OPEN_JOIN_REQUESTS, joinRequestOf, requestToJoin, requestsOf, sponsoredJoinRequests } from "../src/lib/join-requests";
+import {
+  JOIN_REQUEST_DAYS,
+  MAX_OPEN_JOIN_REQUESTS,
+  admitMembers,
+  joinRequestOf,
+  requestToJoin,
+  requestsIn,
+  requestsOf,
+  sponsoredJoinRequests,
+} from "../src/lib/join-requests";
 import { addLiveFund, addUser, randomAccount, recordTransactions, testDb } from "./support/db";
 
 /** A live fund of Ana, Beto and Caro, and Lucas, who isn't in it. */
@@ -177,5 +186,44 @@ describe("sponsoredJoinRequests (spec, 9.4)", () => {
     await requestToJoin(db, other.id, lucas.id, es);
     expect(await sponsoredJoinRequests(db, dani.id)).toEqual([{ fund: other.address, account: getAddress(lucas.account) }]);
     expect(await sponsoredJoinRequests(db, ana.id)).toEqual([{ fund: fund.address, account: getAddress(lucas.account) }]);
+  });
+});
+
+describe("admitMembers (spec, 9.4)", () => {
+  it("gives a row to whoever the chain lists with a request here, drops the request, and does nothing twice", async () => {
+    const db = await testDb();
+    const { fund, ana, lucas } = await liveFund(db);
+    const stranger = await addUser(db, "Nadie");
+    await requestToJoin(db, fund.id, lucas.id, es);
+    const onChain = [getAddress(ana.account), getAddress(lucas.account), getAddress(stranger.account)];
+
+    expect(await admitMembers(db, fund.id, onChain)).toEqual([lucas.id]);
+    expect(await db.$count(memberships, and(eq(memberships.fundId, fund.id), eq(memberships.userId, lucas.id)))).toBe(1);
+    expect(await joinRequestOf(db, fund.id, lucas.id)).toBeNull();
+    // Without a request there's nothing to catch up: the chain listing someone isn't enough to get a row.
+    expect(await db.$count(memberships, and(eq(memberships.fundId, fund.id), eq(memberships.userId, stranger.id)))).toBe(0);
+    expect(await admitMembers(db, fund.id, onChain)).toEqual([]);
+    expect(await admitMembers(db, fund.id, [])).toEqual([]);
+  });
+
+  it("admits from an expired request too: the chain took them, whenever it was proposed", async () => {
+    const db = await testDb();
+    const { fund, lucas } = await liveFund(db);
+    await requestToJoin(db, fund.id, lucas.id, es);
+    await age(db, lucas.id, JOIN_REQUEST_DAYS + 3);
+    expect(await admitMembers(db, fund.id, [getAddress(lucas.account).toLowerCase() as `0x${string}`])).toEqual([lucas.id]);
+  });
+
+  it("lists everyone who asked, open or not, with their name and account, oldest first", async () => {
+    const db = await testDb();
+    const { fund, lucas } = await liveFund(db);
+    const mora = await addUser(db, "Mora");
+    await requestToJoin(db, fund.id, lucas.id, es);
+    await age(db, lucas.id, JOIN_REQUEST_DAYS + 1);
+    await requestToJoin(db, fund.id, mora.id, es);
+    expect(await requestsIn(db, fund.id)).toEqual([
+      { userId: lucas.id, name: "Lucas", account: getAddress(lucas.account), requestedAt: expect.any(Date), open: false },
+      { userId: mora.id, name: "Mora", account: getAddress(mora.account), requestedAt: expect.any(Date), open: true },
+    ]);
   });
 });

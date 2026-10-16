@@ -7,11 +7,12 @@ import type { CurrentUser } from "./current-user";
 import { type Db, getDb } from "./db/client";
 import { decisions, expenses, funds, memberships, users, weekSummaries } from "./db/schema";
 import { env } from "./env";
-import { memberFundAbi } from "./fund-abi";
+import { MAX_MEMBERS, memberFundAbi } from "./fund-abi";
 import { type FundView, buildFundView } from "./fund-view";
 import { checkHistory } from "./history";
 import type { Locale } from "./i18n/locales";
 import { messagesFor } from "./i18n/messages";
+import { JOIN_REQUEST_DAYS, admitMembers, joinRequestOf, requestsIn } from "./join-requests";
 import { ttlMemo } from "./memo";
 import { cashOutPending, lastOperationBlock, pendingOperations } from "./operations";
 import { waitForBlock } from "./read-your-writes";
@@ -37,6 +38,15 @@ export type FundScreen = {
 // The history check lives in history.ts (week-summaries.ts needs it too); these names stay importable from here.
 export { HistoryGapError, checkHistory } from "./history";
 
+/** A fund's members in the database: their names and accounts. */
+function peopleOf(db: Db, fundId: string) {
+  return db
+    .select({ userId: users.id, name: users.name, account: users.account })
+    .from(memberships)
+    .innerJoin(users, eq(users.id, memberships.userId))
+    .where(eq(memberships.fundId, fundId));
+}
+
 /**
  * Everything one screen of a live fund needs (spec, 9.2). Null when the fund isn't ours, isn't live, or the
  * viewer may not see it: a member sees their fund; anyone sees a fund whose public view is on. What the server writes
@@ -54,13 +64,12 @@ export async function loadFundScreen(
     .from(funds)
     .where(and(eq(funds.address, getAddress(address)), eq(funds.status, "live")));
   if (fund === undefined || (publicView && !fund.publicView)) return null;
-  const people = await db
-    .select({ userId: users.id, name: users.name, account: users.account })
-    .from(memberships)
-    .innerJoin(users, eq(users.id, memberships.userId))
-    .where(eq(memberships.fundId, fund.id));
-  const viewerIsMember = viewer !== null && people.some((p) => p.userId === viewer.id);
-  if (!publicView && !viewerIsMember) return null;
+  let people = await peopleOf(db, fund.id);
+  let viewerIsMember = viewer !== null && people.some((p) => p.userId === viewer.id);
+  // Someone the group just voted in may open the fund before anyone admitted them (below), from another device: only
+  // someone with a request here gets past this without being a member, and only to be admitted (spec, 9.4).
+  const mayBeIn = !publicView && !viewerIsMember && viewer !== null && (await joinRequestOf(db, fund.id, viewer.id)) !== null;
+  if (!publicView && !viewerIsMember && !mayBeIn) return null;
 
   // The balance, the block's time and the history are all read up to the snapshot's block.
   const client = celoClient();
@@ -68,6 +77,12 @@ export async function loadFundScreen(
   const mine = publicView || viewer === null ? null : await lastOperationBlock(db, viewer.id, getAddress(address));
   if (mine !== null) await waitForBlock(client, mine);
   const snapshot = await readFund(client, getAddress(address));
+  // The chain says who is in: whoever it added since their request gets their row, and their request goes (spec, 9.4).
+  if ((await admitMembers(db, fund.id, snapshot.members)).length > 0) {
+    people = await peopleOf(db, fund.id);
+    viewerIsMember = viewer !== null && people.some((p) => p.userId === viewer.id);
+  }
+  if (!publicView && !viewerIsMember) return null;
   const [balance, block, events] = await Promise.all([
     client.readContract({ address: snapshot.address, abi: memberFundAbi, functionName: "balanceInWars", blockNumber: snapshot.block }),
     client.getBlock({ blockNumber: snapshot.block }),
@@ -80,6 +95,9 @@ export async function loadFundScreen(
   const names = new Map<Address, string>();
   if (publicView && !fund.publicNames) snapshot.members.forEach((member, i) => names.set(getAddress(member), m.common.member(i + 1)));
   else for (const p of people) names.set(getAddress(p.account), p.name);
+  // Who asked to join, for their request and its proposal: never on the public view, which shows no requests.
+  const requests = publicView ? [] : await requestsIn(db, fund.id);
+  for (const request of requests) if (!names.has(request.account)) names.set(request.account, request.name);
 
   const joined = joinWeeks(events, (e) => weekAt(blockTime(e.blockNumber, clock), snapshot.startTime));
   const proposals = await readProposals(snapshot, events, publicView ? null : (viewer?.account ?? null));
@@ -134,6 +152,13 @@ export async function loadFundScreen(
     proposals,
     expenses: expenseRows,
     pending,
+    joinRequests: requests.map((request) => ({
+      account: request.account,
+      name: request.name,
+      at: request.open ? request.requestedAt : new Date(request.requestedAt.getTime() + JOIN_REQUEST_DAYS * 86_400_000),
+      open: request.open,
+    })),
+    canAddMembers: snapshot.members.length < MAX_MEMBERS,
     conversionHold: hold,
     summaries: summaryRows.map((row) => ({ week: row.week, at: row.createdAt })),
     warsBalance: snapshot.warsBalance,

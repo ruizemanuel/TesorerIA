@@ -258,7 +258,7 @@ export const es = {
       byMember: (who: string, what: string) => `${sentenceStart(who)} propuso ${what}.`,
       agentDetail: (votes: number) => `Lo que no puedo devolver por mi cuenta lo tienen que votar: hacen falta ${votes} votos.`,
       pay: (amount: string, who: string, note: string) => `pagarle ${amount} a ${who}${note ? ` por ${note}` : ""}`,
-      addMember: "sumar a una cuenta nueva al fondo",
+      addMember: (who: string) => `sumar a ${who} al fondo`,
       removeMember: (who: string) => `sacar a ${who} del fondo`,
       replaceMember: (who: string) => `cambiar la cuenta de ${who}`,
       setWeeklyCap: (expense: string, cap: string) => `cambiar el tope semanal de ${expense} a ${cap}`,
@@ -274,6 +274,9 @@ export const es = {
     },
     paid: (amount: string, who: string) => `El fondo le pagó ${amount} a ${who}: la propuesta se aprobó.`,
     memberAdded: (who: string) => `Se sumó ${who} al fondo.`,
+    /** Someone who asked to join a live fund (spec, 9.4), while it's open, and once it expired without a proposal. */
+    joinRequest: (who: string) => `${sentenceStart(who)} pidió sumarse al fondo.`,
+    joinRequestExpired: (who: string) => `Venció el pedido de ${who}.`,
     /** The agent's word when a week closes (spec, 9.4): `week` counts from 1, as people do. */
     weekClosed: (week: number) => `Cerré la semana ${week}. Te dejo el resumen para el grupo.`,
     memberRemoved: (who: string) => `${sentenceStart(who)} dejó el fondo y se llevó su parte.`,
@@ -526,6 +529,10 @@ export const es = {
   /** Ejecutar, on a proposal that has its votes. */
   execute: {
     button: "Ejecutar",
+  },
+  /** Proponer sumarlo, on someone who asked to join (spec, 9.4). */
+  proposeMember: {
+    button: "Proponer sumarlo",
   },
   /** The chat with the agent (spec, 9.2 and 9.3): what its route answers, its panel, its card, and the brief's fixed text. */
   chat: {

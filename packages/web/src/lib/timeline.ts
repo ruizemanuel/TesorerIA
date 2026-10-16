@@ -12,6 +12,7 @@ export type TimelineAction =
   | { kind: "receipt"; tx: Hash }
   | { kind: "vote"; proposalId: bigint; votes: number; required: number; canVote: boolean; voted: boolean; completes: boolean }
   | { kind: "execute"; proposalId: bigint; canExecute: boolean }
+  | { kind: "propose-member"; account: Address; canPropose: boolean }
   /** A week's summary (spec, 9.4), by the contract's week: "Ver el resumen". */
   | { kind: "summary"; week: number };
 
@@ -44,6 +45,12 @@ export type TimelinePending = {
 /** The agent's latest word on the USDT the fund still holds: it skipped converting it, or couldn't (F8). */
 export type ConversionHold = { usdt: bigint; code: string | null; at: Date };
 
+/**
+ * Someone who asked to join the live fund (join-requests.ts, spec 9.4): their account and name, and whether the request is
+ * still open, as the database says. `at` is when they asked, or when it expired.
+ */
+export type TimelineJoinRequest = { account: Address; name: string; at: Date; open: boolean };
+
 /** Why the agent hasn't converted, as it says it (spec, 9.2: no jargon): by its skip code, or the dictionary's `other`. */
 function holdWhy(m: Messages, code: string | null): string {
   const why = m.timeline.holdWhy;
@@ -68,6 +75,8 @@ export function buildTimeline({
   proposals,
   expenses,
   pending,
+  joinRequests = [],
+  canAddMembers = false,
   conversionHold = null,
   summaries = [],
   warsBalance,
@@ -91,6 +100,9 @@ export function buildTimeline({
   proposals: ReadonlyMap<bigint, ProposalState>;
   expenses: readonly TimelineExpense[];
   pending: readonly TimelinePending[];
+  /** Who asked to join (members' screens only), and whether the fund has room for one more on the chain. */
+  joinRequests?: readonly TimelineJoinRequest[];
+  canAddMembers?: boolean;
   /** Why the USDT waiting hasn't been converted yet, or null (read-fund.ts, conversionHold). */
   conversionHold?: ConversionHold | null;
   /** The agent's summary of each week that closed (spec, 9.4): the contract's week, and when the agent wrote it. */
@@ -110,6 +122,10 @@ export function buildTimeline({
   const spent = new Map<bigint, bigint>();
   const voteOnItsWay = pending.some((operation) => operation.kind === "vote");
   const executeOnItsWay = pending.some((operation) => operation.kind === "execute");
+  const proposeOnItsWay = pending.some((operation) => operation.kind === "propose");
+  /** The accounts an open AddMember proposal would add: their request is told by the proposal now. */
+  const beingProposed = new Set<Address>();
+  const newcomer = (address: Address) => names.get(getAddress(address)) ?? t.newAccount;
   let cap = initialWeeklyCap;
 
   for (const event of events) {
@@ -151,9 +167,10 @@ export function buildTimeline({
       }
       case "ProposalCreated": {
         const { id, action, a, amount, proposer, note } = event.args;
-        const what = proposalText(m, action, a, amount, note, who, agreedExpense);
+        const what = proposalText(m, action, a, amount, note, who, newcomer, agreedExpense);
         const byAgent = isAddressEqual(proposer, agent);
         const state = proposals.get(id);
+        if (action === ProposalAction.AddMember && state !== undefined && !state.executed && state.deadline > nowSeconds) beingProposed.add(getAddress(a));
         let tail = "";
         let proposalAction: TimelineAction | undefined;
         if (state !== undefined) {
@@ -266,6 +283,21 @@ export function buildTimeline({
     items.push({ id: `expense:${expense.id}`, at: expense.createdAt, actor: { kind: "agent" }, text: sentence, pending: pendingNow || undefined });
   }
 
+  // Who asked to join, for the group to propose (spec, 9.4): never on the public view, which has no requests.
+  for (const request of viewerIsMember ? joinRequests : []) {
+    if (beingProposed.has(getAddress(request.account))) continue;
+    const base = { id: `join:${request.account}`, at: request.at, actor: { kind: "member", name: request.name } as Actor };
+    items.push(
+      request.open
+        ? {
+            ...base,
+            text: t.joinRequest(request.name),
+            action: { kind: "propose-member", account: request.account, canPropose: canAddMembers && !proposeOnItsWay },
+          }
+        : { ...base, text: t.joinRequestExpired(request.name) },
+    );
+  }
+
   for (const operation of pending) {
     // A createFund isn't the fund's yet, and a pass to pesos moves the member's own account (spec, 9.2).
     if (operation.kind === "create-fund" || operation.kind === "cash-out") continue;
@@ -297,6 +329,8 @@ function proposalText(
   amount: bigint,
   note: string,
   who: (address: Address) => string,
+  /** The name of someone being added: who asked to join, or "una cuenta nueva" without one. */
+  newcomer: (address: Address) => string,
   agreedExpense: string,
 ): string {
   const t = m.timeline.proposal;
@@ -304,7 +338,7 @@ function proposalText(
     case ProposalAction.Pay:
       return t.pay(formatPesos(amount, m.locale), who(a), note);
     case ProposalAction.AddMember:
-      return t.addMember;
+      return t.addMember(newcomer(a));
     case ProposalAction.RemoveMember:
       return t.removeMember(who(a));
     case ProposalAction.ReplaceMember:

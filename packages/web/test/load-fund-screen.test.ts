@@ -1,10 +1,10 @@
 import { WARS as WARS_TOKEN, type WeekSummaryFacts } from "@tesoreria/agent";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { type Address, type Hash, getAddress, pad } from "viem";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CurrentUser } from "../src/lib/current-user";
 import type { Db } from "../src/lib/db/client";
-import { decisions, expenses, funds, operations, weekSummaries } from "../src/lib/db/schema";
+import { decisions, expenses, funds, joinRequests, memberships, operations, weekSummaries } from "../src/lib/db/schema";
 import { formatPesos } from "../src/lib/format";
 import { finishOperation, recordOperation } from "../src/lib/operations";
 import { HistoryGapError, loadFundScreen as loadScreen, loadPublicFundScreen } from "../src/lib/read-fund";
@@ -451,5 +451,53 @@ describe("loadFundScreen: the week summaries (spec, 9.4)", () => {
     const address = await withSummary();
     const screen = await loadFundScreen(address, asViewer(ana), { locale: "en" });
     expect(screen?.weekSummaries[0]?.text).toContain("Week 2 summary (Oct 18 to Oct 25)");
+  });
+});
+
+describe("loadFundScreen: someone who asked to join (spec, 9.4)", () => {
+  const fundIdOf = async (address: Address) => (await db.select({ id: funds.id }).from(funds).where(eq(funds.address, address)))[0]!.id;
+
+  it("lets in someone the chain added since their request, from any device, before anyone else looked (Review Focus 3)", async () => {
+    const lucas = await addUser(db, "Lucas");
+    const address = await liveFund({}, [ana, beto, caro, lucas]);
+    const fundId = await fundIdOf(address);
+    await db.insert(joinRequests).values({ fundId, userId: lucas.id });
+
+    const screen = await loadFundScreen(address, asViewer(lucas));
+    expect(screen).toMatchObject({ viewerIsMember: true });
+    expect(screen?.view.rows.map((row) => [row.name, row.isMe])).toContainEqual(["Lucas", true]);
+    expect(await db.$count(memberships, and(eq(memberships.fundId, fundId), eq(memberships.userId, lucas.id)))).toBe(1);
+    expect(await db.$count(joinRequests, eq(joinRequests.fundId, fundId))).toBe(0);
+  });
+
+  it("still shows nothing to someone the chain hasn't taken yet, and to anyone without a request, before reading it", async () => {
+    const lucas = await addUser(db, "Lucas");
+    const address = await liveFund();
+    await db.insert(joinRequests).values({ fundId: await fundIdOf(address), userId: lucas.id });
+    expect(await loadFundScreen(address, asViewer(lucas))).toBeNull();
+    agent.readFund.mockClear();
+    expect(await loadFundScreen(address, asViewer(outsider))).toBeNull();
+    expect(agent.readFund).not.toHaveBeenCalled();
+  });
+
+  it("shows the group who asked, with Proponer sumarlo, until the fund has 10 members on the chain (Review Focus 4)", async () => {
+    const lucas = await addUser(db, "Lucas");
+    const address = await liveFund();
+    await db.insert(joinRequests).values({ fundId: await fundIdOf(address), userId: lucas.id });
+    const asked = (screen: Awaited<ReturnType<typeof loadFundScreen>>) => screen?.timeline.find((item) => item.text === "Lucas pidió sumarse al fondo.");
+    expect(asked(await loadFundScreen(address, asViewer(ana)))?.action).toEqual({ kind: "propose-member", account: getAddress(lucas.account), canPropose: true });
+
+    const ten = [ana, beto, caro].map((person) => getAddress(person.account));
+    while (ten.length < 10) ten.push(randomAccount());
+    agent.readFund.mockResolvedValue(snapshot({ address, members: ten }));
+    expect(asked(await loadFundScreen(address, asViewer(ana)))?.action).toMatchObject({ canPropose: false });
+  });
+
+  it("never shows a request on the public view, nor the name of who asked", async () => {
+    const lucas = await addUser(db, "Lucas");
+    const address = await liveFund({ publicView: true, publicNames: true });
+    await db.insert(joinRequests).values({ fundId: await fundIdOf(address), userId: lucas.id });
+    const screen = await loadFundScreen(address, null, { publicView: true });
+    expect(texts(screen!).some((text) => text.includes("Lucas"))).toBe(false);
   });
 });

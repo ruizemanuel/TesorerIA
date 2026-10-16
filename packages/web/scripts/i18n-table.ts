@@ -64,6 +64,8 @@ const NOW = new Date("2026-10-15T13:15:00Z");
 const NAME = "Ana";
 const OTHER = "Beto";
 const THIRD = "Caro";
+/** Someone who asked to join a live fund. */
+const NEWCOMER = "Lucas";
 const INVITATION_URL = "https://tesoreria.example/invitacion/k3x9";
 const FUND_URL = "https://tesoreria.example/f/0x9A74F670F3c59Ae4B8450fdD477b0461b89D2dfD";
 
@@ -112,6 +114,7 @@ const ARGS: Record<string, (k: Kit) => Case[]> = {
   ],
   "timeline.proposal.agentDetail": () => [call(5)],
   "timeline.proposal.pay": ({ pesos, note }) => [when("with a note", pesos(3_000), THIRD, note), when("without a note", pesos(3_000), THIRD, "")],
+  "timeline.proposal.addMember": ({ m }) => [call(NEWCOMER), when("an account with no name", m.timeline.newAccount)],
   "timeline.proposal.removeMember": () => [call(THIRD)],
   "timeline.proposal.replaceMember": () => [call(THIRD)],
   "timeline.proposal.setWeeklyCap": ({ expense, pesos }) => [call(expense, pesos(80_000))],
@@ -120,6 +123,8 @@ const ARGS: Record<string, (k: Kit) => Case[]> = {
   "timeline.proposal.votes": () => [call(3, 5)],
   "timeline.paid": ({ pesos }) => [call(pesos(3_000), NAME)],
   "timeline.memberAdded": () => [call(THIRD)],
+  "timeline.joinRequest": () => [call(NEWCOMER)],
+  "timeline.joinRequestExpired": () => [call(NEWCOMER)],
   "timeline.weekClosed": () => [call(3)],
   "timeline.memberRemoved": ({ m }) => [call(THIRD), when("an account with no name", m.timeline.someone)],
   "timeline.memberReplaced": ({ m }) => [call(THIRD), when("an account with no name", m.timeline.someone)],

@@ -216,7 +216,7 @@ export const en: Messages = {
       byMember: (who: string, what: string) => `${sentenceStart(who)} proposed ${what}.`,
       agentDetail: (votes: number) => `What I can't pay back on my own has to be voted on: ${votes} votes are needed.`,
       pay: (amount: string, who: string, note: string) => `paying ${who} ${amount}${note ? ` for ${note}` : ""}`,
-      addMember: "adding a new account to the fund",
+      addMember: (who: string) => `adding ${who} to the fund`,
       removeMember: (who: string) => `removing ${who} from the fund`,
       replaceMember: (who: string) => `changing ${who}'s account`,
       setWeeklyCap: (expense: string, cap: string) => `changing the weekly cap for ${expense} to ${cap}`,
@@ -232,6 +232,8 @@ export const en: Messages = {
     },
     paid: (amount: string, who: string) => `The fund paid ${who} ${amount}: the proposal was approved.`,
     memberAdded: (who: string) => `${sentenceStart(who)} joined the fund.`,
+    joinRequest: (who: string) => `${sentenceStart(who)} asked to join the fund.`,
+    joinRequestExpired: (who: string) => `${sentenceStart(who)}'s request to join expired.`,
     weekClosed: (week: number) => `I closed week ${week}. Here's the summary for the group.`,
     memberRemoved: (who: string) => `${sentenceStart(who)} left the fund and took their share.`,
     memberReplaced: (who: string) => `${sentenceStart(who)} switched accounts.`,
@@ -432,6 +434,9 @@ export const en: Messages = {
   },
   execute: {
     button: "Carry out",
+  },
+  proposeMember: {
+    button: "Propose adding them",
   },
   chat: {
     unavailable: "The agent can't answer right now. Try again later.",

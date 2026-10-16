@@ -1,4 +1,4 @@
-import { and, desc, eq, isNotNull, ne, not, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, ne, not, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { type Address, getAddress } from "viem";
 import { type Db, inTransaction } from "./db/client";
@@ -94,4 +94,42 @@ export async function sponsoredJoinRequests(db: Db, userId: string): Promise<{ f
       ),
     );
   return rows.map((row) => ({ fund: getAddress(row.fund!), account: getAddress(row.account) }));
+}
+
+/** Everyone with a request to join `fundId`, open or not, oldest first: their name and account, for its movements. */
+export async function requestsIn(
+  db: Db,
+  fundId: string,
+): Promise<{ userId: string; name: string; account: Address; requestedAt: Date; open: boolean }[]> {
+  const rows = await db
+    .select({ userId: users.id, name: users.name, account: users.account, requestedAt: joinRequests.createdAt, open: isOpenRequest() })
+    .from(joinRequests)
+    .innerJoin(users, eq(users.id, joinRequests.userId))
+    .where(eq(joinRequests.fundId, fundId))
+    .orderBy(asc(joinRequests.createdAt));
+  return rows.map((row) => ({ ...row, account: getAddress(row.account) }));
+}
+
+/**
+ * Gives a membership row to each of `members` (the fund's members on the chain) who asked to join `fundId` and has none,
+ * and drops their request (spec, 9.4). The chain decides who is in: this only catches the database up, wherever the
+ * proposal was carried out from. Nobody gets in without a request. The user ids it admitted.
+ */
+export async function admitMembers(db: Db, fundId: string, members: readonly Address[]): Promise<string[]> {
+  if (members.length === 0) return [];
+  const waiting = await db
+    .select({ userId: joinRequests.userId })
+    .from(joinRequests)
+    .innerJoin(users, eq(users.id, joinRequests.userId))
+    .where(and(eq(joinRequests.fundId, fundId), inArray(users.account, members.map((member) => getAddress(member)))));
+  if (waiting.length === 0) return [];
+  const ids = waiting.map((row) => row.userId);
+  await inTransaction(db, (tx) => [
+    tx
+      .insert(memberships)
+      .values(ids.map((userId) => ({ fundId, userId })))
+      .onConflictDoNothing(),
+    tx.delete(joinRequests).where(and(eq(joinRequests.fundId, fundId), inArray(joinRequests.userId, ids))),
+  ]);
+  return ids;
 }

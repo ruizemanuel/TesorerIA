@@ -1,5 +1,5 @@
 import { USDT, WARS as WARS_TOKEN } from "@tesoreria/agent";
-import { type Address, pad, toHex, zeroAddress } from "viem";
+import { type Address, getAddress, pad, toHex, zeroAddress } from "viem";
 import { describe, expect, it } from "vitest";
 import type { ExpenseStatus } from "../src/lib/db/schema";
 import { NBSP, formatUsdt } from "../src/lib/format";
@@ -556,5 +556,61 @@ describe("buildTimeline in English", () => {
       { id: "summary:0", at, actor: { kind: "agent" }, text: "Cerré la semana 1. Te dejo el resumen para el grupo.", action: { kind: "summary", week: 0 } },
     ]);
     expect(timeline({ summaries: [{ week: 2, at }], m: en })[0]?.text).toBe("I closed week 3. Here's the summary for the group.");
+  });
+});
+
+describe("buildTimeline: asking to join a live fund (spec, 9.4)", () => {
+  const LUCAS = getAddress("0x000000000000000000000000000000000000aaa4");
+  const ASKED = new Date(NOW.getTime() - 3_600_000);
+  const withLucas = new Map([...NAMES, [LUCAS, "Lucas"]]);
+  const asked = { account: LUCAS, name: "Lucas", at: ASKED, open: true };
+  const OPEN: ProposalState = { votes: 1, executed: false, deadline: CLOCK.timestamp + 86_400n, voted: true };
+  const addLucas = (state: ProposalState) => ({
+    events: [event("ProposalCreated", { id: 4n, action: 1, a: LUCAS, b: zeroAddress, amount: 0n, proposer: ANA, note: "" }, BLOCK - 100n)],
+    proposals: new Map([[4n, state]]),
+  });
+
+  it("shows a member who asked, with Proponer sumarlo, in Spanish and English", () => {
+    expect(timeline({ names: withLucas, joinRequests: [asked], canAddMembers: true })).toEqual([
+      {
+        id: `join:${LUCAS}`,
+        at: ASKED,
+        actor: { kind: "member", name: "Lucas" },
+        text: "Lucas pidió sumarse al fondo.",
+        action: { kind: "propose-member", account: LUCAS, canPropose: true },
+      },
+    ]);
+    expect(timeline({ names: withLucas, joinRequests: [asked], canAddMembers: true, m: en })[0]?.text).toBe("Lucas asked to join the fund.");
+  });
+
+  it("doesn't offer it while the fund is full or the viewer's proposal is on its way, and shows nothing to a non-member", () => {
+    expect(timeline({ joinRequests: [asked], canAddMembers: false })[0]?.action).toEqual({ kind: "propose-member", account: LUCAS, canPropose: false });
+    const pending = [{ userOpHash: "0xp", kind: "propose", amount: null, token: null, createdAt: NOW }] as const;
+    const onItsWay = timeline({ joinRequests: [asked], canAddMembers: true, pending });
+    expect(onItsWay.find((item) => item.id === `join:${LUCAS}`)?.action).toMatchObject({ canPropose: false });
+    expect(timeline({ joinRequests: [asked], canAddMembers: true, viewerIsMember: false })).toEqual([]);
+  });
+
+  it("leaves the request out while a proposal to add them is open, which names them, and brings it back once that one expired", () => {
+    const open = timeline({ names: withLucas, joinRequests: [asked], canAddMembers: true, ...addLucas(OPEN) });
+    expect(open.map((item) => item.text)).toEqual(["Ana propuso sumar a Lucas al fondo. Lleva 1 de 2 votos."]);
+    expect(timeline({ names: withLucas, joinRequests: [asked], ...addLucas(OPEN), m: en })[0]?.text).toBe(
+      "Ana proposed adding Lucas to the fund. It has 1 of 2 votes.",
+    );
+    const expired = timeline({ names: withLucas, joinRequests: [asked], canAddMembers: true, ...addLucas({ ...OPEN, deadline: CLOCK.timestamp - 1n }) });
+    // Newest first: the proposal (100 s ago) above the request (an hour ago).
+    expect(expired.map((item) => item.text)).toEqual(["Ana propuso sumar a Lucas al fondo. Venció sin los votos necesarios.", "Lucas pidió sumarse al fondo."]);
+  });
+
+  it("says a request that expired without a proposal, at the time it expired, with no button", () => {
+    const EXPIRED = new Date(NOW.getTime() - 60_000);
+    const [item] = timeline({ names: withLucas, joinRequests: [{ ...asked, at: EXPIRED, open: false }], canAddMembers: true });
+    expect(item).toEqual({ id: `join:${LUCAS}`, at: EXPIRED, actor: { kind: "member", name: "Lucas" }, text: "Venció el pedido de Lucas." });
+    expect(timeline({ joinRequests: [{ ...asked, open: false }], m: en })[0]?.text).toBe("Lucas's request to join expired.");
+  });
+
+  it("says 'una cuenta nueva' in a proposal to add someone it has no name for, as before", () => {
+    expect(timeline(addLucas(OPEN))[0]?.text).toBe("Ana propuso sumar a una cuenta nueva al fondo. Lleva 1 de 2 votos.");
+    expect(timeline({ ...addLucas(OPEN), m: en })[0]?.text).toBe("Ana proposed adding a new account to the fund. It has 1 of 2 votes.");
   });
 });

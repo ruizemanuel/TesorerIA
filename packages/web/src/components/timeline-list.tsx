@@ -6,6 +6,7 @@ import type { TimelineItem } from "../lib/timeline";
 import { Avatar } from "./avatar";
 import { ExecuteButton } from "./execute-button";
 import { PanelLink } from "./panel-link";
+import { ProposeMemberButton } from "./propose-member-button";
 import { buttonClass } from "./ui";
 import { VoteButton } from "./vote-button";
 
@@ -85,6 +86,9 @@ export function TimelineList({
               )}
               {item.action?.kind === "execute" && !readOnly && !closed && item.action.canExecute && (
                 <ExecuteButton fund={fund} proposalId={item.action.proposalId.toString()} />
+              )}
+              {item.action?.kind === "propose-member" && !readOnly && !closed && item.action.canPropose && (
+                <ProposeMemberButton fund={fund} account={item.action.account} />
               )}
             </div>
           </li>
