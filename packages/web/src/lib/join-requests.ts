@@ -19,6 +19,19 @@ export function isOpenRequest() {
   return sql<boolean>`${joinRequests.createdAt} > now() - ${JOIN_REQUEST_DAYS} * interval '1 day'`;
 }
 
+/** The open requests in `fundId` from anyone but `exceptUserId` (all of them for null): the ones the cap of MAX_OPEN_JOIN_REQUESTS counts. */
+function openFromOthers(fundId: string, exceptUserId: string | null) {
+  return and(eq(joinRequests.fundId, fundId), exceptUserId === null ? undefined : ne(joinRequests.userId, exceptUserId), isOpenRequest());
+}
+
+/**
+ * How many open requests `fundId` holds from people other than `exceptUserId`: at MAX_OPEN_JOIN_REQUESTS, the fund
+ * takes no more, and the invitation says so before anyone makes an account for it (invitationFor).
+ */
+export function openRequestsFromOthers(db: Db, fundId: string, exceptUserId: string | null): Promise<number> {
+  return db.$count(joinRequests, openFromOthers(fundId, exceptUserId));
+}
+
 /**
  * Asks to join the live fund `fundId` for `userId` (spec, 9.4): a new request, the same one again (a double tap or two
  * tabs keep one row, with its first date), or a renewed one once it expired. Not for a member, nor while the fund has
@@ -32,7 +45,7 @@ export async function requestToJoin(db: Db, fundId: string, userId: string, m: M
   if (await isMember(db, fundId, userId)) return fail(409, m.funds.alreadyMember);
   await inTransaction(db, (tx) => {
     const members = tx.$count(memberships, eq(memberships.fundId, fundId));
-    const waiting = tx.$count(joinRequests, and(eq(joinRequests.fundId, fundId), ne(joinRequests.userId, userId), isOpenRequest()));
+    const waiting = tx.$count(joinRequests, openFromOthers(fundId, userId));
     return [
       lockFund(tx, fundId),
       tx

@@ -14,6 +14,7 @@ import {
   joinProgress,
   joinRequestOf,
   joinStateOf,
+  openRequestsFromOthers,
   requestToJoin,
   requestsIn,
   requestsOf,
@@ -140,6 +141,22 @@ describe("requestToJoin (spec, 9.4)", () => {
     expect(await requestToJoin(db, fund.id, ana.id, en)).toEqual({ ok: false, status: 409, error: "You're already in this fund." });
     expect(en.funds.liveFull).toBe("The fund already has 10 members, which is the most it can have.");
     expect(en.funds.manyRequests).toBe("Many people are already asking to join this fund. Try again in a few days.");
+  });
+});
+
+describe("openRequestsFromOthers (spec, 9.4)", () => {
+  it("counts the fund's open requests, leaving out the viewer's own and the expired ones, and sees no one in another fund", async () => {
+    const db = await testDb();
+    const { fund, ana, lucas } = await liveFund(db);
+    const other = await addLiveFund(db, { creatorId: ana.id, address: randomAccount(), members: [ana.id] });
+    expect(await openRequestsFromOthers(db, fund.id, null)).toBe(0);
+    await othersAsk(db, fund.id, 3);
+    await othersAsk(db, other.id, 2);
+    await requestToJoin(db, fund.id, lucas.id, es);
+    expect(await openRequestsFromOthers(db, fund.id, null)).toBe(4);
+    expect(await openRequestsFromOthers(db, fund.id, lucas.id)).toBe(3);
+    await age(db, lucas.id, JOIN_REQUEST_DAYS + 1);
+    expect(await openRequestsFromOthers(db, fund.id, null)).toBe(3);
   });
 });
 

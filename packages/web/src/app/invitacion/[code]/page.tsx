@@ -8,7 +8,7 @@ import { getDb } from "../../../lib/db/client";
 import { draftByInvite } from "../../../lib/funds";
 import { getLocale, getMessages } from "../../../lib/i18n/server";
 import { invitationFor } from "../../../lib/invitation";
-import { NO_JOIN, joinStateOf } from "../../../lib/join-requests";
+import { NO_JOIN, joinStateOf, openRequestsFromOthers } from "../../../lib/join-requests";
 
 /** The invitation (spec, 9, screen 1), and on a live fund, asking to join it and where that stands (spec, 9.4). */
 export default async function InvitePage({ params }: { params: Promise<{ code: string }> }) {
@@ -21,7 +21,9 @@ export default async function InvitePage({ params }: { params: Promise<{ code: s
   const join = user === null ? NO_JOIN : await joinStateOf(db, celoClient(), draft, user, m);
   // Admitted just now: the fund lists them, and the invitation takes them to it.
   if (join.admitted) draft = (await draftByInvite(db, code)) ?? draft;
-  const invitation = invitationFor(draft, user?.id ?? null, m, join);
+  // Only a live fund has requests; whoever the viewer is, the cap is on the other people's (invitationFor).
+  const othersWaiting = draft.status === "live" ? await openRequestsFromOthers(db, draft.id, user?.id ?? null) : 0;
+  const invitation = invitationFor(draft, user?.id ?? null, m, join, othersWaiting);
   return (
     <main className="mx-auto grid max-w-[560px] gap-4 p-4 pt-8">
       <div className="flex items-center justify-between">

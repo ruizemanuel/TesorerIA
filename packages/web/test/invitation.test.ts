@@ -4,6 +4,7 @@ import type { DraftSummary } from "../src/lib/funds";
 import { en } from "../src/lib/i18n/en";
 import { es } from "../src/lib/i18n/es";
 import { invitationFor } from "../src/lib/invitation";
+import { MAX_OPEN_JOIN_REQUESTS } from "../src/lib/join-requests";
 import { randomAccount } from "./support/db";
 
 const ME = randomUUID();
@@ -82,6 +83,37 @@ describe("invitationFor a live fund (spec, 9.4)", () => {
       expect(invitationFor(fund("live", 10), ME, es, join)).toEqual({ kind: "closed", why: "El fondo ya tiene 10 miembros, que es el máximo." });
     }
     expect(invitationFor(fund("live", 10, true), ME, es)).toEqual({ kind: "closed", why: "Este fondo ya está andando.", link: { href: `/f/${FUND}`, label: "Ir al fondo" } });
+  });
+
+  it("closes the invitation, before any form, on a fund that already has 5 open requests from other people, so nobody makes an account for nothing", () => {
+    const refusal = { kind: "closed", why: "Ya hay muchos pedidos para sumarse a este fondo. Probá en unos días." };
+    // Logged out, or logged in with no request of their own.
+    for (const viewer of [null, ME]) expect(invitationFor(fund("live", 4), viewer, es, undefined, MAX_OPEN_JOIN_REQUESTS)).toEqual(refusal);
+    // Just under the cap there is still room for one more.
+    expect(invitationFor(fund("live", 4), null, es, undefined, MAX_OPEN_JOIN_REQUESTS - 1)).toEqual({ kind: "request", again: false });
+    // An expired request of their own doesn't get "Pedir de nuevo": it would be refused all the same.
+    expect(invitationFor(fund("live", 4), ME, es, { request: EXPIRED, proposal: null }, MAX_OPEN_JOIN_REQUESTS)).toEqual(refusal);
+  });
+
+  it("keeps the other states ahead of the 5-request refusal: a member, a full fund, a proposal and your own open request", () => {
+    const others = MAX_OPEN_JOIN_REQUESTS;
+    expect(invitationFor(fund("live", 4, true), ME, es, undefined, others)).toMatchObject({ why: "Este fondo ya está andando.", link: { href: `/f/${FUND}` } });
+    expect(invitationFor(fund("live", 10), ME, es, undefined, others)).toEqual({ kind: "closed", why: "El fondo ya tiene 10 miembros, que es el máximo." });
+    expect(invitationFor(fund("live", 4), ME, es, { request: OPEN, proposal: PROPOSED }, others)).toEqual({ kind: "closed", why: "Ana propuso sumarte. Lleva 1 de 2 votos." });
+    expect(invitationFor(fund("live", 4), ME, es, { request: EXPIRED, proposal: PROPOSED }, others)).toMatchObject({ why: "Ana propuso sumarte. Lleva 1 de 2 votos." });
+    // Your own request is one of the open ones, not "another person's": you still see where it stands.
+    expect(invitationFor(fund("live", 4), ME, es, { request: OPEN, proposal: null }, others)).toMatchObject({ why: expect.stringMatching(/^Pediste sumarte\./) });
+  });
+
+  it("says the 5-request refusal in English", () => {
+    expect(invitationFor(fund("live", 4), null, en, undefined, MAX_OPEN_JOIN_REQUESTS)).toEqual({
+      kind: "closed",
+      why: "Many people are already asking to join this fund. Try again in a few days.",
+    });
+    expect(invitationFor(fund("live", 4), ME, en, { request: EXPIRED, proposal: null }, MAX_OPEN_JOIN_REQUESTS)).toMatchObject({ kind: "closed" });
+    expect(invitationFor(fund("live", 4), ME, en, { request: OPEN, proposal: null }, MAX_OPEN_JOIN_REQUESTS)).toMatchObject({
+      why: expect.stringMatching(/^You asked to join\./),
+    });
   });
 
   it("says each of them in English", () => {
