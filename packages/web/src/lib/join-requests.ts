@@ -1,11 +1,12 @@
+import { fundAbi, shortMessage } from "@tesoreria/agent";
 import { and, asc, desc, eq, inArray, isNotNull, ne, not, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
-import { type Address, getAddress } from "viem";
+import { type Address, type PublicClient, getAddress, isAddressEqual } from "viem";
 import { type Db, inTransaction } from "./db/client";
 import { funds, joinRequests, memberships, users } from "./db/schema";
-import { MAX_MEMBERS } from "./fund-abi";
+import { MAX_MEMBERS, ProposalAction, memberFundAbi } from "./fund-abi";
 import { fail, isMember, lockFund } from "./fund-rows";
-import type { FundsResult } from "./funds";
+import type { DraftSummary, FundsResult } from "./funds";
 import type { Messages } from "./i18n/messages";
 
 /** A request to join is open for this many days from its date (spec, 9.4), on the database's clock. */
@@ -132,4 +133,72 @@ export async function admitMembers(db: Db, fundId: string, members: readonly Add
     tx.delete(joinRequests).where(and(eq(joinRequests.fundId, fundId), inArray(joinRequests.userId, ids))),
   ]);
   return ids;
+}
+
+/** How many of a fund's latest proposals the invitation looks through for one adding the viewer: a proposal lasts 7 days. */
+const RECENT_PROPOSALS = 20n;
+
+/** Where an account stands on a fund's chain (spec, 9.4): a member, or with an open AddMember proposal, or neither. */
+export type JoinProgress = { member: boolean; proposal: { proposer: Address; votes: number; required: number } | null };
+
+/** Reads where `account` stands on `fund`: whether it's a member, and the latest open proposal that adds it. */
+export async function joinProgress(client: Pick<PublicClient, "readContract" | "getBlock">, fund: Address, account: Address): Promise<JoinProgress> {
+  if (await client.readContract({ address: fund, abi: memberFundAbi, functionName: "isMember", args: [account] })) return { member: true, proposal: null };
+  const [count, block] = await Promise.all([client.readContract({ address: fund, abi: memberFundAbi, functionName: "proposalCount" }), client.getBlock()]);
+  const oldest = count > RECENT_PROPOSALS ? count - RECENT_PROPOSALS : 0n;
+  for (let id = count - 1n; id >= oldest; id--) {
+    const proposal = await client.readContract({ address: fund, abi: memberFundAbi, functionName: "getProposal", args: [id] });
+    // Open as the contract has it (Fund._activeProposal): not carried out, and not past its deadline.
+    if (proposal.action !== ProposalAction.AddMember || !isAddressEqual(proposal.a, account)) continue;
+    if (proposal.executed || BigInt(proposal.deadline) < block.timestamp) continue;
+    const [votes, required] = await Promise.all([
+      client.readContract({ address: fund, abi: memberFundAbi, functionName: "voteCount", args: [id] }),
+      client.readContract({ address: fund, abi: fundAbi, functionName: "votesRequired" }),
+    ]);
+    return { member: false, proposal: { proposer: getAddress(proposal.proposer), votes: Number(votes), required } };
+  }
+  return { member: false, proposal: null };
+}
+
+/** What the invitation of a live fund shows someone logged in who isn't in it (spec, 9.4). */
+export type JoinState = {
+  request: { requestedAt: Date; open: boolean } | null;
+  /** An open proposal to add them: who made it, by name, and its votes. */
+  proposal: { proposer: string; votes: number; required: number } | null;
+  /** The chain had them already, and now the fund does: the invitation takes them to it. */
+  admitted: boolean;
+};
+
+export const NO_JOIN: JoinState = { request: null, proposal: null, admitted: false };
+
+/**
+ * Where `viewer`'s request to join `fund` stands, reading the chain only for someone with a request in a live fund
+ * they aren't in yet: if the chain already added them, they're admitted here. If the chain can't be read, the request
+ * is shown as the database has it, and the next visit reads it again.
+ */
+export async function joinStateOf(
+  db: Db,
+  client: Pick<PublicClient, "readContract" | "getBlock">,
+  fund: Pick<DraftSummary, "id" | "status" | "address" | "members">,
+  viewer: { id: string; account: Address },
+  m: Messages,
+): Promise<JoinState> {
+  if (fund.status !== "live" || fund.address === null || fund.members.some((member) => member.userId === viewer.id)) return NO_JOIN;
+  const request = await joinRequestOf(db, fund.id, viewer.id);
+  if (request === null) return NO_JOIN;
+  let progress: JoinProgress;
+  try {
+    progress = await joinProgress(client, fund.address, viewer.account);
+  } catch (error) {
+    console.error(`Could not read how a request to join stands: ${shortMessage(error)}`);
+    return { request, proposal: null, admitted: false };
+  }
+  if (progress.member) {
+    await admitMembers(db, fund.id, [viewer.account]);
+    return { request, proposal: null, admitted: true };
+  }
+  if (progress.proposal === null) return { request, proposal: null, admitted: false };
+  const { proposer, votes, required } = progress.proposal;
+  const name = fund.members.find((member) => isAddressEqual(member.account, proposer))?.name ?? m.timeline.someone;
+  return { request, proposal: { proposer: name, votes, required }, admitted: false };
 }

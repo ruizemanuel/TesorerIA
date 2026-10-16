@@ -11,6 +11,8 @@ export const memberFundAbi = parseAbi([
   "function getProposal(uint256 id) view returns ((uint8 action, address a, address b, uint256 amount, uint64 deadline, bool executed, address proposer, string note))",
   "function voteCount(uint256 id) view returns (uint256)",
   "function hasVoted(uint256 id, address member) view returns (bool)",
+  "function isMember(address member) view returns (bool)",
+  "function proposalCount() view returns (uint256)",
   "function contributeWars(uint256 amount)",
   "function contributeUsdt(uint256 amount)",
   "function vote(uint256 id)",

@@ -101,6 +101,7 @@ const ARGS: Record<string, (k: Kit) => Case[]> = {
   "invitation.title": ({ fund }) => [call(NAME, createElement("i", null, fund))],
   "invitation.rules": ({ bold, pesos, expense }) => [call(bold(pesos(10_000)), bold(pesos(60_000)), expense)],
   "invitation.alreadyJoined": () => [call(`${NAME}, ${OTHER}, ${THIRD}`)],
+  "invitation.proposed": ({ m }) => [call(NAME, 1, 2), when("an account with no name", m.timeline.someone, 1, 2)],
   "timeline.contributed": ({ m, pesos }) => [call(NAME, pesos(10_000)), when("an account with no name", m.timeline.someone, pesos(10_000))],
   "timeline.converted": ({ pesos, usdt }) => [call(usdt(10), pesos(16_000))],
   "timeline.reimbursed": ({ pesos, expense }) => [call(pesos(45_000), NAME, expense)],

@@ -10,8 +10,11 @@ import { useMessages } from "../lib/i18n/client";
 import { PersonFields, personFrom } from "./person-fields";
 import { Button } from "./ui";
 
-/** Joining a fund by its link (spec, 9, screen 1), creating the account first if there's none. */
-export function JoinForm({ code, loggedIn }: { code: string; loggedIn: boolean }) {
+/**
+ * Joining a fund by its link (spec, 9, screen 1), or asking to join a live one (spec, 9.4), creating the account first
+ * if there's none. `label` is the button's: "Sumarme", "Pedir sumarme" or "Pedir de nuevo".
+ */
+export function JoinForm({ code, loggedIn, label }: { code: string; loggedIn: boolean; label: string }) {
   const router = useRouter();
   const m = useMessages();
   const [busy, setBusy] = useState(false);
@@ -38,6 +41,12 @@ export function JoinForm({ code, loggedIn }: { code: string; loggedIn: boolean }
             then: () => post<{ fundId: string; status: string; address: string | null }>(`/api/invites/${encodeURIComponent(code)}/join`),
             m,
           });
+          if (joined.status === "requested") {
+            // A live fund: the request is in, and the invitation, read again, says where it stands (spec, 9.4).
+            router.refresh();
+            setBusy(false);
+            return;
+          }
           router.push(joined.address ? `/f/${joined.address}` : `/f/borrador/${joined.fundId}`);
         } catch (caught) {
           setError(userMessage(caught, m));
@@ -52,7 +61,7 @@ export function JoinForm({ code, loggedIn }: { code: string; loggedIn: boolean }
         </>
       )}
       <Button type="submit" disabled={busy}>
-        {busy ? m.common.confirm : m.invitation.join}
+        {busy ? m.common.confirm : label}
       </Button>
       <p role="alert" className="text-sm text-owe">
         {error}

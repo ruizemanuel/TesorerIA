@@ -231,6 +231,12 @@ export const es = {
     beingCreated: "Este fondo ya se está creando.",
     running: "Este fondo ya está andando.",
     goToFund: "Ir al fondo",
+    /** A live fund (spec, 9.4): asking to join, and where the request stands. */
+    request: "Pedir sumarme",
+    requestAgain: "Pedir de nuevo",
+    requested: "Pediste sumarte. Alguien del grupo tiene que proponerte, y después se vota. Cuando se apruebe, vas a ver el fondo acá.",
+    proposed: (who: string, votes: number, required: number) => `${sentenceStart(who)} propuso sumarte. Lleva ${votes} de ${required} votos.`,
+    expired: "Tu pedido venció. Pedile a alguien del grupo que te proponga.",
   },
   /**
    * The movements of a fund, written on the server (timeline.ts; spec, 9.2): the agent speaks in first person, a

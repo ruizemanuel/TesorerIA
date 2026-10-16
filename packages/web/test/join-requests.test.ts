@@ -1,17 +1,19 @@
 import { and, eq, sql } from "drizzle-orm";
-import { getAddress } from "viem";
-import { describe, expect, it } from "vitest";
+import { type Address, getAddress, zeroAddress } from "viem";
+import { describe, expect, it, vi } from "vitest";
 import type { Db } from "../src/lib/db/client";
 import { funds, joinRequests, memberships } from "../src/lib/db/schema";
 import { MAX_MEMBERS } from "../src/lib/fund-abi";
-import { joinFund } from "../src/lib/funds";
+import { draftById, joinFund } from "../src/lib/funds";
 import { en } from "../src/lib/i18n/en";
 import { es } from "../src/lib/i18n/es";
 import {
   JOIN_REQUEST_DAYS,
   MAX_OPEN_JOIN_REQUESTS,
   admitMembers,
+  joinProgress,
   joinRequestOf,
+  joinStateOf,
   requestToJoin,
   requestsIn,
   requestsOf,
@@ -225,5 +227,86 @@ describe("admitMembers (spec, 9.4)", () => {
       { userId: lucas.id, name: "Lucas", account: getAddress(lucas.account), requestedAt: expect.any(Date), open: false },
       { userId: mora.id, name: "Mora", account: getAddress(mora.account), requestedAt: expect.any(Date), open: true },
     ]);
+  });
+});
+
+type Proposal = { action: number; a: Address; b: Address; amount: bigint; deadline: bigint; executed: boolean; proposer: Address; note: string };
+
+/** A fund on the chain with these proposals, where `account` is or isn't a member, at time `now`. */
+function chain({ member = false, proposals = [] as Proposal[], now = 1_000_000n, fails = false } = {}) {
+  return {
+    getBlock: async () => ({ timestamp: now }),
+    readContract: async ({ functionName, args }: { functionName: string; args?: readonly unknown[] }) => {
+      if (fails) throw new Error("The node is down");
+      switch (functionName) {
+        case "isMember":
+          return member;
+        case "proposalCount":
+          return BigInt(proposals.length);
+        case "getProposal":
+          return proposals[Number(args![0])];
+        case "voteCount":
+          return 1n;
+        case "votesRequired":
+          return 2;
+      }
+      throw new Error(`Unexpected read: ${functionName}`);
+    },
+  } as unknown as Parameters<typeof joinProgress>[0];
+}
+
+describe("joinProgress and joinStateOf: where a request stands on the chain (spec, 9.4)", () => {
+  const FUND_ADDRESS = getAddress("0x00000000000000000000000000000000000f00d1");
+  const LUCAS = getAddress("0x000000000000000000000000000000000000aaa4");
+  const ANA_ACCOUNT = getAddress("0x000000000000000000000000000000000000aaa1");
+  const adding = (a: Address, change: Partial<Proposal> = {}): Proposal => ({
+    action: 1,
+    a,
+    b: zeroAddress,
+    amount: 0n,
+    deadline: 1_000_000n + 86_400n,
+    executed: false,
+    proposer: ANA_ACCOUNT,
+    note: "",
+    ...change,
+  });
+
+  it("says a member is one, and finds the open proposal that adds the account, with its votes", async () => {
+    expect(await joinProgress(chain({ member: true }), FUND_ADDRESS, LUCAS)).toEqual({ member: true, proposal: null });
+    const proposals = [adding(LUCAS), adding(LUCAS, { executed: true }), adding(LUCAS, { deadline: 999_999n }), { ...adding(LUCAS), action: 0 }, adding(ANA_ACCOUNT)];
+    expect(await joinProgress(chain({ proposals }), FUND_ADDRESS, LUCAS)).toEqual({ member: false, proposal: { proposer: ANA_ACCOUNT, votes: 1, required: 2 } });
+    expect(await joinProgress(chain({ proposals: proposals.slice(1) }), FUND_ADDRESS, LUCAS)).toEqual({ member: false, proposal: null });
+    expect(await joinProgress(chain(), FUND_ADDRESS, LUCAS)).toEqual({ member: false, proposal: null });
+  });
+
+  it("looks only through the latest 20 proposals: one older than that has expired anyway", async () => {
+    const proposals = [adding(LUCAS), ...Array.from({ length: 20 }, () => adding(ANA_ACCOUNT))];
+    expect(await joinProgress(chain({ proposals }), FUND_ADDRESS, LUCAS)).toEqual({ member: false, proposal: null });
+  });
+
+  it("admits someone the chain already added, and names who proposed them", async () => {
+    const db = await testDb();
+    const { fund, ana, lucas } = await liveFund(db);
+    const viewer = { id: lucas.id, account: getAddress(lucas.account) };
+    const summary = (await draftById(db, fund.id))!;
+    expect(await joinStateOf(db, chain({ member: true }), summary, viewer, es)).toEqual({ request: null, proposal: null, admitted: false }); // no request
+
+    await requestToJoin(db, fund.id, lucas.id, es);
+    const proposed = await joinStateOf(db, chain({ proposals: [adding(viewer.account, { proposer: getAddress(ana.account) })] }), summary, viewer, es);
+    expect(proposed).toMatchObject({ request: { open: true }, proposal: { proposer: "Ana", votes: 1, required: 2 }, admitted: false });
+
+    expect(await joinStateOf(db, chain({ member: true }), summary, viewer, es)).toMatchObject({ admitted: true });
+    expect((await draftById(db, fund.id))!.members.map((member) => member.name)).toContain("Lucas");
+  });
+
+  it("shows the request as the database has it when the chain can't be read, and says why in the log", async () => {
+    const db = await testDb();
+    const { fund, lucas } = await liveFund(db);
+    await requestToJoin(db, fund.id, lucas.id, es);
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    const state = await joinStateOf(db, chain({ fails: true }), (await draftById(db, fund.id))!, { id: lucas.id, account: getAddress(lucas.account) }, es);
+    expect(state).toMatchObject({ request: { open: true }, proposal: null, admitted: false });
+    expect(logged).toHaveBeenCalledWith(expect.stringContaining("The node is down"));
+    logged.mockRestore();
   });
 });

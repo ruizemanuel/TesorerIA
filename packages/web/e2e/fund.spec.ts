@@ -283,7 +283,31 @@ test("three friends create a fund, contribute, get the agreed expense back, and 
   await open(ana, fund);
   await expect(onScreen(ana, "En el fondo")).toBeVisible();
 
-  // 13. A week later (the fork's clock moves on), the heartbeat closes the fund's week 0: the agent leaves its summary
+  // 13. Dani asks to join the fund, now live, by the same link (spec, 9.4). Ana proposes her from Movimientos, which is
+  // her vote too, and Beto's vote completes the count and adds her in the same operation. Dani then reaches the fund
+  // from her invitation, and owes this week's dues: she joined in it.
+  const dani = await phone(await browser.newContext());
+  await open(dani, invite);
+  await expect(dani.getByRole("heading", { name: /Ana te invitó a/ })).toBeVisible();
+  await dani.getByLabel("Tu nombre").fill("Dani");
+  await dani.getByRole("button", { name: "Pedir sumarme" }).click();
+  await expect(onScreen(dani, /^Pediste sumarte\./)).toBeVisible();
+  await open(ana, `${fund}/movimientos`);
+  await proposal(ana, "Dani pidió sumarse al fondo.").getByRole("button", { name: "Proponer sumarlo" }).click();
+  await expect(onScreen(ana, "Ana propuso sumar a Dani al fondo. Lleva 1 de 2 votos.")).toBeVisible();
+  await expect(onScreen(ana, "Dani pidió sumarse al fondo.")).toHaveCount(0);
+  await open(dani, invite);
+  await expect(onScreen(dani, "Ana propuso sumarte. Lleva 1 de 2 votos.")).toBeVisible();
+  await open(beto, `${fund}/movimientos`);
+  await proposal(beto, "sumar a Dani al fondo").getByRole("button", { name: "Votar" }).click();
+  await expect(onScreen(beto, "Se sumó Dani al fondo.")).toBeVisible();
+  await expect(onScreen(beto, "Ana propuso sumar a Dani al fondo. Se aprobó.")).toBeVisible();
+  await open(dani, invite);
+  await dani.getByRole("link", { name: "Ir al fondo" }).click();
+  await expect(dani).toHaveURL(new RegExp(`${fund}$`));
+  await expect(onScreen(dani, /^Debés \$\s10\.000\./)).toBeVisible();
+
+  // 14. A week later (the fork's clock moves on), the heartbeat closes the fund's week 0: the agent leaves its summary
   // in Movimientos, and its panel shows it as it goes to the group, with WhatsApp's link carrying that same text
   // (spec, 9.4). Last, because the clock doesn't come back. Everything above happened in week 0.
   await advanceClock(604_800);
@@ -298,8 +322,10 @@ test("three friends create a fund, contribute, get the agreed expense back, and 
   const written = (await summary.locator("p", { hasText: "TesorerIA ·" }).textContent()) ?? "";
   expect(written).toMatch(/^TesorerIA · Fútbol de los jueves\nResumen de la semana 1 \(del \d{1,2}\/\d{1,2} al \d{1,2}\/\d{1,2}\)\n/);
   expect(written).toMatch(/\nEn el fondo hay \$\s[\d.]+(,\d{2})?\.\n/);
-  // Ana and Caro put in their $ 10.000 and Beto went over: nobody owes.
-  expect(written).toContain("\nTodos pagaron la cuota.\n");
+  // Ana, Beto and Caro paid week 1 (the contract's week 0): Ana and Caro $ 10.000 each, Beto 10 USDT. Dani joined in
+  // it and didn't.
+  expect(written).toMatch(/\nPagaron la cuota 3 de 4\. Deben:\n· Dani, \$\s10\.000\n/);
+  expect(written).toContain("\n· Se sumó Dani al fondo.\n");
   expect(written).toMatch(/\n· Aportaron \$\s[\d.]+(,\d{2})? entre todos\.\n/);
   expect(written).toMatch(/\n· Le devolví \$\s5\.000 a Ana por la cancha\.\n/);
   expect(written).toMatch(/\n· Se aprobó pagarle \$\s3\.000 a Caro por la pelota nueva\.\n/);

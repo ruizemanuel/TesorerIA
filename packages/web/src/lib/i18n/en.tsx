@@ -199,6 +199,11 @@ export const en: Messages = {
     beingCreated: "This fund is already being created.",
     running: "This fund is already running.",
     goToFund: "Go to the fund",
+    request: "Ask to join",
+    requestAgain: "Ask again",
+    requested: "You asked to join. Someone in the group has to propose you, and then it's voted on. Once it's approved, you'll see the fund here.",
+    proposed: (who: string, votes: number, required: number) => `${sentenceStart(who)} proposed adding you. It has ${votes} of ${required} votes.`,
+    expired: "Your request expired. Ask someone in the group to propose you.",
   },
   timeline: {
     someone: SOMEONE,
