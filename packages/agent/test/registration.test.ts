@@ -39,6 +39,7 @@ describe("the ERC-8004 registration", () => {
     expect(file.description).toContain(FUND_FACTORY);
     expect(file.description).toContain("100,000 wARS per reimbursement");
     expect(file.description).toContain("500 USDT per conversion");
+    expect(file.description).toContain("At the close of each week it writes the group a summary of who owes what and what happened");
     expect(file.services).toEqual([{ name: "web", endpoint: "https://tesoreriaia.vercel.app" }]);
     expect(file.active).toBe(true);
   });

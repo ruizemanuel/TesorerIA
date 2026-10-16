@@ -32,7 +32,9 @@ export function agentRegistration() {
     description:
       "TesorerIA runs a group's shared fund in Argentine pesos (wARS) on Celo. Members contribute wARS or USDT; " +
       "the agent converts the USDT to wARS on Uniswap, pays members back for the expense the group agreed on, " +
-      "up to a weekly cap, and turns every other payment into a proposal the members vote on. A contract " +
+      "up to a weekly cap, and turns every other payment into a proposal the members vote on. " +
+      "At the close of each week it writes the group a summary of who owes what and what happened, for a member " +
+      "to share in the group's chat. A contract " +
       `deployed by FundFactory ${FUND_FACTORY} enforces its limits: it can only pay members, never above the ` +
       "weekly cap, and it can't change the rules. Its own code adds more: at most " +
       `${amount(LIMITS.maxReimbursementWars, 18)} wARS per reimbursement and ` +
