@@ -129,7 +129,7 @@ function screenIn(m: Messages): FundScreen {
     viewer: ANA,
     m,
   });
-  return { fundId, block: BLOCK, view, timeline: [], viewerIsMember: true, publicView: false, contributionOnItsWay: false, cashOutOnItsWay: false, weekSummaries: [] };
+  return { fundId, block: BLOCK, view, timeline: [], viewerIsMember: true, publicView: false, contributionOnItsWay: false, cashOutOnItsWay: false, weekSummaries: [], invite: null };
 }
 
 afterEach(() => {

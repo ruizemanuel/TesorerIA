@@ -27,6 +27,11 @@ export type FundScreen = {
   timeline: TimelineItem[];
   /** The agent's summary of each week that closed (spec, 9.4), newest first: the text that goes to the group. */
   weekSummaries: { week: number; text: string }[];
+  /**
+   * The link the fund was shared with, for a member to pass on from Tu cuenta: on a live fund it asks to join (spec,
+   * 9.4 B). Null on the public view, and once no one else could join: the fund is full or closed.
+   */
+  invite: string | null;
   viewerIsMember: boolean;
   publicView: boolean;
   /** The viewer has a contribution here that went out and has no receipt yet: Aportar must not offer to send another. */
@@ -127,6 +132,7 @@ export async function loadFundScreen(
     .where(eq(weekSummaries.fundId, fund.id))
     .orderBy(desc(weekSummaries.week));
   const link = publicView ? null : `${env().ORIGIN}/f/${snapshot.address}`;
+  const invite = publicView || snapshot.closed || snapshot.members.length >= MAX_MEMBERS ? null : `${env().ORIGIN}/invitacion/${fund.inviteCode}`;
   const summaryTexts = summaryRows.map((row) => ({
     week: row.week,
     text: weekSummaryText(readFacts(row.facts), { fundName: fund.name, agreedExpense: fund.agreedExpense, names, link }, m),
@@ -182,6 +188,7 @@ export async function loadFundScreen(
     view,
     timeline,
     weekSummaries: summaryTexts,
+    invite,
     viewerIsMember,
     publicView,
     contributionOnItsWay,

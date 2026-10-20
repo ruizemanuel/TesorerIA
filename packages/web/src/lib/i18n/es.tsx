@@ -431,6 +431,9 @@ export const es = {
     yourFunds: "Tus fondos",
     fundTags: { here: "estás acá", draft: "borrador", requested: "pediste sumarte" },
     createAnother: "Crear otro fondo",
+    /** Below Tus fondos: the link the fund was shared with, which asks to join once it's live (spec, 9.4 B). */
+    invite: "Invitar a alguien",
+    inviteHow: (fund: string) => `Quien abra el link pide sumarse a ${fund}, y el grupo lo vota.`,
   },
   /** Aportar (spec, 9, pantalla 3): where to send USDT or wARS from, and the button once the money has arrived. */
   contribute: {

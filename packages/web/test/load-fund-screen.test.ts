@@ -459,6 +459,30 @@ describe("loadFundScreen: the week summaries (spec, 9.4)", () => {
   });
 });
 
+describe("loadFundScreen: the invitation link, for Tu cuenta (spec, 9.4 B)", () => {
+  const inviteCodeOf = async (address: Address) =>
+    (await db.select({ code: funds.inviteCode }).from(funds).where(eq(funds.address, address)))[0]!.code;
+
+  it("gives a member the link the fund was shared with, which asks to join once the fund is live", async () => {
+    const address = await liveFund();
+    const screen = await loadFundScreen(address, asViewer(beto));
+    expect(screen?.invite).toBe(`https://tesoreriaia.vercel.app/invitacion/${await inviteCodeOf(address)}`);
+  });
+
+  it("gives none on the public view, nor once the fund has 10 members or is closed: no one else could join it", async () => {
+    const address = await liveFund({ publicView: true });
+    expect((await loadFundScreen(address, null, { publicView: true }))?.invite).toBeNull();
+
+    const ten = [ana, beto, caro].map((person) => getAddress(person.account));
+    while (ten.length < 10) ten.push(randomAccount());
+    agent.readFund.mockResolvedValue(snapshot({ address, members: ten }));
+    expect((await loadFundScreen(address, asViewer(ana)))?.invite).toBeNull();
+
+    agent.readFund.mockResolvedValue(snapshot({ address, members: [ana, beto, caro].map((person) => getAddress(person.account)), closed: true }));
+    expect((await loadFundScreen(address, asViewer(ana)))?.invite).toBeNull();
+  });
+});
+
 describe("loadFundScreen: someone who asked to join (spec, 9.4)", () => {
   const fundIdOf = async (address: Address) => (await db.select({ id: funds.id }).from(funds).where(eq(funds.address, address)))[0]!.id;
 

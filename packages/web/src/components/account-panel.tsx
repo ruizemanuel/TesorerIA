@@ -10,16 +10,29 @@ import { useLocale, useMessages } from "../lib/i18n/client";
 import { LanguageSwitch } from "./language-switch";
 import { LogoutButton } from "./logout-button";
 import { PanelLink } from "./panel-link";
+import { ShareLink } from "./share-link";
 import { buttonClass } from "./ui";
 
 const LOOK_EVERY_MS = 30_000;
 
 /**
- * Tu cuenta (spec, 9.2 and 9.4 C): who you entered as, what your own account holds (where the agent's reimbursements
- * land), the way to pass it to pesos when there are any, your funds and the way to create another, the language switch
- * and Salir.
+ * Tu cuenta (spec, 9.2 and 9.4 B and C): who you entered as, what your own account holds (where the agent's
+ * reimbursements land), the way to pass it to pesos when there are any, your funds and the way to create another, the
+ * fund's invitation link while someone else could still join it (`invite`, FundScreen), the language switch and Salir.
  */
-export function AccountPanel({ userName, account, funds }: { userName: string; account: Address; funds: readonly YourFund[] }) {
+export function AccountPanel({
+  userName,
+  account,
+  funds,
+  fundName,
+  invite,
+}: {
+  userName: string;
+  account: Address;
+  funds: readonly YourFund[];
+  fundName: string;
+  invite: string | null;
+}) {
   const m = useMessages();
   const locale = useLocale();
   const { balances, failed } = useAccountBalances(account, LOOK_EVERY_MS);
@@ -52,6 +65,7 @@ export function AccountPanel({ userName, account, funds }: { userName: string; a
           <p className="text-muted">{m.account.nothingYet}</p>
         ))}
       <YourFunds funds={funds} />
+      {invite !== null && <InviteSomeone url={invite} fundName={fundName} />}
       <LanguageSwitch className="justify-center" />
       <LogoutButton />
     </div>
@@ -100,6 +114,24 @@ function YourFunds({ funds }: { funds: readonly YourFund[] }) {
       <Link href="/crear" className="flex min-h-11 items-center font-bold text-primary">
         {m.account.createAnother}
       </Link>
+    </section>
+  );
+}
+
+/**
+ * Invitar a alguien (spec, 9.4 B): the fund's invitation link, as the draft shared it. WhatsApp stays secondary:
+ * "Pasar a pesos" is the panel's one primary button (spec, 9.1).
+ */
+function InviteSomeone({ url, fundName }: { url: string; fundName: string }) {
+  const m = useMessages();
+  const heading = useId();
+  return (
+    <section aria-labelledby={heading} className="grid gap-2">
+      <h3 id={heading} className="text-sm font-semibold text-muted">
+        {m.account.invite}
+      </h3>
+      <p>{m.account.inviteHow(fundName)}</p>
+      <ShareLink url={url} fundName={fundName} variant="secondary" />
     </section>
   );
 }

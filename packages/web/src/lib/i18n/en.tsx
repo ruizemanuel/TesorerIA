@@ -357,6 +357,8 @@ export const en: Messages = {
     yourFunds: "Your funds",
     fundTags: { here: "you're here", draft: "draft", requested: "you asked to join" },
     createAnother: "Create another fund",
+    invite: "Invite someone",
+    inviteHow: (fund: string) => `Whoever opens the link asks to join ${fund}, and the group votes on it.`,
   },
   contribute: {
     haveUsdt: "I have USDT",

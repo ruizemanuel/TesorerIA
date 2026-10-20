@@ -51,11 +51,14 @@ test("three friends create a fund, contribute, get the agreed expense back, vote
   const fund = new URL(ana.url()).pathname;
 
   // Ana leaves, and comes back to the fund by entering with her passkey (spec, 11: "entrar"). On the way out, Tu cuenta
-  // lists her funds (spec, 9.4 C): this one, marked, and the way to create another.
+  // lists her funds (spec, 9.4 C): this one, marked, and the way to create another; and below them, the link the fund
+  // was shared with, to invite someone now that it's live (spec, 9.4 B).
   await open(ana, `${fund}?p=cuenta`);
   const yourFunds = ana.getByRole("dialog", { name: "Tu cuenta" }).getByRole("region", { name: "Tus fondos" });
   await expect(yourFunds.getByText(/^Fútbol de los jueves · estás acá$/)).toBeVisible();
   await expect(yourFunds.getByRole("link", { name: "Crear otro fondo" })).toHaveAttribute("href", "/crear");
+  const inviteSomeone = ana.getByRole("dialog", { name: "Tu cuenta" }).getByRole("region", { name: "Invitar a alguien" });
+  await expect(inviteSomeone.getByText(invite, { exact: true })).toBeVisible();
   await ana.getByRole("button", { name: "Salir" }).click();
   await expect(ana).toHaveURL(/localhost:3000\/$/);
   await ana.goto(fund);
