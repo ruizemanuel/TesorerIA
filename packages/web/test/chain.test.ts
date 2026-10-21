@@ -1,8 +1,9 @@
-import { type Hash, pad } from "viem";
+import { type Hash, createPublicClient, http, pad } from "viem";
 import { entryPoint07Address } from "viem/account-abstraction";
+import { celo } from "viem/chains";
 import { describe, expect, it, vi } from "vitest";
 import type { LogReader, RawLog } from "@tesoreria/agent";
-import { NODE_FALLBACK_BLOCKS, userOperationFinder, withNodeFallback } from "../src/lib/chain";
+import { BLOCK_OUT_OF_RANGE, NODE_FALLBACK_BLOCKS, retryingBlockOutOfRange, userOperationFinder, withNodeFallback } from "../src/lib/chain";
 
 const OP: Hash = pad("0x0b", { size: 32 });
 const RESEND: Hash = pad("0x0c", { size: 32 });
@@ -84,5 +85,39 @@ describe("withNodeFallback", () => {
     const read = withNodeFallback(async () => [LOG], node);
     expect(await read({ address: FUND, fromBlock: 1n, toBlock: 10n })).toEqual([LOG]);
     expect(node).not.toHaveBeenCalled();
+  });
+});
+
+describe("retryingBlockOutOfRange (21/10: forno's -32019)", () => {
+  const ACCOUNT = "0x00000000000000000000000000000000000A11CE" as const;
+  const outOfRange = { error: { code: BLOCK_OUT_OF_RANGE, message: "block is out of range" } };
+  const balance = { result: "0x1" };
+
+  /** A Celo client on viem's own http transport, whose node answers `answers` in turn, the way forno does. */
+  function clientAnswering(answers: object[], retries?: number) {
+    const fetchFn = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      const { id } = JSON.parse(String(init?.body)) as { id: number };
+      return Response.json({ jsonrpc: "2.0", id, ...answers.shift() });
+    });
+    const transport = retryingBlockOutOfRange(http("https://node.test", { fetchFn, retryCount: 0 }), { retries, delayMs: 0 });
+    return { client: createPublicClient({ chain: celo, transport }), fetchFn };
+  }
+
+  it("asks again a read at a block the node it reached doesn't have yet, and answers once one does", async () => {
+    const { client, fetchFn } = clientAnswering([outOfRange, outOfRange, balance]);
+    expect(await client.getBalance({ address: ACCOUNT, blockNumber: 80_687_423n })).toBe(1n);
+    expect(fetchFn).toHaveBeenCalledTimes(3);
+  });
+
+  it("gives up after its retries, with the node's error", async () => {
+    const { client, fetchFn } = clientAnswering([outOfRange, outOfRange, outOfRange, balance], 2);
+    await expect(client.getBalance({ address: ACCOUNT, blockNumber: 80_687_423n })).rejects.toThrow(/block is out of range/);
+    expect(fetchFn).toHaveBeenCalledTimes(3);
+  });
+
+  it("never asks again on any other error", async () => {
+    const { client, fetchFn } = clientAnswering([{ error: { code: -32602, message: "invalid params" } }, balance]);
+    await expect(client.getBalance({ address: ACCOUNT, blockNumber: 80_687_423n })).rejects.toThrow(/invalid params/i);
+    expect(fetchFn).toHaveBeenCalledTimes(1);
   });
 });

@@ -1,5 +1,5 @@
 import { BLOCKSCOUT_API, BLOCKSCOUT_PRO_API, type LogReader, RPC_LOG_RANGE, blockscoutLogReader, rpcLogReader } from "@tesoreria/agent";
-import { type Chain, type Hash, type PublicClient, type Transport, createPublicClient, getAbiItem, http } from "viem";
+import { BaseError, type Chain, type Hash, type PublicClient, type Transport, createPublicClient, getAbiItem, http } from "viem";
 import { entryPoint07Abi, entryPoint07Address } from "viem/account-abstraction";
 import { base, celo } from "viem/chains";
 import { env } from "./env";
@@ -11,8 +11,36 @@ const shared = globalThis as { tesoreriaCelo?: ChainClient; tesoreriaBase?: Chai
 
 /** Celo, through CELO_RPC_URL: forno on mainnet, anvil on the fork. */
 export function celoClient(): ChainClient {
-  shared.tesoreriaCelo ??= createPublicClient({ chain: celo, transport: http(env().CELO_RPC_URL) }) as ChainClient;
+  shared.tesoreriaCelo ??= createPublicClient({ chain: celo, transport: retryingBlockOutOfRange(http(env().CELO_RPC_URL)) }) as ChainClient;
   return shared.tesoreriaCelo;
+}
+
+/** Forno's answer to a request at a block the node that took it doesn't have yet: "block is out of range". */
+export const BLOCK_OUT_OF_RANGE = -32019;
+
+/**
+ * `transport`, but a request the node answers with BLOCK_OUT_OF_RANGE is asked again, up to `retries` times,
+ * `delayMs` apart. Forno spreads requests over nodes, and a read at the block one of them just gave as the latest can
+ * reach another that is a block behind (21/10: 4 reads in 40, each readable again within 400 ms). A fund's screen and
+ * the agent's heartbeat read the whole fund at one block, so one such answer failed them all. viem asks again only
+ * on a few codes of its own, and this isn't one of them.
+ */
+export function retryingBlockOutOfRange(transport: Transport, { retries = 3, delayMs = 500 }: { retries?: number; delayMs?: number } = {}): Transport {
+  return (config) => {
+    const inner = transport(config);
+    const request: typeof inner.request = async (args, options) => {
+      for (let attempt = 0; ; attempt++) {
+        try {
+          return await inner.request(args, options);
+        } catch (error) {
+          const outOfRange = error instanceof BaseError && error.walk((e) => (e as { code?: unknown }).code === BLOCK_OUT_OF_RANGE) !== null;
+          if (!outOfRange || attempt >= retries) throw error;
+          await new Promise((resolve) => setTimeout(resolve, delayMs));
+        }
+      }
+    };
+    return { ...inner, request };
+  };
 }
 
 /** Base, for Chainlink's USD / ARS (spec, 8.1). */
