@@ -7,7 +7,15 @@ import { CHALLENGE_TTL_MS, issueChallenge, logIn } from "../src/lib/auth";
 import type { Db } from "../src/lib/db/client";
 import { credentials, operations } from "../src/lib/db/schema";
 import { es } from "../src/lib/i18n/es";
-import { type KeyChangeInput, confirmKeyChange, keyChangeKeyFor, keyChangeOf, proveKeyChange, startKeyChange } from "../src/lib/key-change";
+import {
+  type KeyChangeInput,
+  confirmKeyChange,
+  keyChangeKeyFor,
+  keyChangeOf,
+  legacyPasskeysRemain,
+  proveKeyChange,
+  startKeyChange,
+} from "../src/lib/key-change";
 import { LEGACY_RP_ID } from "../src/lib/passkey-sites";
 import type { Session } from "../src/lib/session";
 import { addUser, testDb } from "./support/db";
@@ -60,11 +68,11 @@ const userHandle = () => toHex(crypto.getRandomValues(new Uint8Array(16)));
 /** A passkey of the new site, used from it. */
 const newPasskey = () => createFakePasskey({ rpId: RP_ID, origin: ORIGIN });
 
-/** Someone whose active passkey belongs to `rpId`: by default the old site, as everyone's did before the move. */
-async function member(rpId = LEGACY_RP_ID) {
+/** Someone whose active passkey belongs to `rpId`: by default the old site, as everyone's did before the move. They live in `into`, by default the shared database. */
+async function member(rpId = LEGACY_RP_ID, into = db) {
   const passkey = createFakePasskey({ rpId, origin: ORIGIN });
-  const row = await addUser(db, "Ema");
-  await db
+  const row = await addUser(into, "Ema");
+  await into
     .insert(credentials)
     .values({ id: passkey.credential.id, userId: row.id, publicKey: passkey.credential.publicKey, userHandle: userHandle(), rpId });
   const user: Person = { id: row.id, name: row.name, account: getAddress(row.account) };
@@ -101,6 +109,7 @@ async function start(
     now = NOW,
     readKey = unread,
     site = { rpId: RP_ID, origin: ORIGIN },
+    into = db,
   }: {
     passkey?: FakePasskey;
     session?: ReturnType<typeof fakeSession>;
@@ -108,11 +117,12 @@ async function start(
     now?: number;
     readKey?: (account: Address) => Promise<SafeKey>;
     site?: { rpId: string; origin: string; pilot?: Address };
+    into?: Db;
   } = {},
 ) {
   const challenge = issueChallenge(session, NOW);
   const input: KeyChangeInput = { credentialId: passkey.credential.id, userHandle: userHandle(), ...passkey.attest({ challenge, ...attest }) };
-  const result = await startKeyChange({ db, session, user, input, ...site, now, readKey, m: es });
+  const result = await startKeyChange({ db: into, session, user, input, ...site, now, readKey, m: es });
   return { result, session, passkey };
 }
 
@@ -147,6 +157,23 @@ describe("keyChangeOf", () => {
     expect((await keyChangeOf(db, friend.user, sessionOf(friend.user), settings)).due).toBe(false);
     // Without the variable, everyone with an old-site passkey is asked.
     expect((await keyChangeOf(db, friend.user, sessionOf(friend.user), { rpId: RP_ID })).due).toBe(true);
+  });
+});
+
+describe("legacyPasskeysRemain", () => {
+  it("legacyPasskeysRemain is true while an old-site active passkey remains, and false after its change", async () => {
+    // Everyone's passkeys count, so it runs in a database of its own: the other tests' people would answer for it.
+    const own = await testDb();
+    expect(await legacyPasskeysRemain(own)).toBe(false);
+    const { user } = await member(LEGACY_RP_ID, own);
+    expect(await legacyPasskeysRemain(own)).toBe(true);
+    // A new-site passkey, active or pending, is not the old site's.
+    await member(RP_ID, own);
+    const { passkey } = await start(user, { into: own });
+    expect(await legacyPasskeysRemain(own)).toBe(true);
+    // Once the chain shows the new key, the old passkey is retired and the second door has nobody left.
+    expect(await confirmKeyChange(own, user, holding(passkey))).toBe("changed");
+    expect(await legacyPasskeysRemain(own)).toBe(false);
   });
 });
 

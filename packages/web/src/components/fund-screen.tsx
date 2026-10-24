@@ -5,6 +5,7 @@ import { getLocale, getMessages } from "../lib/i18n/server";
 import type { FundScreen } from "../lib/read-fund";
 import { AgentButton, TabBar, TopBar } from "./bars";
 import { FundHeader } from "./fund-header";
+import { type KeyChangeAsk, KeyChangeCard } from "./key-change-card";
 import { LanguageSwitch } from "./language-switch";
 import { LiveFund } from "./live-fund";
 import { RulesCard } from "./rules-card";
@@ -22,12 +23,15 @@ export async function FundScreenView({
   panel,
   previousBalance,
   chat = false,
+  keyChange,
 }: {
   screen: FundScreen;
   user: CurrentUser | null;
   panel?: ReactNode;
   previousBalance?: bigint;
   chat?: boolean;
+  /** The member's request to swap the passkey of the old site for one of this one (spec, 9.5). Not for a public view. */
+  keyChange?: KeyChangeAsk;
 }) {
   const m = await getMessages();
   const locale = await getLocale();
@@ -57,6 +61,7 @@ export async function FundScreenView({
             locale={locale}
           />
           <div className="mx-auto grid w-full max-w-[560px] gap-3 px-4 lg:max-w-none lg:gap-4 lg:px-0">
+            {!publicView && keyChange !== undefined && <KeyChangeCard due={keyChange.due} resume={keyChange.resume} />}
             <WeekList view={view} justPaid={previousBalance !== undefined} m={m} locale={locale} />
             <Card className="lg:hidden">
               <CardTitle>{m.movements.latest}</CardTitle>

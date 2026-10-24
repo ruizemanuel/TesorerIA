@@ -69,6 +69,17 @@ describe("userMessage", () => {
     expect(userMessage(notAllowed, es)).toBe(CANCELLED);
   });
 
+  it("on login with the old site's passkey, says the phone can't use it here when the browser refuses the site (SecurityError)", () => {
+    const refused = new DOMException("The relying party ID is not a registrable domain suffix of, nor equal to the current domain.", "SecurityError");
+    expect(loginMessage(refused, es, "legacy")).toBe(es.login.updateDevice);
+    expect(loginMessage(new WebAuthnP256.CredentialRequestFailedError({ cause: refused }), en, "legacy")).toBe(en.login.updateDevice);
+    // Only there: with the current site's passkeys it is not about the phone's age, and any other error reads as always.
+    expect(loginMessage(refused, es)).toBe(GENERIC);
+    expect(loginMessage(refused, es, "current")).toBe(GENERIC);
+    expect(loginMessage(new DOMException("not allowed", "NotAllowedError"), es, "legacy")).toBe(es.errors.noPasskey);
+    expect(loginMessage(new UserFacingError("Esa passkey no tiene una cuenta acá."), es, "legacy")).toBe("Esa passkey no tiene una cuenta acá.");
+  });
+
   it("tells the passkey doesn't match the account when the bundler refuses the signature (AA24)", () => {
     const refused = new UserOperationExecutionError(new UserOperationSignatureError({}), {} as never);
     expect(userMessage(refused, es)).toBe("Tu passkey no coincide con tu cuenta. Entrá de nuevo.");

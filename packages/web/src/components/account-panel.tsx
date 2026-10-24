@@ -7,6 +7,7 @@ import { useAccountBalances } from "../lib/client/account";
 import { USDT_SPECK, WARS_SPECK, formatPesos, formatUsdt } from "../lib/format";
 import { type YourFund, fundTag } from "../lib/home";
 import { useLocale, useMessages } from "../lib/i18n/client";
+import { type KeyChangeAsk, KeyChangeSection } from "./key-change-card";
 import { LanguageSwitch } from "./language-switch";
 import { LogoutButton } from "./logout-button";
 import { PanelLink } from "./panel-link";
@@ -18,7 +19,8 @@ const LOOK_EVERY_MS = 30_000;
 /**
  * Tu cuenta (spec, 9.2 and 9.4 B and C): who you entered as, what your own account holds (where the agent's
  * reimbursements land), the way to pass it to pesos when there are any, your funds and the way to create another, the
- * fund's invitation link while someone else could still join it (`invite`, FundScreen), the language switch and Salir.
+ * fund's invitation link while someone else could still join it (`invite`, FundScreen), the request to update your
+ * passkey while it's due (`keyChange`, spec 9.5), the language switch and Salir.
  */
 export function AccountPanel({
   userName,
@@ -26,12 +28,14 @@ export function AccountPanel({
   funds,
   fundName,
   invite,
+  keyChange,
 }: {
   userName: string;
   account: Address;
   funds: readonly YourFund[];
   fundName: string;
   invite: string | null;
+  keyChange?: KeyChangeAsk;
 }) {
   const m = useMessages();
   const locale = useLocale();
@@ -64,6 +68,7 @@ export function AccountPanel({
         ) : (
           <p className="text-muted">{m.account.nothingYet}</p>
         ))}
+      {keyChange !== undefined && <KeyChangeSection due={keyChange.due} resume={keyChange.resume} />}
       <YourFunds funds={funds} />
       {invite !== null && <InviteSomeone url={invite} fundName={fundName} />}
       <LanguageSwitch className="justify-center" />

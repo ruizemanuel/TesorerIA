@@ -395,6 +395,32 @@ describe("the dictionaries", () => {
     expect(e.movementsCut(50, 60)).toBe("Activity, newest first (the newest 50 of 60; you can't see the older ones):");
   });
 
+  it("ask a member to update their passkey, and keep a door for the previous one, in each language", () => {
+    const sentences = (m: typeof es) => [
+      m.keyChange.title,
+      m.keyChange.lead,
+      m.keyChange.twice,
+      m.keyChange.button,
+      m.keyChange.resume,
+      m.keyChange.later,
+      m.keyChange.working,
+      ...Object.values(m.keyChange.step),
+      m.keyChange.waiting,
+      m.keyChange.done,
+      m.login.legacyLink,
+      m.login.updateDevice,
+    ];
+    expect(Object.keys(es.keyChange.step)).toEqual(["create", "prove", "sign", "confirm"]);
+    for (const m of [es, en]) {
+      for (const sentence of sentences(m)) expect(sentence).toMatch(/\S/);
+      expect(m.keyChange.lead).toContain("tesoreria.finance");
+      expect(m.login.legacyLink).toContain("tesoreria.finance");
+    }
+    // The word is passkey, as everywhere else in the interface.
+    for (const sentence of sentences(es)) expect(sentence).not.toMatch(/llave/i);
+    expect(sentences(es)).not.toEqual(sentences(en));
+  });
+
   it("shares the invitation in the language of whoever shares it", () => {
     expect(es.share.whatsApp("Fútbol", "https://tesoreria.app/invitacion/abc")).toBe('Sumate al fondo "Fútbol" en TesorerIA: https://tesoreria.app/invitacion/abc');
     expect(en.share.whatsApp("Fútbol", "https://tesoreria.app/invitacion/abc")).toBe('Join the fund "Fútbol" on TesorerIA: https://tesoreria.app/invitacion/abc');

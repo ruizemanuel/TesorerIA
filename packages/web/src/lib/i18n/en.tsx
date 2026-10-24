@@ -127,7 +127,28 @@ export const en: Messages = {
     firstTime: (create: ReactNode) => <>First time here? Open the invitation link you were sent, or {create}.</>,
     createLink: "create a fund",
     button: "Log in with my passkey",
+    legacyLink: "Had an account before tesoreria.finance? Log in with your previous passkey",
+    updateDevice:
+      "Your phone can't use your previous passkey on this site. Update its system or browser, or log in from a computer with Chrome and use your phone with the QR code.",
     logOut: "Log out",
+  },
+  keyChange: {
+    title: "Update your passkey",
+    lead: "TesorerIA moved to tesoreria.finance. Make a passkey for the new address: your account, your money and your funds stay the same.",
+    twice:
+      "Your phone will ask for your face or fingerprint twice: once to make the new passkey and once to confirm the change with your current one.",
+    button: "Update my passkey",
+    resume: "Finish updating your passkey",
+    later: "Not now",
+    working: "Updating your passkey…",
+    step: {
+      create: "Making your new passkey…",
+      prove: "Confirm with the new passkey you made before…",
+      sign: "Confirm the change with your current passkey…",
+      confirm: "Waiting for the change to be confirmed…",
+    },
+    waiting: "The change is on its way. Come back in a while.",
+    done: "Done, your passkey is updated.",
   },
   create: {
     title: "Set up the group's fund",

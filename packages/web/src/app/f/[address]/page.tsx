@@ -14,12 +14,15 @@ import { summaryPanels } from "../../../components/summary-panels";
 import { chatEnabled } from "../../../lib/chat/model";
 import { currentUser } from "../../../lib/current-user";
 import { getDb } from "../../../lib/db/client";
+import { env } from "../../../lib/env";
 import { fundsOf } from "../../../lib/funds";
 import { yourFunds } from "../../../lib/home";
 import { getLocale, getMessages } from "../../../lib/i18n/server";
 import { requestsOf } from "../../../lib/join-requests";
+import { keyChangeOf } from "../../../lib/key-change";
 import { loadFundScreen } from "../../../lib/read-fund";
 import { safeNext } from "../../../lib/safe-next";
+import { getSession } from "../../../lib/session";
 
 type Search = { aporte?: string };
 
@@ -40,10 +43,17 @@ export default async function FundPage({ params, searchParams }: { params: Promi
   if (screen === null) notFound();
   const here = `/f/${screen.view.address}`;
   const chat = chatEnabled();
-  // Tus fondos comes with the page, like every panel's content (spec, 9.4 C).
   const db = await getDb();
-  const [mine, requests] = await Promise.all([fundsOf(db, user.id), requestsOf(db, user.id)]);
+  // Tus fondos comes with the page, like every panel's content (spec, 9.4 C). So does the request to swap the passkey
+  // of the old site for one of this one (spec, 9.5): from the database alone, since /api/me reads the chain.
+  const { RP_ID, KEY_CHANGE_PILOT } = env();
+  const [mine, requests, asked] = await Promise.all([
+    fundsOf(db, user.id),
+    requestsOf(db, user.id),
+    keyChangeOf(db, user, await getSession(), { rpId: RP_ID, pilot: KEY_CHANGE_PILOT }),
+  ]);
   const funds = yourFunds({ funds: mine, requests, current: screen.view.address });
+  const keyChange = { due: asked.due, resume: asked.pending !== null };
 
   const panel = (
     <PanelHost
@@ -60,7 +70,16 @@ export default async function FundPage({ params, searchParams }: { params: Promi
           />
         ),
         gasto: <ExpensePanel fund={screen.view.address} agreedExpense={screen.view.agreedExpense} />,
-        cuenta: <AccountPanel userName={user.name} account={user.account} funds={funds} fundName={screen.view.name} invite={screen.invite} />,
+        cuenta: (
+          <AccountPanel
+            userName={user.name}
+            account={user.account}
+            funds={funds}
+            fundName={screen.view.name}
+            invite={screen.invite}
+            keyChange={keyChange}
+          />
+        ),
         pesos: <CashOutPanel fund={screen.view.address} account={user.account} cashOutOnItsWay={screen.cashOutOnItsWay} />,
         agente: chat ? (
           <AgentPanel
@@ -85,7 +104,7 @@ export default async function FundPage({ params, searchParams }: { params: Promi
   return (
     <>
       <RememberFund fund={screen.view.address} />
-      <FundScreenView screen={screen} user={user} panel={panel} previousBalance={previousBalance} chat={chat} />
+      <FundScreenView screen={screen} user={user} panel={panel} previousBalance={previousBalance} chat={chat} keyChange={keyChange} />
     </>
   );
 }

@@ -4,7 +4,9 @@ import { LanguageSwitch } from "../../components/language-switch";
 import { LoginButton } from "../../components/login-button";
 import { Card } from "../../components/ui";
 import { currentUser } from "../../lib/current-user";
+import { getDb } from "../../lib/db/client";
 import { getMessages } from "../../lib/i18n/server";
+import { legacyPasskeysRemain } from "../../lib/key-change";
 import { safeNext } from "../../lib/safe-next";
 
 export default async function EnterPage({ searchParams }: { searchParams: Promise<{ next?: string }> }) {
@@ -12,6 +14,7 @@ export default async function EnterPage({ searchParams }: { searchParams: Promis
   const target = safeNext(next);
   if (await currentUser()) redirect(target);
   const m = await getMessages();
+  const legacyOpen = await legacyPasskeysRemain(await getDb()); // the second door, while someone still has a passkey of the old site (spec, 9.5)
   return (
     <main className="mx-auto grid max-w-[560px] gap-4 p-4 pt-10">
       <div className="flex items-center justify-between">
@@ -23,7 +26,7 @@ export default async function EnterPage({ searchParams }: { searchParams: Promis
       <Card className="grid gap-4">
         <h1 className="text-2xl font-bold [font-stretch:87%]">{m.login.title}</h1>
         <p className="text-muted">{m.login.lead}</p>
-        <LoginButton next={target} />
+        <LoginButton next={target} legacyOpen={legacyOpen} />
       </Card>
       <p className="text-sm text-muted">
         {m.login.firstTime(

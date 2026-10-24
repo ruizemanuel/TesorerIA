@@ -145,7 +145,35 @@ export const es = {
     firstTime: (create: ReactNode) => <>¿Es tu primera vez? Entrá con el link de invitación que te pasaron, o {create}.</>,
     createLink: "creá un fondo",
     button: "Entrar con mi passkey",
+    /** Below the button, while someone still has a passkey of the old site (spec, 9.5): the link that asks for it. */
+    legacyLink: "¿Ya tenías cuenta antes de tesoreria.finance? Entrá con tu passkey anterior",
+    /** When the phone or browser refuses the old site's passkey here: it has no Related Origin Requests. */
+    updateDevice:
+      "Tu teléfono no puede usar tu passkey anterior en este sitio. Actualizá el sistema o el navegador, o entrá desde una computadora con Chrome y usá el teléfono con el código QR.",
     logOut: "Salir",
+  },
+  /**
+   * Swapping the passkey of the old site for one of tesoreria.finance (spec, 9.5): the card of the inicio, and the same
+   * action in Tu cuenta. `resume` replaces the title when a new passkey is pending already. `working` is said until the
+   * first step starts, and `step` has what each one asks of the person.
+   */
+  keyChange: {
+    title: "Actualizá tu passkey",
+    lead: "TesorerIA se mudó a tesoreria.finance. Creá una passkey para el dominio nuevo: tu cuenta, tu plata y tus fondos no cambian.",
+    twice:
+      "Tu teléfono te va a pedir la cara o la huella dos veces: una para crear la passkey nueva y otra para confirmar el cambio con la de siempre.",
+    button: "Actualizar mi passkey",
+    resume: "Terminá de actualizar tu passkey",
+    later: "Ahora no",
+    working: "Actualizando tu passkey…",
+    step: {
+      create: "Creando tu passkey nueva…",
+      prove: "Confirmá con la passkey nueva que habías creado antes…",
+      sign: "Confirmá el cambio con tu passkey de siempre…",
+      confirm: "Esperando que se confirme el cambio…",
+    },
+    waiting: "El cambio está en camino. Volvé en un rato.",
+    done: "Listo, tu passkey está actualizada.",
   },
   /** Creating a fund (spec, 9, screen 7). */
   create: {
