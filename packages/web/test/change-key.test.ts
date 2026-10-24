@@ -31,7 +31,7 @@ vi.mock("../src/lib/client/passkey", async (importOriginal) => ({ ...(await impo
 const api = vi.hoisted(() => ({ post: vi.fn(async (_path: string, _body?: unknown): Promise<unknown> => ({ ok: true })), get: vi.fn() }));
 vi.mock("../src/lib/client/api", () => api);
 
-import { changeKey } from "../src/lib/client/key-change";
+import { changeKey, confirmOnLoad } from "../src/lib/client/key-change";
 import { RefusedError, UserFacingError, userMessage } from "../src/lib/client/errors";
 import type { Me } from "../src/lib/client/wallet";
 import { es } from "../src/lib/i18n/es";
@@ -191,6 +191,36 @@ describe("changeKey", () => {
     expect(posted()).toEqual(["/api/auth/key/confirm"]);
   });
 
+  describe("with nothing pending and nothing due", () => {
+    // What /api/me answers on the tap once it confirmed a swap that landed after its page closed (spec, 9.5).
+    const CHANGED = () => ({ ...member({ due: false }), credential: { ...OLD, rpId: "tesoreria.finance" } });
+
+    it("makes no passkey and says changed once the active passkey is the new site's", async () => {
+      const items = stubLocalStorage({ [SITE_KEY]: "legacy" });
+      const { steps, result } = run(CHANGED());
+
+      await expect(result).resolves.toBe("changed");
+      expect(steps).toEqual([]);
+      expect(created.createPasskey).not.toHaveBeenCalled();
+      expect(wallet.sendKeyChange).not.toHaveBeenCalled();
+      expect(posted()).toEqual([]);
+      expect(items.get(SITE_KEY)).toBe("current"); // the next login asks for the new passkey
+    });
+
+    it("makes no passkey and refuses while the active one is still the old site's: the change isn't theirs yet", async () => {
+      const items = stubLocalStorage({ [SITE_KEY]: "current" });
+      const { steps, result } = run(member({ due: false }));
+
+      const error = await result.catch((caught) => caught);
+      expect(error).toBeInstanceOf(UserFacingError);
+      expect(userMessage(error, es)).toBe("No se pudo completar. Probá de nuevo en un rato.");
+      expect(steps).toEqual([]);
+      expect(created.createPasskey).not.toHaveBeenCalled();
+      expect(posted()).toEqual([]);
+      expect(items.get(SITE_KEY)).toBe("legacy"); // the old passkey is still the one that logs in
+    });
+  });
+
   describe("when the server refuses to start", () => {
     it("goes to confirm on a 409: a change is on its way, or the Safe already holds the key", async () => {
       answers({ "/api/auth/key": new RefusedError("Tu operación está en camino.", 409), "/api/auth/key/confirm": { result: "waiting" } });
@@ -292,5 +322,33 @@ describe("changeKey", () => {
       expect(userMessage(error, es)).toBe("Cancelaste la confirmación. Probá de nuevo.");
       expect(posted()).toEqual([]);
     });
+  });
+});
+
+describe("confirmOnLoad, for a page that finds a passkey pending", () => {
+  it("asks nothing when no passkey is pending", async () => {
+    await expect(confirmOnLoad(false)).resolves.toBe(false);
+    expect(posted()).toEqual([]);
+  });
+
+  it("asks the server once to confirm from the chain, and says done once it changed", async () => {
+    const items = stubLocalStorage({ [SITE_KEY]: "legacy" });
+    await expect(confirmOnLoad(true)).resolves.toBe(true);
+    expect(posted()).toEqual(["/api/auth/key/confirm"]);
+    expect(items.get(SITE_KEY)).toBe("current");
+  });
+
+  it("says done when another tab or /api/me confirmed it first", async () => {
+    answers({ "/api/auth/key/confirm": { result: "none" } });
+    await expect(confirmOnLoad(true)).resolves.toBe(true);
+  });
+
+  it("says not done, and nothing else, while the chain doesn't show it or can't be asked", async () => {
+    answers({ "/api/auth/key/confirm": { result: "waiting" } });
+    await expect(confirmOnLoad(true)).resolves.toBe(false);
+    answers({ "/api/auth/key/confirm": new RefusedError("Algo falló. Probá de nuevo.", 500) });
+    await expect(confirmOnLoad(true)).resolves.toBe(false);
+    answers({ "/api/auth/key/confirm": new TypeError("Failed to fetch") });
+    await expect(confirmOnLoad(true)).resolves.toBe(false);
   });
 });

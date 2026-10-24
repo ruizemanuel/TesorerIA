@@ -2,7 +2,7 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 import { userMessage } from "../lib/client/errors";
-import { type KeyChangeStep, changeKey } from "../lib/client/key-change";
+import { type KeyChangeStep, changeKey, confirmOnLoad } from "../lib/client/key-change";
 import { loadMe } from "../lib/client/wallet";
 import { useMessages } from "../lib/i18n/client";
 import type { Messages } from "../lib/i18n/messages";
@@ -48,14 +48,28 @@ function statusText(m: Messages, step: KeyChangeStep | "starting" | null, outcom
 /**
  * The key change a button runs (spec, 9.5): `changeKey` from where `/api/me` says the person is when they tap, and
  * what to tell them meanwhile. A change that completes refreshes the page, which stops asking.
+ *
+ * With `resume`, the page found a passkey pending, so it asks the chain once as it loads (`confirmOnLoad`): a swap
+ * that landed after its page closed is confirmed then, as if the person had tapped, and a failure says nothing.
  */
-function useKeyChange() {
+function useKeyChange(resume = false) {
   const m = useMessages();
   const { refresh } = useRefresh();
   const [step, setStep] = useState<KeyChangeStep | "starting" | null>(null);
   const [outcome, setOutcome] = useState<Outcome>("open"); // changed or waiting: the button is not offered again
   const [error, setError] = useState("");
   const busy = useRef(false); // a second click lands before the button re-renders as disabled
+  const asked = useRef(false); // once per page, even when React runs the effect twice
+
+  useEffect(() => {
+    if (!resume || asked.current) return;
+    asked.current = true;
+    void confirmOnLoad(resume).then((changed) => {
+      if (!changed) return;
+      setOutcome("changed");
+      refresh();
+    });
+  }, [resume, refresh]);
 
   async function change() {
     if (busy.current) return;
@@ -111,7 +125,7 @@ function KeyChangeAction({ keyChange }: { keyChange: ReturnType<typeof useKeyCha
  */
 export function KeyChangeCard({ due, resume }: KeyChangeAsk) {
   const m = useMessages();
-  const keyChange = useKeyChange();
+  const keyChange = useKeyChange(resume); // the inicio is where the page loads: Tu cuenta opens over it, and doesn't ask again
   // The server can't know what this browser's session said, so the card is on the page until it's read.
   const [later, setLater] = useState(false);
   useEffect(() => {

@@ -2,7 +2,7 @@ import { sendKeyChange, signPasskeyChallenge } from "@tesoreria/wallet";
 import type { Hash, Hex } from "viem";
 import { post } from "./api";
 import { RefusedError, UserFacingError, wasCancelled } from "./errors";
-import { createPasskey, freshChallenge, rememberPasskeySite } from "./passkey";
+import { createPasskey, freshChallenge, rememberPasskeySite, siteOf } from "./passkey";
 import { type Me, celoBrowserClient, memberAccount, memberBundlerClient, recordDone } from "./wallet";
 
 export type KeyChangeStep = "create" | "prove" | "sign" | "confirm";
@@ -10,6 +10,8 @@ export type KeyChangeStep = "create" | "prove" | "sign" | "confirm";
 /**
  * What a member's key change goes through (spec, 9.5), from where `/api/me` says they are:
  * - a change is on its way, or landed: only `confirm`, which asks the chain. Nothing is made or sent again;
+ * - no pending passkey and none due: nothing. The swap landed and /api/me confirmed it before this tap, or the
+ *   change isn't theirs to make: a passkey made now would be one the server refuses, left in the phone's list;
  * - no pending passkey: `create` it (a passkey of the new site, kept as the pending one), `sign` the swap with the
  *   passkey the Safe holds, `confirm`;
  * - a pending passkey this session made or proved (`ready`): `sign`, `confirm`;
@@ -17,7 +19,7 @@ export type KeyChangeStep = "create" | "prove" | "sign" | "confirm";
  */
 export function keyChangeSteps({ keyChange }: Me): KeyChangeStep[] {
   if (keyChange.onItsWay) return ["confirm"];
-  if (keyChange.pending === null) return ["create", "sign", "confirm"];
+  if (keyChange.pending === null) return keyChange.due ? ["create", "sign", "confirm"] : [];
   return keyChange.ready ? ["sign", "confirm"] : ["prove", "sign", "confirm"];
 }
 
@@ -31,9 +33,19 @@ export function keyChangeSteps({ keyChange }: Me): KeyChangeStep[] {
  * wouldn't start), or a swap that landed and failed. A `prove` the device can't answer, because the pending passkey
  * is on another phone, goes back to `create`: the Safe is never left with a key nobody holds, since the pending
  * passkey is replaced only when no swap to it could have been sent.
+ *
+ * With no steps at all (`keyChangeSteps`), the passkey the Safe holds is the active one `/api/me` names: "changed"
+ * if it is of the new site, as when the swap landed before this tap. If it is still the old site's, there is nothing
+ * the person can change yet, and it throws, as the server would refuse the start.
  */
 export async function changeKey(me: Me, onStep?: (step: KeyChangeStep) => void): Promise<"changed" | "waiting"> {
   const steps = keyChangeSteps(me);
+  if (steps.length === 0) {
+    const site = siteOf(me.credential.rpId);
+    rememberPasskeySite(site);
+    if (site === "legacy") throw new UserFacingError({ key: "generic" });
+    return "changed";
+  }
   let publicKey = me.keyChange.pending?.publicKey; // the key to swap to
   for (;;) {
     const step = steps.shift() ?? "confirm";
@@ -112,6 +124,15 @@ async function swap(me: Me, publicKey: Hex): Promise<void> {
   }
   await recordDone(result);
   if (!result.success) throw new UserFacingError({ key: "notCompleted" });
+}
+
+/**
+ * What a page that finds a passkey pending (`resume`) does as it loads (spec, 9.5): the swap may have landed after
+ * the page that sent it closed, so the server is asked once to confirm it from the chain. Whether the change is
+ * done, for the page to refresh and stop asking. Anything else is false and says nothing: the button is still there.
+ */
+export async function confirmOnLoad(resume: boolean): Promise<boolean> {
+  return resume && (await confirm()) === "changed";
 }
 
 /**

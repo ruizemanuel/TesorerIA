@@ -34,4 +34,10 @@ describe("keyChangeSteps", () => {
     expect(keyChangeSteps(member({ pending: PENDING, ready: false, onItsWay: true }))).toEqual(["confirm"]);
     expect(keyChangeSteps(member({ pending: PENDING, ready: true, onItsWay: true }))).toEqual(["confirm"]);
   });
+
+  it("has nothing to do with nothing pending and nothing due: the change landed already, or isn't theirs to make", () => {
+    // As /api/me answers once it confirmed a swap that landed after its page closed: no passkey may be made then.
+    expect(keyChangeSteps({ ...member({ due: false }), credential: { ...KEYS, rpId: "tesoreria.finance" } })).toEqual([]);
+    expect(keyChangeSteps(member({ due: false }))).toEqual([]);
+  });
 });
