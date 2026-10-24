@@ -20,13 +20,11 @@ export async function POST(request: Request) {
   const m = messagesFor(localeOf(request));
   const body = await readJson(request, Assertion);
   if (!body.ok) return body.response;
-  const { RP_ID, ORIGIN } = env();
   const result = await logIn({
     db: await getDb(),
     session: await getSession(),
     assertion: body.value,
-    rpId: RP_ID,
-    origin: ORIGIN,
+    origin: env().ORIGIN,
     m,
   });
   return result.ok ? Response.json({ ok: true }) : jsonError(result.status, result.error);

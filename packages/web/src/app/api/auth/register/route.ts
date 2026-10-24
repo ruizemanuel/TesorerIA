@@ -9,11 +9,15 @@ import { messagesFor } from "../../../../lib/i18n/messages";
 import { hexSchema } from "../../../../lib/schemas";
 import { getSession } from "../../../../lib/session";
 
+const MAX_ATTESTATION_BYTES = 4096; // a real one is a few hundred
+
 const Registration = z.object({
   name: z.string().max(200), // the logic answers with the friendly message from 31 letters up
   email: z.string().max(254).optional(),
   credentialId: z.string().min(1).max(1024),
-  publicKey: hexSchema,
+  // Optional, though every page sends it: a tab opened before this field existed posts a `publicKey` instead, and the
+  // logic must answer that with the bad-passkey message, not the malformed-request one this schema would give.
+  attestationObject: hexSchema.refine((value) => value.length <= 2 + 2 * MAX_ATTESTATION_BYTES).optional(),
   userHandle: hexSchema,
   clientDataJSON: z.string().max(4096),
 });

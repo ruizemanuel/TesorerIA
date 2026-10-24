@@ -1,7 +1,7 @@
-import { type PasskeyAssertion, verifyPasskeyAssertion } from "@tesoreria/wallet";
+import { type Attestation, type PasskeyAssertion, readAttestation, verifyPasskeyAssertion } from "@tesoreria/wallet";
 import { eq } from "drizzle-orm";
 import { Base64, Hex as OxHex } from "ox";
-import { type Address, type Hex, isHex, size } from "viem";
+import { type Address, type Hex, isHex, sha256, size, stringToBytes } from "viem";
 import { personProblem } from "./checks";
 import type { Db } from "./db/client";
 import { credentials, users } from "./db/schema";
@@ -19,8 +19,11 @@ export type Registration = {
   name: string;
   email?: string;
   credentialId: string;
-  /** 0x + x ‖ y, as viem's createWebAuthnCredential returns it. */
-  publicKey: Hex;
+  /**
+   * What the authenticator answered the creation with: the passkey's key is read from here, never from a field the
+   * browser fills in. Missing only from a page whose JavaScript predates it, which is refused as a bad passkey.
+   */
+  attestationObject?: Hex;
   /** The random user.id the authenticator got, 16 bytes. */
   userHandle: Hex;
   /** The creation ceremony's client data, to check its challenge and origin. */
@@ -36,7 +39,7 @@ export function issueChallenge(session: Session, now = Date.now()): Hex {
 }
 
 /** The pending challenge, once: it's cleared whether or not it's still fresh, so an answer can't be replayed. */
-function takeChallenge(session: Session, now: number): Hex | null {
+export function takeChallenge(session: Session, now: number): Hex | null {
   const { challenge, challengeAt } = session;
   session.challenge = undefined;
   session.challengeAt = undefined;
@@ -59,7 +62,7 @@ export async function registerMember({
   session: Session;
   input: Registration;
   deriveAccount: DeriveAccount;
-  /** The site the new passkey belongs to: kept with it. */
+  /** The site the new passkey has to be made for (its attestation says which): kept with it. */
   rpId: string;
   origin: string;
   now?: number;
@@ -75,7 +78,16 @@ export async function registerMember({
   if (problem !== null) return fail(400, problem);
   const name = input.name.trim();
   const email = input.email?.trim() || undefined;
-  if (!isHex(input.publicKey) || size(input.publicKey) !== 64) return fail(400, m.auth.badPasskey);
+  // The passkey must be the one this site asked for: for this site, with the person verified, and under the id the page says.
+  const attestation = attestationOf(input.attestationObject);
+  if (
+    attestation === null ||
+    attestation.rpIdHash !== sha256(stringToBytes(rpId)) ||
+    !attestation.userVerified ||
+    attestation.credentialId !== input.credentialId
+  ) {
+    return fail(400, m.auth.badPasskey);
+  }
   if (!isHex(input.userHandle) || size(input.userHandle) !== 16) return fail(400, m.auth.badPasskey);
   let client: { type?: unknown; challenge?: unknown; origin?: unknown } | null;
   try {
@@ -91,7 +103,8 @@ export async function registerMember({
     return fail(400, m.auth.badPasskey);
   }
 
-  const account = await deriveAccount({ id: input.credentialId, publicKey: input.publicKey });
+  const { publicKey } = attestation;
+  const account = await deriveAccount({ id: input.credentialId, publicKey });
   // A credential id someone else registered would leave a person without a passkey behind: check it first.
   const taken = await db.select({ id: users.id }).from(users).where(eq(users.account, account));
   const known = await db.select({ id: credentials.id }).from(credentials).where(eq(credentials.id, input.credentialId));
@@ -107,7 +120,7 @@ export async function registerMember({
   try {
     await db
       .insert(credentials)
-      .values({ id: input.credentialId, userId, publicKey: input.publicKey, userHandle: input.userHandle, rpId });
+      .values({ id: input.credentialId, userId, publicKey, userHandle: input.userHandle, rpId, state: "active" });
   } catch (error) {
     // No transactions over Neon's HTTP driver: take the person we just added out again, so none is left without a passkey.
     await db.delete(users).where(eq(users.id, userId)).catch(() => undefined);
@@ -117,6 +130,16 @@ export async function registerMember({
   session.userId = userId;
   await session.save();
   return { ok: true, userId };
+}
+
+/** `readAttestation` throws on anything that isn't the attestation of a P-256 passkey; for a registration that is a passkey we can't take. */
+function attestationOf(attestationObject: Hex | undefined): Attestation | null {
+  if (attestationObject === undefined) return null;
+  try {
+    return readAttestation(attestationObject);
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -132,12 +155,15 @@ function isUniqueViolation(error: unknown): boolean {
   return false;
 }
 
-/** Checks a passkey's answer to this session's challenge, and starts the session (spec, 6). */
+/**
+ * Checks a passkey's answer to this session's challenge, and starts the session (spec, 6). Each passkey is checked
+ * against the site it was made for, so one from tesoreriaia.vercel.app still logs in on tesoreria.finance (spec, 9.5).
+ * A pending passkey is the person's own, proved by its signature; a retired one is not accepted.
+ */
 export async function logIn({
   db,
   session,
   assertion,
-  rpId,
   origin,
   now = Date.now(),
   m,
@@ -145,7 +171,6 @@ export async function logIn({
   db: Db;
   session: Session;
   assertion: PasskeyAssertion;
-  rpId: string;
   origin: string;
   now?: number;
   m: Messages;
@@ -156,7 +181,11 @@ export async function logIn({
     return { ok: false, status: 400, error: m.auth.late };
   }
   const [row] = await db.select().from(credentials).where(eq(credentials.id, assertion.credentialId));
-  if (row === undefined || !isValidAnswer({ assertion, publicKey: row.publicKey as Hex, challenge, rpId, origin })) {
+  if (
+    row === undefined ||
+    row.state === "retired" ||
+    !isValidAnswer({ assertion, publicKey: row.publicKey as Hex, challenge, rpId: row.rpId, origin })
+  ) {
     await session.save();
     return { ok: false, status: 401, error: m.auth.unknownPasskey };
   }
