@@ -1,7 +1,8 @@
 import { WebAuthnP256 } from "ox";
+import { UserOperationExecutionError, UserOperationSignatureError } from "viem/account-abstraction";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { post } from "../src/lib/client/api";
-import { OnItsWayError, UserFacingError, isOnItsWay, loginMessage, userMessage } from "../src/lib/client/errors";
+import { OnItsWayError, RefusedError, UserFacingError, isOnItsWay, loginMessage, userMessage } from "../src/lib/client/errors";
 import { en } from "../src/lib/i18n/en";
 import { es } from "../src/lib/i18n/es";
 
@@ -34,6 +35,15 @@ describe("userMessage", () => {
     expect(userMessage(caught, es)).toBe("Esa passkey ya tiene una cuenta. Entrá con ella.");
   });
 
+  it("keeps the status of a route's refusal, for the code that has to tell them apart", async () => {
+    vi.stubGlobal("fetch", async () => Response.json({ error: "Probá de nuevo en un rato." }, { status: 503 }));
+    const caught = await post("/api/auth/key", {}).catch((error: unknown) => error);
+    expect(caught).toBeInstanceOf(RefusedError);
+    expect(caught).toBeInstanceOf(UserFacingError); // and it is shown like any other
+    expect((caught as RefusedError).status).toBe(503);
+    expect(userMessage(caught, es)).toBe("Probá de nuevo en un rato.");
+  });
+
   it("says something Spanish when the route's answer has no message", async () => {
     vi.stubGlobal("fetch", async () => new Response("<html>Bad gateway</html>", { status: 502 }));
     const caught = await post("/api/me").catch((error: unknown) => error);
@@ -57,6 +67,12 @@ describe("userMessage", () => {
     expect(loginMessage(new UserFacingError("Esa passkey no tiene una cuenta acá."), es)).toBe("Esa passkey no tiene una cuenta acá.");
     expect(loginMessage(new TypeError("Failed to fetch"), es)).toBe(GENERIC);
     expect(userMessage(notAllowed, es)).toBe(CANCELLED);
+  });
+
+  it("tells the passkey doesn't match the account when the bundler refuses the signature (AA24)", () => {
+    const refused = new UserOperationExecutionError(new UserOperationSignatureError({}), {} as never);
+    expect(userMessage(refused, es)).toBe("Tu passkey no coincide con tu cuenta. Entrá de nuevo.");
+    expect(userMessage(refused, en)).toBe(en.errors.wrongPasskey);
   });
 
   it("hides everything else behind a generic sentence", () => {

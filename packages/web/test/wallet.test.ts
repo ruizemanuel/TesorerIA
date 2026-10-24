@@ -1,5 +1,5 @@
-import { type Address, type Chain, type Hash, type Hex, getAddress, pad } from "viem";
-import { entryPoint07Address } from "viem/account-abstraction";
+import { type Address, type Chain, type Hash, type Hex, getAddress, http, pad } from "viem";
+import { createBundlerClient, entryPoint07Address } from "viem/account-abstraction";
 import { celo } from "viem/chains";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -8,16 +8,19 @@ type Owner = { sign(parameters: { hash: Hex }): Promise<unknown> };
 type Sent = { onSent(userOpHash: Hash): Promise<void>; nonce?: bigint };
 type Account = { address: Address; getNonce?: (parameters?: { key?: bigint }) => Promise<bigint> };
 const wallet = vi.hoisted(() => ({
-  createMemberAccount: vi.fn<(parameters: { owner: Owner }) => Promise<Account>>(),
+  createMemberAccount: vi.fn<(parameters: { owner: Owner; address?: Address }) => Promise<Account>>(),
   createPimlicoBundlerClient: vi.fn((_parameters: { transport: (options: { chain: Chain }) => { config: { timeout: number } } }) => ({ bundler: true })),
   sendTaggedCalls: vi.fn<(parameters: Sent) => Promise<unknown>>(),
 }));
 vi.mock("@tesoreria/wallet", () => wallet);
 
-const passkey = vi.hoisted(() => ({ sign: vi.fn(async (_parameters: { hash: Hex }) => ({ signature: "0xsigned" })) }));
+const passkey = vi.hoisted(() => {
+  const sign = vi.fn(async (_parameters: { hash: Hex }) => ({ signature: "0xsigned" }));
+  return { sign, account: vi.fn((_parameters: { credential: object; rpId?: string }) => ({ type: "webAuthn", sign })) };
+});
 vi.mock("viem/account-abstraction", async (importOriginal) => ({
   ...(await importOriginal<typeof import("viem/account-abstraction")>()),
-  toWebAuthnAccount: vi.fn(() => ({ type: "webAuthn", sign: passkey.sign })),
+  toWebAuthnAccount: passkey.account,
 }));
 
 const api = vi.hoisted(() => ({ post: vi.fn(async (_path: string, _body?: unknown) => ({ ok: true })), get: vi.fn() }));
@@ -26,9 +29,16 @@ vi.mock("../src/lib/client/api", () => api);
 import { OnItsWayError, UserFacingError, userMessage } from "../src/lib/client/errors";
 import { type Me, sendCalls, settleOperation } from "../src/lib/client/wallet";
 import { es } from "../src/lib/i18n/es";
+import { LEGACY_RP_ID } from "../src/lib/passkey-sites";
 
 const ACCOUNT = getAddress("0x2F8218c7cF6d822091EDe24Db9c46B0324c21A6F");
-const me: Me = { name: "Ema", account: ACCOUNT, credential: { id: "cred", publicKey: "0x1234" } };
+// A member of the old site, who has not changed their key: the Safe holds this passkey, made for LEGACY_RP_ID.
+const me: Me = {
+  name: "Ema",
+  account: ACCOUNT,
+  credential: { id: "cred", publicKey: "0x1234", rpId: LEGACY_RP_ID },
+  keyChange: { due: true, pending: null, ready: false, onItsWay: false },
+};
 const FUND = getAddress("0x00000000000000000000000000000000000f00d1");
 const OP: Hash = pad("0x01", { size: 32 });
 const TX: Hash = pad("0x02", { size: 32 });
@@ -41,6 +51,31 @@ const NONCE = vi.fn(async (_parameters?: { key?: bigint }) => 7n);
 
 /** The operations the page told the server about, in order. */
 const posted = () => api.post.mock.calls.map(([path, body]) => [path, body] as const);
+
+/** What viem throws when the bundler (through /api/bundler) answers a send with this JSON-RPC error: the real error, not one built by hand. */
+async function refusedByBundler(message: string): Promise<unknown> {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (_url: string, init: { body: string }) => {
+      const { id } = JSON.parse(init.body);
+      return new Response(JSON.stringify({ jsonrpc: "2.0", id, error: { code: -32507, message } }), { headers: { "content-type": "application/json" } });
+    }),
+  );
+  return createBundlerClient({ transport: http("http://localhost:3000/api/bundler") })
+    .sendUserOperation({
+      sender: ACCOUNT,
+      nonce: 0n,
+      callData: "0x",
+      callGasLimit: 1n,
+      verificationGasLimit: 1n,
+      preVerificationGas: 1n,
+      maxFeePerGas: 1n,
+      maxPriorityFeePerGas: 1n,
+      signature: "0x",
+      entryPointAddress: entryPoint07Address,
+    })
+    .catch((error: unknown) => error);
+}
 
 beforeEach(() => {
   vi.stubGlobal("window", { location: { origin: "http://localhost:3000" } });
@@ -93,14 +128,31 @@ describe("sendCalls", () => {
     expect(JSON.stringify(body)).not.toContain("blockNumber"); // what the server reads: the field is optional
   });
 
-  it("refuses a passkey that isn't the account's, before anyone is asked to sign", async () => {
-    wallet.createMemberAccount.mockResolvedValue({ address: getAddress("0x6BE3c1eB63A4edbc6C23c281F93F81B14eF3a671") });
+  it("signs with the active passkey's site and the account's own address", async () => {
+    wallet.sendTaggedCalls.mockResolvedValue(RECEIPT);
+    await sendCalls(me, CALLS, INFO);
+    // The passkey is asked for on its own site, not the page's, and the Safe keeps its address whatever its key now derives.
+    expect(passkey.account).toHaveBeenCalledWith({ credential: me.credential, rpId: LEGACY_RP_ID });
+    expect(wallet.createMemberAccount).toHaveBeenCalledWith(expect.objectContaining({ address: ACCOUNT }));
+
+    // A member who already changed their key signs for the new site.
+    const renewed: Me = { ...me, credential: { id: "new", publicKey: "0xabcd", rpId: "tesoreria.finance" } };
+    await sendCalls(renewed, CALLS, INFO);
+    expect(passkey.account).toHaveBeenLastCalledWith({ credential: renewed.credential, rpId: "tesoreria.finance" });
+  });
+
+  it("shows wrongPasskey when the bundler refuses the signature (AA24)", async () => {
+    wallet.sendTaggedCalls.mockRejectedValue(await refusedByBundler("UserOperation reverted during simulation with reason: AA24 signature error"));
     const error = await sendCalls(me, CALLS, INFO).catch((caught) => caught);
-    expect(error).toBeInstanceOf(UserFacingError);
-    expect(error.key).toBe("wrongPasskey");
     expect(userMessage(error, es)).toBe("Tu passkey no coincide con tu cuenta. Entrá de nuevo.");
-    expect(error).not.toBeInstanceOf(OnItsWayError);
-    expect(wallet.sendTaggedCalls).not.toHaveBeenCalled();
+    expect(error).not.toBeInstanceOf(OnItsWayError); // it never left: signing again is the right thing
+    expect(api.post).not.toHaveBeenCalled();
+
+    // Any other refusal keeps its generic sentence.
+    wallet.sendTaggedCalls.mockRejectedValue(await refusedByBundler("UserOperation reverted during simulation with reason: AA21 didn't pay prefund"));
+    expect(userMessage(await sendCalls(me, CALLS, INFO).catch((caught) => caught), es)).toBe(
+      "No se pudo completar. Probá de nuevo en un rato.",
+    );
   });
 
   it("lets an error from before the operation left pass through untouched", async () => {

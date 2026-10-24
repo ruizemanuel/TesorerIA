@@ -19,6 +19,19 @@ export class UserFacingError extends Error {
 }
 
 /**
+ * A route refused the request. `status` is its HTTP status, for the code that has to tell one refusal from another
+ * (a key change reads the 409 and the 503 of its start); everything else shows its words, as any `UserFacingError`.
+ */
+export class RefusedError extends UserFacingError {
+  override readonly name: string = "RefusedError";
+  readonly status: number;
+  constructor(message: string | { key: ErrorKey }, status: number) {
+    super(message);
+    this.status = status;
+  }
+}
+
+/**
  * The operation went out but its receipt or its record never came back: it may well land. It is told apart
  * so nothing sends it again (spec, 6): no second Aportar, and a createFund that went out is never called off.
  */
@@ -33,19 +46,33 @@ export function isOnItsWay(error: unknown): error is OnItsWayError {
   return error instanceof OnItsWayError;
 }
 
-/** Whether the person dismissed the passkey prompt: the browser's error, or the one a library wrapped it in. */
-export function wasCancelled(error: unknown): boolean {
+/** Whether `error`, or one of the errors it wraps (to a few levels), has one of these names. */
+function isNamed(error: unknown, ...names: string[]): boolean {
   for (let depth = 0; depth < 5 && typeof error === "object" && error !== null; depth++) {
     const { name, cause } = error as { name?: unknown; cause?: unknown };
-    if (name === "NotAllowedError" || name === "AbortError") return true;
+    if (typeof name === "string" && names.includes(name)) return true;
     error = cause;
   }
   return false;
 }
 
-/** What to show a person for anything a client call threw, in the page's language. */
+/** Whether the person dismissed the passkey prompt: the browser's error, or the one a library wrapped it in. */
+export function wasCancelled(error: unknown): boolean {
+  return isNamed(error, "NotAllowedError", "AbortError");
+}
+
+/**
+ * Whether the bundler refused the operation's signature (AA24, viem's `UserOperationSignatureError`): the passkey
+ * that signed is not the one the Safe holds now, as after a key change that landed on another phone.
+ */
+export function wasWrongPasskey(error: unknown): boolean {
+  return isNamed(error, "UserOperationSignatureError");
+}
+
+/** What to show a person for anything a client call threw, in the page's language. Of viem's errors, only the bundler refusing the signature (AA24) is told apart. */
 export function userMessage(error: unknown, m: Messages): string {
   if (error instanceof UserFacingError) return error.key === undefined ? error.message : m.errors[error.key];
+  if (wasWrongPasskey(error)) return m.errors.wrongPasskey;
   return wasCancelled(error) ? m.errors.cancelled : m.errors.generic;
 }
 

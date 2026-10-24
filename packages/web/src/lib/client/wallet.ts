@@ -5,7 +5,15 @@ import { celo } from "viem/chains";
 import { get, post } from "./api";
 import { OnItsWayError, UserFacingError } from "./errors";
 
-export type Me = { name: string; account: Address; credential: { id: string; publicKey: Hex } };
+/** Where the member is in swapping their old-site passkey for a tesoreria.finance one (`keyChangeOf`, spec 9.5). */
+export type KeyChange = {
+  due: boolean;
+  pending: { id: string; rpId: string; publicKey: Hex } | null;
+  ready: boolean;
+  onItsWay: boolean;
+};
+/** `credential` is the passkey the Safe holds: the one that signs, for its own `rpId`. */
+export type Me = { name: string; account: Address; credential: { id: string; publicKey: Hex; rpId: string }; keyChange: KeyChange };
 export type OperationInfo = {
   kind: "create-fund" | "contribute" | "vote" | "execute" | "cash-out" | "propose";
   fund?: Address;
@@ -32,6 +40,38 @@ function bundlerTransport() {
   return http(new URL("/api/bundler", window.location.origin).toString(), { timeout: BUNDLER_TIMEOUT_MS });
 }
 
+type BrowserClient = ReturnType<typeof celoBrowserClient>;
+
+/**
+ * The member's Safe at `me.account`, signing with the passkey it holds (`me.credential`) for that passkey's own site.
+ * The address is given, not derived from the passkey: once the key was changed, the passkey no longer derives it.
+ * Another passkey of the person can't sign by mistake: the browser is asked for this one only, and a signature the
+ * Safe doesn't accept is refused by the bundler (AA24, shown as `wrongPasskey`). `onSigned` is called when the
+ * person has confirmed with the passkey.
+ */
+export function memberAccount(me: Me, client: BrowserClient, onSigned?: () => void) {
+  const passkey = toWebAuthnAccount({ credential: me.credential, rpId: me.credential.rpId });
+  // The Safe signs by asking its owner to `sign`: when that returns, the person has confirmed.
+  const owner: typeof passkey = {
+    ...passkey,
+    async sign(parameters) {
+      const signed = await passkey.sign(parameters);
+      onSigned?.();
+      return signed;
+    },
+  };
+  return createMemberAccount({ client, owner, address: me.account });
+}
+
+/** The bundler for the member's operations, sponsored: the server fills in the policy. */
+export function memberBundlerClient(client: BrowserClient) {
+  return createPimlicoBundlerClient({
+    client,
+    transport: bundlerTransport(),
+    sponsorshipPolicyId: "set by the server", // /api/bundler replaces it
+  });
+}
+
 /**
  * Signs `calls` with the member's passkey and sends them as one sponsored UserOperation through /api/bundler.
  * The only function that knows a Safe with a passkey is behind it: the rest of the web just asks to sign calls
@@ -50,25 +90,8 @@ export async function sendCalls(
   nonce?: bigint,
 ): Promise<SendTaggedCallsResult> {
   const client = celoBrowserClient();
-  const passkey = toWebAuthnAccount({ credential: me.credential });
-  // The Safe signs by asking its owner to `sign`: when that returns, the person has confirmed.
-  const owner: typeof passkey = {
-    ...passkey,
-    async sign(parameters) {
-      const signed = await passkey.sign(parameters);
-      onSigned?.();
-      return signed;
-    },
-  };
-  const account = await createMemberAccount({ client, owner });
-  if (account.address.toLowerCase() !== me.account.toLowerCase()) {
-    throw new UserFacingError({ key: "wrongPasskey" });
-  }
-  const bundlerClient = createPimlicoBundlerClient({
-    client,
-    transport: bundlerTransport(),
-    sponsorshipPolicyId: "set by the server", // /api/bundler replaces it
-  });
+  const account = await memberAccount(me, client, onSigned);
+  const bundlerClient = memberBundlerClient(client);
 
   // A createFund goes on nonce key 0, read here so the record keeps it: the server releases one that never came
   // back only while the chain still has that nonce, and pins its resend to it (funds.ts). Anything else lets viem
@@ -96,15 +119,19 @@ export async function sendCalls(
     throw new OnItsWayError({ cause: error });
   }
   if (result.unrecorded !== undefined) await record(result.userOpHash).catch(() => {});
-  // The operation has landed: a receipt without a block (viem reads null, whatever its type says) must not fail it.
+  await recordDone(result);
+  if (!result.success) throw new UserFacingError({ key: "notCompleted" });
+  return result;
+}
+
+/** Tells the server an operation landed. That has happened: a receipt without a block (viem reads null, whatever its type says), or a server that doesn't answer, must not fail it. */
+export async function recordDone(result: SendTaggedCallsResult): Promise<void> {
   await post("/api/operations/done", {
     userOpHash: result.userOpHash,
     transactionHash: result.transactionHash,
     blockNumber: result.blockNumber?.toString(),
     success: result.success,
   }).catch(() => {});
-  if (!result.success) throw new UserFacingError({ key: "notCompleted" });
-  return result;
 }
 
 /** The account's EntryPoint nonce now, with key 0: the one its next operation takes. */
