@@ -5,6 +5,6 @@ describe("/.well-known/webauthn", () => {
   it("lists the origins that may use this site's passkeys, as JSON", async () => {
     const response = GET();
     expect(response.headers.get("content-type")).toBe("application/json");
-    expect(await response.json()).toEqual({ origins: ["https://prueba.tesoreria.finance"] });
+    expect(await response.json()).toEqual({ origins: ["https://tesoreria.finance", "https://prueba.tesoreria.finance"] });
   });
 });

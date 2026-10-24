@@ -8,8 +8,9 @@ TesorerIA is an AI treasurer for a group's shared fund in Argentine pesos (wARS)
 
 Built for the [Agents on Open Rails](https://www.loops.house/agents-on-open-rails) hackathon (Celo × Ripio), track Stable Agents: LatAm.
 
-- **The app:** [tesoreriaia.vercel.app](https://tesoreriaia.vercel.app), in Rioplatense Spanish or English. The browser's language picks one, and an ES · EN switch changes it.
-- **A real fund, read-only:** [Fútbol de los jueves](https://tesoreriaia.vercel.app/f/0x9A74F670F3c59Ae4B8450fdD477b0461b89D2dfD/publico), eight friends who split a football pitch every Thursday. Their names are hidden.
+- **The app:** [tesoreria.finance](https://tesoreria.finance), in Rioplatense Spanish or English. The browser's language picks one, and an ES · EN switch changes it.
+- **A real fund, read-only:** [Fútbol de los jueves](https://tesoreria.finance/f/0x9A74F670F3c59Ae4B8450fdD477b0461b89D2dfD/publico), eight friends who split a football pitch every Thursday. Their names are hidden.
+- **The old address:** `tesoreriaia.vercel.app`, the app's first address, redirects to `tesoreria.finance`.
 
 <p>
   <img src="docs/screenshots/home.png" alt="The home page in English, with the real group's week live and its members shown as Member 1 to 8" width="49%">
@@ -114,4 +115,4 @@ These addresses belong to the TesorerIA team. Don't count them as users.
 | Address | What it is |
 |---|---|
 | `0x2F8218c7cF6d822091EDe24Db9c46B0324c21A6F` | Safe 1.4.1 smart account owned by a team passkey on `localhost`, created with `probes/passkey` to test sponsored, tagged UserOperations on Celo mainnet. Used only for testing. |
-| `0x1c75c0F4F3A76441bfD0ff0D2F19f0478d599528` | A team member's own account on `tesoreriaia.vercel.app`: a Safe 1.4.1 smart account owned by their passkey. That team member also belongs to the real group that uses TesorerIA, so this account is a member of the group's fund too. |
+| `0x1c75c0F4F3A76441bfD0ff0D2F19f0478d599528` | A team member's own account on `tesoreria.finance` (made on `tesoreriaia.vercel.app`, the app's first address): a Safe 1.4.1 smart account owned by their passkey. That team member also belongs to the real group that uses TesorerIA, so this account is a member of the group's fund too. |

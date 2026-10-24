@@ -43,7 +43,7 @@ export function agentRegistration() {
       `${amount(LIMITS.maxDailyConvertedUsdt, 6)} USDT a day, and ${LIMITS.maxDailyTransactions} transactions a ` +
       `day per fund. Its wallet, ${AGENT_ADDRESS}, pays gas in USDT and tags every transaction with ` +
       "celo_fbe4d00a2cb4.",
-    services: [{ name: "web", endpoint: "https://tesoreriaia.vercel.app" }],
+    services: [{ name: "web", endpoint: "https://tesoreria.finance" }],
     x402Support: false,
     active: true,
     registrations:

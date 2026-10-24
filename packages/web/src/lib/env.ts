@@ -9,9 +9,9 @@ const schema = z
   .object({
     /** "fork": anvil on 8548, the fork bundler and the agent's fork signer (Task 14). */
     CHAIN_MODE: blank(z.enum(["mainnet", "fork"]).default("mainnet")),
-    /** The passkeys' site: tesoreriaia.vercel.app in production, localhost in development. Fixed once real accounts exist. */
+    /** The passkeys' site: tesoreria.finance in production, localhost in development. Fixed once real accounts exist. */
     RP_ID: blank(z.string().min(1)),
-    /** The page's full origin, port included: https://tesoreriaia.vercel.app, or http://localhost:3000. */
+    /** The page's full origin, port included: https://tesoreria.finance, or http://localhost:3000. */
     ORIGIN: blank(z.url()),
     SESSION_SECRET: blank(z.string().min(32)),
     /** Neon's URL, "memory" or "pglite:<folder>". Required on mainnet; the fork defaults to "memory". */

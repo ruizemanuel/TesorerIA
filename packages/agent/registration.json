@@ -5,7 +5,7 @@
   "services": [
     {
       "name": "web",
-      "endpoint": "https://tesoreriaia.vercel.app"
+      "endpoint": "https://tesoreria.finance"
     }
   ],
   "x402Support": false,
