@@ -123,6 +123,18 @@ describe("loadMe", () => {
     await expect(loadMe()).rejects.toThrow("Entrá con tu passkey.");
     expect(items.get(SITE_KEY)).toBe("legacy"); // nothing was learned
   });
+
+  it("refuses, with words for the person and no TypeError, an answer without an active passkey", async () => {
+    // Nothing can sign without one, so nothing is tried: the next load may find it again, once the server confirms the change.
+    const items = stubLocalStorage({ [SITE_KEY]: "legacy" });
+    for (const credential of [undefined, null]) {
+      api.get.mockResolvedValueOnce({ ...me, credential });
+      const error = await loadMe().catch((caught) => caught);
+      expect(error).toBeInstanceOf(UserFacingError);
+      expect(userMessage(error, es)).toBe("No se pudo completar. Probá de nuevo en un rato.");
+    }
+    expect(items.get(SITE_KEY)).toBe("legacy");
+  });
 });
 
 describe("sendCalls", () => {

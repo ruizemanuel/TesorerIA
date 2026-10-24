@@ -1,9 +1,9 @@
 import { type Hash, createPublicClient, http, pad } from "viem";
 import { entryPoint07Address } from "viem/account-abstraction";
 import { celo } from "viem/chains";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { LogReader, RawLog } from "@tesoreria/agent";
-import { BLOCK_OUT_OF_RANGE, NODE_FALLBACK_BLOCKS, retryingBlockOutOfRange, userOperationFinder, withNodeFallback } from "../src/lib/chain";
+import { BLOCK_OUT_OF_RANGE, NODE_FALLBACK_BLOCKS, quickCeloClient, retryingBlockOutOfRange, userOperationFinder, withNodeFallback } from "../src/lib/chain";
 
 const OP: Hash = pad("0x0b", { size: 32 });
 const RESEND: Hash = pad("0x0c", { size: 32 });
@@ -85,6 +85,31 @@ describe("withNodeFallback", () => {
     const read = withNodeFallback(async () => [LOG], node);
     expect(await read({ address: FUND, fromBlock: 1n, toBlock: 10n })).toEqual([LOG]);
     expect(node).not.toHaveBeenCalled();
+  });
+});
+
+describe("quickCeloClient", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
+
+  it("gives up on a read that doesn't answer within its time, after one try", async () => {
+    vi.stubEnv("RP_ID", "localhost");
+    vi.stubEnv("ORIGIN", "http://localhost:3000");
+    vi.stubEnv("SESSION_SECRET", "a-session-secret-for-tests-only-0123456789");
+    vi.stubEnv("DATABASE_URL", "memory");
+    vi.stubEnv("CELO_RPC_URL", "http://celo.test");
+    // A node that never answers: only the request's own signal ends it.
+    const node = vi.fn(
+      (_url: string, init: RequestInit) => new Promise<Response>((_resolve, reject) => init.signal?.addEventListener("abort", () => reject(init.signal?.reason))),
+    );
+    vi.stubGlobal("fetch", node);
+    const started = Date.now();
+    await expect(quickCeloClient(100).getChainId()).rejects.toThrow(/took too long/);
+    expect(Date.now() - started).toBeLessThan(2_000);
+    expect(node).toHaveBeenCalledTimes(1);
+    expect(new URL(String(node.mock.calls[0]?.[0])).host).toBe("celo.test"); // CELO_RPC_URL's node
   });
 });
 

@@ -15,6 +15,8 @@ export type KeyChange = {
 };
 /** `credential` is the passkey the Safe holds: the one that signs, for its own `rpId`. */
 export type Me = { name: string; account: Address; credential: { id: string; publicKey: Hex; rpId: string }; keyChange: KeyChange };
+/** What /api/me answers. A member always has an active passkey, but a key change cut halfway could leave them none. */
+type MeAnswer = Omit<Me, "credential"> & { credential?: Me["credential"] | null };
 export type OperationInfo = {
   kind: "create-fund" | "contribute" | "vote" | "execute" | "cash-out" | "propose";
   fund?: Address;
@@ -33,11 +35,14 @@ export function celoBrowserClient() {
  * The member, as the server has them. Their active passkey says which site the next login asks for, so it is
  * remembered here, in the one place every page loads it from: after a key change made on another device, the old
  * site's passkey is retired and the main login button must stop asking for it.
+ *
+ * Without an active passkey nothing can sign, so nothing is tried: the person is told to try again in a while.
  */
 export async function loadMe(): Promise<Me> {
-  const me = await get<Me>("/api/me");
+  const me = await get<MeAnswer>("/api/me");
+  if (!me.credential) throw new UserFacingError({ key: "generic" });
   rememberPasskeySite(siteOf(me.credential.rpId));
-  return me;
+  return me as Me;
 }
 
 /** Above the 30 s /api/bundler waits for Pimlico: if the browser gave up first, an operation Pimlico accepted would look unsent and invite a second one. */

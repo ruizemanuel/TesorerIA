@@ -33,6 +33,8 @@ const state = vi.hoisted(() => ({
   session: null as unknown,
   readSafeKey: null as unknown as (account: Address) => Promise<SafeKey>,
   pilot: undefined as Address | undefined,
+  /** The Celo client of each chain read, by name. */
+  clients: [] as string[],
 }));
 vi.mock("../src/lib/db/client", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../src/lib/db/client")>()),
@@ -42,11 +44,12 @@ vi.mock("../src/lib/session", () => ({ getSession: async () => state.session }))
 vi.mock("../src/lib/env", () => ({
   env: () => ({ RP_ID: "tesoreria.finance", ORIGIN: "https://tesoreria.finance", KEY_CHANGE_PILOT: state.pilot }),
 }));
-vi.mock("../src/lib/chain", () => ({ celoClient: () => "celo" }));
+vi.mock("../src/lib/chain", () => ({ celoClient: () => "celo", quickCeloClient: (timeoutMs: number) => `celo within ${timeoutMs} ms` }));
 vi.mock("@tesoreria/wallet", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@tesoreria/wallet")>()),
   readSafeKey: async (client: unknown, account: Address) => {
-    if (client !== "celo") throw new Error("not the Celo client");
+    if (typeof client !== "string" || !client.startsWith("celo")) throw new Error("not the Celo client");
+    state.clients.push(client);
     return state.readSafeKey(account);
   },
 }));
@@ -526,6 +529,32 @@ describe("GET /api/me", () => {
     // With nothing pending, it doesn't read the chain.
     await me();
     expect(reads).toEqual([user.account, user.account]);
+  });
+
+  it("gives the chain a few seconds at most, so a tap while a passkey is pending doesn't wait on viem's retries", async () => {
+    const { user, passkey: old } = await member();
+    await start(user);
+    state.session = sessionOf(user);
+    state.readSafeKey = holding(old);
+    state.clients.length = 0;
+    await me();
+    expect(state.clients).toHaveLength(1);
+    const [, within] = /^celo within (\d+) ms$/.exec(state.clients[0] ?? "") ?? [];
+    expect(Number(within)).toBeGreaterThan(0);
+    expect(Number(within)).toBeLessThanOrEqual(5_000);
+  });
+
+  it("answers an error, not a passkey it doesn't have, to a member with no active passkey", async () => {
+    // What a key change cut halfway by the old race could leave: the old passkey retired, and no new one active.
+    const { user, passkey: old } = await member();
+    await db.update(credentials).set({ state: "retired" }).where(eq(credentials.id, old.credential.id));
+    state.session = sessionOf(user);
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    const answer = await meRoute.GET(new Request(`${ORIGIN}/api/me`));
+    expect(answer.status).toBe(503);
+    expect(await answer.json()).toEqual({ error: es.errors.generic });
+    expect(logged).toHaveBeenCalledWith(expect.stringContaining("no active passkey"));
+    logged.mockRestore();
   });
 
   it("answers as the database stands when the key change can't be confirmed", async () => {

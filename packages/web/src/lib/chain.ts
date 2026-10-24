@@ -15,6 +15,14 @@ export function celoClient(): ChainClient {
   return shared.tesoreriaCelo;
 }
 
+/**
+ * Celo, through CELO_RPC_URL, for one read that answers within `timeoutMs` or fails, without viem's own retries
+ * (three more, of up to 10 s each): for a read made while a person waits, which their next tap tries again.
+ */
+export function quickCeloClient(timeoutMs: number): ChainClient {
+  return createPublicClient({ chain: celo, transport: http(env().CELO_RPC_URL, { timeout: timeoutMs, retryCount: 0 }) }) as ChainClient;
+}
+
 /** Forno's answer to a request at a block the node that took it doesn't have yet: "block is out of range". */
 export const BLOCK_OUT_OF_RANGE = -32019;
 

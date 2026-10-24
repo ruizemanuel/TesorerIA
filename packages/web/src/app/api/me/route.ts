@@ -1,7 +1,7 @@
 import { shortMessage } from "@tesoreria/agent";
 import { readSafeKey } from "@tesoreria/wallet";
 import { and, eq } from "drizzle-orm";
-import { celoClient } from "../../../lib/chain";
+import { quickCeloClient } from "../../../lib/chain";
 import { currentUser } from "../../../lib/current-user";
 import { getDb } from "../../../lib/db/client";
 import { credentials } from "../../../lib/db/schema";
@@ -12,15 +12,18 @@ import { messagesFor } from "../../../lib/i18n/messages";
 import { confirmKeyChange, keyChangeOf } from "../../../lib/key-change";
 import { getSession } from "../../../lib/session";
 
+/** How long the chain gets to show a pending key change, on a request every action's tap waits on. */
+const CHAIN_READ_MS = 3_000;
+
 export async function GET(request: Request) {
   const m = messagesFor(localeOf(request));
   const user = await currentUser();
   if (user === null) return jsonError(401, m.errors.logIn);
   const db = await getDb();
-  // A key change that reached the chain after its page closed is confirmed here (spec, 9.5). Without the chain, the
-  // answer is the database's as it stands, and the next one tries again.
+  // A key change that reached the chain after its page closed is confirmed here (spec, 9.5). Without the chain, or
+  // when it takes longer than CHAIN_READ_MS, the answer is the database's as it stands, and the next one tries again.
   try {
-    await confirmKeyChange(db, user, (account) => readSafeKey(celoClient(), account));
+    await confirmKeyChange(db, user, (account) => readSafeKey(quickCeloClient(CHAIN_READ_MS), account));
   } catch (error) {
     console.error(`/api/me could not confirm a key change: ${shortMessage(error)}`);
   }
@@ -29,6 +32,11 @@ export async function GET(request: Request) {
     .select({ id: credentials.id, publicKey: credentials.publicKey, rpId: credentials.rpId })
     .from(credentials)
     .where(and(eq(credentials.userId, user.id), eq(credentials.state, "active")));
+  if (credential === undefined) {
+    // Nothing can sign for them until one is: a key change cut halfway, which a later confirmation may finish.
+    console.error(`/api/me: ${user.id} has no active passkey`);
+    return jsonError(503, m.errors.generic);
+  }
   const { RP_ID, KEY_CHANGE_PILOT } = env();
   const keyChange = await keyChangeOf(db, user, await getSession(), { rpId: RP_ID, pilot: KEY_CHANGE_PILOT });
   return Response.json({ name: user.name, account: user.account, credential, keyChange });
