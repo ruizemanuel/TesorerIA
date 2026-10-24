@@ -22,14 +22,19 @@ import {
   slice,
   zeroAddress,
 } from "viem";
-import { entryPoint07Address } from "viem/account-abstraction";
+import {
+  type RpcUserOperation,
+  type UserOperation,
+  entryPoint07Address,
+  formatUserOperation,
+  getUserOperationHash,
+} from "viem/account-abstraction";
 import { MAX_CREATE_FUND_NONCES, claimCreateFundNonce } from "./create-fund-cap";
 import type { Db } from "./db/client";
 import { funds, memberships } from "./db/schema";
 import { ProposalAction, memberFundAbi } from "./fund-abi";
 import { frozenCreateFunds } from "./funds";
 import { sponsoredJoinRequests } from "./join-requests";
-import { hashSchema } from "./schemas";
 
 /** The JSON-RPC methods a member's browser needs to send a sponsored UserOperation, and nothing else. */
 export const BUNDLER_METHODS = new Set([
@@ -471,20 +476,39 @@ export function checkBundlerAnswer(method: string, text: string): { ok: true } |
 }
 
 /**
- * The hash the bundler answered a key change's `eth_sendUserOperation` with, once it accepted it; null for any
- * other request, and for an answer with no hash as its result. /api/bundler records it at once (spec, 9.5): from
- * then on the operation may land, and the pending passkey must not be replaced under it (`startKeyChange`), even
- * if the page's own record of it never arrives.
+ * Whether the request sends a key change (`keyChangeCallKey`) to the bundler: the one request after which a swap of
+ * the Safe's passkey may land, which /api/bundler records before it goes out (spec, 9.5).
  */
-export function acceptedKeyChange(request: BundlerRequest, text: string): Hash | null {
-  if (request.method !== "eth_sendUserOperation") return null;
-  if (keyChangeCallKey((request.params[0] as { callData: string }).callData) === null) return null; // checked: a tagged operation
+export function isKeyChangeSend(request: BundlerRequest): boolean {
+  return request.method === "eth_sendUserOperation" && keyChangeCallKey((request.params[0] as { callData: string }).callData) !== null; // checked: a tagged operation
+}
+
+/**
+ * The hash EntryPoint v0.7 gives `userOp` on Celo (`getUserOpHash`), the one a bundler answers its
+ * eth_sendUserOperation with; the signature isn't part of it. Null for an operation that can't be hashed: a field
+ * missing, or one that isn't a quantity, or doesn't fit.
+ */
+export function userOperationHash(userOp: unknown): Hash | null {
+  try {
+    const userOperation = formatUserOperation(userOp as RpcUserOperation<"0.7">) as UserOperation<"0.7">;
+    return getUserOperationHash({ chainId: 42220, entryPointAddress: entryPoint07Address, entryPointVersion: "0.7", userOperation });
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Whether the bundler refused the operation outright: a JSON-RPC error and no result, which a bundler answers an
+ * operation it didn't take. Not a gateway's 5xx, nor an answer that isn't JSON: those say nothing for sure, and the
+ * operation may have gone in.
+ */
+export function refusedByBundler({ status, text }: { status: number; text: string }): boolean {
+  if (status >= 500) return false;
   let answer: unknown;
   try {
     answer = JSON.parse(text);
   } catch {
-    return null;
+    return false;
   }
-  const result = typeof answer === "object" && answer !== null ? (answer as { result?: unknown }).result : undefined;
-  return hashSchema.safeParse(result).success ? (result as Hash) : null;
+  return typeof answer === "object" && answer !== null && "error" in answer && !("result" in answer);
 }

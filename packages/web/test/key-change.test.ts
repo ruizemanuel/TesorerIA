@@ -5,12 +5,14 @@ import { type Address, getAddress, toHex } from "viem";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { CHALLENGE_TTL_MS, issueChallenge, logIn } from "../src/lib/auth";
 import type { Db } from "../src/lib/db/client";
+import { acquireLock, releaseLock } from "../src/lib/db/lock";
 import { credentials, operations } from "../src/lib/db/schema";
 import { es } from "../src/lib/i18n/es";
 import {
   type KeyChangeInput,
   confirmKeyChange,
   keyChangeKeyFor,
+  keyChangeLock,
   keyChangeOf,
   legacyPasskeysRemain,
   proveKeyChange,
@@ -313,8 +315,8 @@ describe("a key change on its way", () => {
   });
 
   it("doesn't replace a pending passkey when its key change is recorded while the chain is read", async () => {
-    // The read shows the old key, and the change is recorded before the delete (by the page's onSent, or by the server
-    // when the bundler takes it): the delete checks for it itself, so it removes nothing.
+    // The read shows the old key, and the change is recorded before the delete (by the page's onSent, which takes no
+    // lock; /api/bundler records it holding the start's lock): the delete checks for it itself, so it removes nothing.
     const { user, passkey: old } = await member();
     const first = await start(user);
     const readKey = async () => {
@@ -330,11 +332,36 @@ describe("a key change on its way", () => {
 
   it("keeps one pending passkey when two starts race", async () => {
     const { user } = await member();
-    // Both read that nothing is pending before either keeps its passkey: the second insert meets the first.
+    // Both start before either keeps its passkey: the first holds their key change's lock, and the second is told to try again.
     const results = (await Promise.all([start(user), start(user)])).map(({ result }) => result);
-    expect(results).toContainEqual({ ok: false, status: 409, error: es.errors.onItsWay });
+    expect(results).toContainEqual({ ok: false, status: 503, error: es.errors.generic });
     expect(results.filter(({ ok }) => ok)).toHaveLength(1);
     expect((await keyChangeOf(db, user, sessionOf(user), { rpId: RP_ID })).pending).not.toBeNull();
+  });
+
+  it("starts nothing while a swap of theirs is being sent, or another start holds their key change's lock", async () => {
+    const { user, passkey: old } = await member();
+    const first = await start(user);
+    expect(await acquireLock(db, keyChangeLock(user.id), "/api/bundler sending the swap", 60_000)).toBe(true);
+    // The chain still shows the old key, but the swap to the pending one may be going out right now.
+    const second = await start(user, { readKey: holding(old) });
+    expect(second.result).toEqual({ ok: false, status: 503, error: es.errors.generic });
+    expect(await rowOf(first.passkey)).toMatchObject({ state: "pending" });
+    expect(await rowOf(second.passkey)).toBeUndefined();
+    expect(second.session.keyChange).toBeUndefined();
+    expect(second.session.challenge).toBeUndefined();
+    // Free again, and with no swap recorded, the pending passkey is replaced as before.
+    await releaseLock(db, keyChangeLock(user.id), "/api/bundler sending the swap");
+    const third = await start(user, { readKey: holding(old) });
+    expect(third.result).toEqual({ ok: true, publicKey: third.passkey.credential.publicKey });
+    expect(await rowOf(first.passkey)).toBeUndefined();
+  });
+
+  it("holds no lock once it's done, whatever it answered", async () => {
+    const { user } = await member();
+    await start(user); // started
+    await start(user); // refused: the chain can't be read
+    expect(await acquireLock(db, keyChangeLock(user.id), "the next one", 60_000)).toBe(true);
   });
 
   it("replaces a pending passkey when no key change is on its way", async () => {

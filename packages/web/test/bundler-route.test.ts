@@ -8,12 +8,15 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import type { CurrentUser } from "../src/lib/current-user";
 import type { Db } from "../src/lib/db/client";
 import { contributeCalls } from "../src/lib/contribute";
+import { acquireLock, releaseLock } from "../src/lib/db/lock";
 import { credentials, operations } from "../src/lib/db/schema";
 import { cancelDeploy, createDraft, deployCall, joinFund } from "../src/lib/funds";
 import { es } from "../src/lib/i18n/es";
+import { keyChangeLock } from "../src/lib/key-change";
 import { LEGACY_RP_ID } from "../src/lib/passkey-sites";
 import type { Session } from "../src/lib/session";
 import { WARS, addLiveFund, addUser, randomAccount, testDb } from "./support/db";
+import { type RpcOperation, entryPointHash } from "./support/entry-point";
 import { safeCallData } from "./support/safe";
 import { fakeSession } from "./support/session";
 
@@ -26,6 +29,7 @@ const state = vi.hoisted(() => ({
   db: null as unknown,
   agentKeyIsWrong: false,
   recordFails: false,
+  beforeLock: null as null | (() => Promise<void>),
 }));
 vi.mock("../src/lib/current-user", () => ({ currentUser: async () => state.user }));
 vi.mock("../src/lib/session", () => ({ getSession: async () => state.session }));
@@ -41,6 +45,17 @@ vi.mock("../src/lib/operations", async (importOriginal) => {
     recordOperation: async (...args: Parameters<typeof real.recordOperation>) => {
       if (state.recordFails) throw new Error("the database is down");
       return real.recordOperation(...args);
+    },
+  };
+});
+vi.mock("../src/lib/db/lock", async (importOriginal) => {
+  const real = await importOriginal<typeof import("../src/lib/db/lock")>();
+  return {
+    ...real,
+    // With `beforeLock`, what happens elsewhere while a request is on its way to the lock.
+    withLock: async (...args: Parameters<typeof real.withLock>) => {
+      await state.beforeLock?.();
+      return real.withLock(...args);
     },
   };
 });
@@ -112,6 +127,7 @@ afterEach(() => {
   vi.clearAllMocks();
   state.agentKeyIsWrong = false;
   state.recordFails = false;
+  state.beforeLock = null;
 });
 
 function call(body: unknown, contentType = "application/json") {
@@ -335,18 +351,29 @@ describe("POST /api/bundler", () => {
       session.keyChange = keyChange ?? undefined;
       return session;
     }
-    const send = (method: string, callData: Hex, change: Record<string, unknown> = {}) => {
-      const userOp = {
-        ...op(changer.account, callData),
+    /** A key change operation from `sender` (the changer, by default), as their page signs it, with `change` made to it. */
+    const operation = (callData: Hex, change: Record<string, unknown> = {}, sender: Address = changer.account) =>
+      ({
+        ...op(sender, callData),
         maxFeePerGas: numberToHex(2n * FAST),
         maxPriorityFeePerGas: numberToHex(1_000_000_000n),
         callGasLimit: numberToHex(1_000_000n),
         verificationGasLimit: numberToHex(900_000n),
         preVerificationGas: numberToHex(100_000n),
         ...change,
-      };
+      }) as RpcOperation;
+    const send = (method: string, callData: Hex, change: Record<string, unknown> = {}, sender?: Address) => {
+      const userOp = operation(callData, change, sender);
       return call(rpc(method, method.startsWith("pm_") ? [userOp, entryPoint07Address, CELO, {}] : [userOp, entryPoint07Address]));
     };
+    /** Another nonce for each operation, so that no two tests send the same one. */
+    let nonces = 0;
+    const fresh = () => ({ nonce: numberToHex(++nonces) });
+    /** The hash EntryPoint v0.7 gives the changer's key change to `key` with `change`: the one a bundler answers with. */
+    const hashOf = (key: Hex, change: Record<string, unknown>) => entryPointHash(operation(keyChangeCallData(key), change));
+    /** What a bundler answers a send it takes, and one it refuses. */
+    const accepting = (hash: Hex) => async () => Response.json({ jsonrpc: "2.0", id: 5, result: hash });
+    const refusing = (message: string) => async () => Response.json({ jsonrpc: "2.0", id: 5, error: { code: -32500, message } });
     const SPONSORED = ["pm_getPaymasterStubData", "eth_estimateUserOperationGas", "pm_getPaymasterData", "eth_sendUserOperation"];
     /** The key change operations the database keeps under this hash. */
     const recorded = (userOpHash: Hex) => (state.db as Db).select().from(operations).where(eq(operations.userOpHash, userOpHash));
@@ -424,55 +451,135 @@ describe("POST /api/bundler", () => {
       expect(asked()).toEqual(["eth_getUserOperationReceipt", "eth_getUserOperationByHash", "eth_chainId"]);
     });
 
-    it("records the key change as soon as the bundler accepts it, and the page's own record of it changes nothing", async () => {
+    it("records the key change before it goes out, under the hash the bundler answers, and the page's own record of it changes nothing", async () => {
       state.user = changer;
       state.session = sessionFor();
-      pimlico.mockImplementation(async () => Response.json({ jsonrpc: "2.0", id: 5, result: SENT }));
-      expect(await (await send("eth_sendUserOperation", keyChangeCallData(pending))).json()).toEqual({ jsonrpc: "2.0", id: 5, result: SENT });
-      const row = { userOpHash: SENT, userId: changer.id, kind: "key-change", fund: null, success: null, transactionHash: null };
-      expect(await recorded(SENT)).toEqual([expect.objectContaining(row)]);
+      const change = fresh();
+      const hash = hashOf(pending, change);
+      let whenSent: unknown[] = [];
+      pimlico.mockImplementation(async () => {
+        whenSent = await recorded(hash); // what the database had as the bundler got it
+        return accepting(hash)();
+      });
+      expect(await (await send("eth_sendUserOperation", keyChangeCallData(pending), change)).json()).toEqual({ jsonrpc: "2.0", id: 5, result: hash });
+      const row = { userOpHash: hash, userId: changer.id, kind: "key-change", fund: null, success: null, transactionHash: null };
+      expect(whenSent).toEqual([expect.objectContaining(row)]);
+      expect(await recorded(hash)).toEqual([expect.objectContaining(row)]);
 
       // The page records the hash viem gave it, as it does every operation: the same row, kept once.
       const posted = await recordRoute(
         new Request("http://localhost:3000/api/operations", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ userOpHash: SENT, kind: "key-change" }),
+          body: JSON.stringify({ userOpHash: hash, kind: "key-change" }),
         }),
       );
       expect(posted.status).toBe(200);
-      expect(await recorded(SENT)).toEqual([expect.objectContaining(row)]);
+      expect(await recorded(hash)).toEqual([expect.objectContaining(row)]);
     });
 
-    it("records nothing the bundler didn't accept, and no other operation", async () => {
+    it("marks the key change failed when the bundler refuses it, and records nothing else", async () => {
       state.user = changer;
       state.session = sessionFor();
-      const refused: Hex = `0x${"7a".repeat(32)}`;
-      pimlico.mockImplementation(async () => Response.json({ jsonrpc: "2.0", id: 5, error: { code: -32500, message: `AA23 reverted ${refused}` } }));
-      expect((await send("eth_sendUserOperation", keyChangeCallData(pending))).status).toBe(200);
+      const change = fresh();
+      pimlico.mockImplementation(refusing("AA23 reverted"));
+      const response = await send("eth_sendUserOperation", keyChangeCallData(pending), change);
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({ error: { message: "AA23 reverted" } }); // the bundler's answer, as it came
+      expect(await recorded(hashOf(pending, change))).toEqual([expect.objectContaining({ kind: "key-change", success: false })]);
+      // Estimating or stubbing it records nothing; nor does a member's contribution, which is the page's to record.
       for (const method of ["pm_getPaymasterStubData", "eth_estimateUserOperationGas"]) {
-        pimlico.mockImplementation(async () => Response.json({ jsonrpc: "2.0", id: 5, result: refused }));
-        expect((await send(method, keyChangeCallData(pending))).status, method).toBe(200);
+        const estimated = fresh();
+        pimlico.mockImplementation(accepting(hashOf(pending, estimated)));
+        expect((await send(method, keyChangeCallData(pending), estimated)).status, method).toBe(200);
+        expect(await recorded(hashOf(pending, estimated)), method).toEqual([]);
       }
-      // A member's contribution is the page's to record, as always.
       state.user = member;
       expect((await call(rpc("eth_sendUserOperation", [op(member.account), entryPoint07Address]))).status).toBe(200);
-      expect(await recorded(refused)).toEqual([]);
+      expect(await (state.db as Db).select().from(operations).where(eq(operations.userId, member.id))).toEqual([]);
     });
 
-    it("still answers with the bundler's answer when the key change can't be recorded: it's out", async () => {
+    it("leaves a refused key change open when the same operation had gone out before: that one may land", async () => {
+      state.user = changer;
+      state.session = sessionFor();
+      const change = fresh();
+      const hash = hashOf(pending, change);
+      // Its first send reached the bundler but its answer never came back; the page sends it again, and the bundler knows it.
+      await (state.db as Db).insert(operations).values({ userOpHash: hash, userId: changer.id, kind: "key-change" });
+      pimlico.mockImplementation(refusing("AA25 invalid account nonce"));
+      expect((await send("eth_sendUserOperation", keyChangeCallData(pending), change)).status).toBe(200);
+      expect(await recorded(hash)).toEqual([expect.objectContaining({ success: null })]);
+    });
+
+    it("leaves the key change open when the bundler doesn't answer, or a gateway fails: it may have gone in", async () => {
+      state.user = changer;
+      state.session = sessionFor();
+      const lost = fresh();
+      pimlico.mockRejectedValue(new DOMException("The operation was aborted due to timeout", "TimeoutError"));
+      expect((await send("eth_sendUserOperation", keyChangeCallData(pending), lost)).status).toBe(502);
+      expect(await recorded(hashOf(pending, lost))).toEqual([expect.objectContaining({ success: null })]);
+
+      const gateway = fresh();
+      pimlico.mockImplementation(async () => new Response("<html>Bad gateway</html>", { status: 502 }));
+      expect((await send("eth_sendUserOperation", keyChangeCallData(pending), gateway)).status).toBe(502);
+      expect(await recorded(hashOf(pending, gateway))).toEqual([expect.objectContaining({ success: null })]);
+    });
+
+    it("sends nothing it can't record first", async () => {
       state.user = changer;
       state.session = sessionFor();
       state.recordFails = true;
-      const lost: Hex = `0x${"0d".repeat(32)}`;
-      pimlico.mockImplementation(async () => Response.json({ jsonrpc: "2.0", id: 5, result: lost }));
+      const change = fresh();
       const logged = vi.spyOn(console, "error").mockImplementation(() => {});
-      const response = await send("eth_sendUserOperation", keyChangeCallData(pending));
-      expect(response.status).toBe(200);
-      expect(await response.json()).toEqual({ jsonrpc: "2.0", id: 5, result: lost });
+      const response = await send("eth_sendUserOperation", keyChangeCallData(pending), change);
+      expect(response.status).toBe(503);
       expect(logged).toHaveBeenCalledWith(expect.stringContaining("the database is down"));
       logged.mockRestore();
-      expect(await recorded(lost)).toEqual([]);
+      expect(pimlico).not.toHaveBeenCalled();
+      expect(await recorded(hashOf(pending, change))).toEqual([]);
+    });
+
+    it("sends nothing while a start of theirs, or another send, holds their key change's lock", async () => {
+      state.user = changer;
+      state.session = sessionFor();
+      const db = state.db as Db;
+      const change = fresh();
+      expect(await acquireLock(db, keyChangeLock(changer.id), "a start on another phone", 60_000)).toBe(true);
+      const refused = await send("eth_sendUserOperation", keyChangeCallData(pending), change);
+      expect(refused.status).toBe(503);
+      expect(pimlico).not.toHaveBeenCalled();
+      expect(await recorded(hashOf(pending, change))).toEqual([]);
+
+      // Free again, the same send goes out.
+      await releaseLock(db, keyChangeLock(changer.id), "a start on another phone");
+      pimlico.mockImplementation(accepting(hashOf(pending, change)));
+      expect((await send("eth_sendUserOperation", keyChangeCallData(pending), change)).status).toBe(200);
+      expect(await recorded(hashOf(pending, change))).toHaveLength(1);
+    });
+
+    it("sends nothing when the pending passkey went while the send waited for the lock", async () => {
+      // A start on another phone held the lock and replaced the pending passkey: this session's swap is to a key nobody keeps.
+      const db = state.db as Db;
+      const user = await addUser(db, "Two phones");
+      const [old, replaced] = [createFakePasskey({ rpId: LEGACY_RP_ID }), createFakePasskey({ rpId: "tesoreria.finance" })];
+      const userHandle = toHex(crypto.getRandomValues(new Uint8Array(16)));
+      await db.insert(credentials).values([
+        { id: old.credential.id, userId: user.id, publicKey: old.credential.publicKey, userHandle, rpId: LEGACY_RP_ID },
+        { id: replaced.credential.id, userId: user.id, publicKey: replaced.credential.publicKey, userHandle, rpId: "tesoreria.finance", state: "pending" },
+      ]);
+      const account = getAddress(user.account);
+      state.user = { id: user.id, name: user.name, account };
+      const session = fakeSession();
+      session.userId = user.id;
+      session.keyChange = replaced.credential.id;
+      state.session = session;
+      state.beforeLock = async () => {
+        await db.delete(credentials).where(eq(credentials.id, replaced.credential.id));
+      };
+      const response = await send("eth_sendUserOperation", keyChangeCallData(replaced.credential.publicKey), fresh(), account);
+      expect(response.status).toBe(403);
+      expect(pimlico).not.toHaveBeenCalled();
+      expect(await db.select().from(operations).where(eq(operations.userId, user.id))).toEqual([]);
     });
   });
 

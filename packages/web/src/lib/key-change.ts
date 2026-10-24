@@ -4,6 +4,7 @@ import { alias } from "drizzle-orm/pg-core";
 import { type Address, type Hex, isAddressEqual } from "viem";
 import { type AuthResult, type NewPasskey, attestedKey, isUniqueViolation, isValidAnswer, takeChallenge } from "./auth";
 import { type Db, inTransaction } from "./db/client";
+import { withLock } from "./db/lock";
 import { credentials, operations } from "./db/schema";
 import type { Messages } from "./i18n/messages";
 import { LEGACY_RP_ID } from "./passkey-sites";
@@ -60,6 +61,21 @@ function keyChangesThatMayLand(db: Db, userId: string) {
     );
 }
 
+/**
+ * The lock of a person's key change (spec, 9.5). A start (`startKeyChange`) holds it from reading whether the pending
+ * passkey may be replaced to keeping the new one, and /api/bundler from checking a swap to the pending passkey to
+ * recording it and sending it: so a pending passkey is never deleted while a swap to it goes out.
+ */
+export function keyChangeLock(userId: string): string {
+  return `key-change:${userId}`;
+}
+
+/**
+ * Longer than either holds it: /api/bundler waits 30 s at most for the bundler, and a start's chain read, with viem's
+ * own tries (four, of 10 s at most), takes some 41 s at worst. A lock whose holder died frees itself after this.
+ */
+export const KEY_CHANGE_LOCK_TTL_MS = 60_000;
+
 /** The server's passkey settings a key change depends on: its RP ID, and KEY_CHANGE_PILOT. */
 export type KeyChangeSite = { rpId: string; pilot?: Address };
 
@@ -110,6 +126,8 @@ export async function legacyPasskeysRemain(db: Db): Promise<boolean> {
  *   refused; if the chain can't be read, the start is refused too.
  * - The delete itself checks that no key change of theirs is on its way or landed, so one recorded after the read
  *   still keeps the pending passkey.
+ * - It all happens holding their key change's lock (`keyChangeLock`), as /api/bundler sends a swap: while anything
+ *   else of theirs holds it, the start is refused, to be tried again in a moment.
  */
 export async function startKeyChange({
   db,
@@ -140,36 +158,39 @@ export async function startKeyChange({
     return { ok: false, status, error } as const;
   };
   if (challenge === null) return fail(400, m.auth.late);
-  const { active, pending } = await passkeysOf(db, user.id);
-  if (!isDue(active, user.account, { rpId, pilot })) return fail(409, m.errors.generic); // nothing to change, or not theirs yet
-  const publicKey = attestedKey(input, { challenge, rpId, origin });
-  if (publicKey === null) return fail(400, m.auth.badPasskey);
-  if (pending !== undefined) {
-    let held: boolean;
+  const locked = await withLock(db, keyChangeLock(user.id), KEY_CHANGE_LOCK_TTL_MS, async () => {
+    const { active, pending } = await passkeysOf(db, user.id);
+    if (!isDue(active, user.account, { rpId, pilot })) return fail(409, m.errors.generic); // nothing to change, or not theirs yet
+    const publicKey = attestedKey(input, { challenge, rpId, origin });
+    if (publicKey === null) return fail(400, m.auth.badPasskey);
+    if (pending !== undefined) {
+      let held: boolean;
+      try {
+        held = isSafeKey(await readKey(user.account), pending.publicKey);
+      } catch {
+        return fail(503, m.errors.generic); // without the chain, nothing is replaced
+      }
+      if (held) {
+        await activate(db, user.id, pending.id);
+        return fail(409, m.errors.generic); // changed already: no old-site passkey is left to change
+      }
+      const deleted = await db
+        .delete(credentials)
+        .where(and(eq(credentials.id, pending.id), eq(credentials.state, "pending"), notExists(keyChangesThatMayLand(db, user.id))))
+        .returning({ id: credentials.id });
+      if (deleted.length === 0) return fail(409, m.errors.onItsWay);
+    }
     try {
-      held = isSafeKey(await readKey(user.account), pending.publicKey);
-    } catch {
-      return fail(503, m.errors.generic); // without the chain, nothing is replaced
+      await db.insert(credentials).values({ id: input.credentialId, userId: user.id, publicKey, userHandle: input.userHandle, rpId, state: "pending" });
+    } catch (error) {
+      if (isUniqueViolation(error)) return fail(409, m.errors.onItsWay); // another start of theirs got its pending passkey in first
+      throw error;
     }
-    if (held) {
-      await activate(db, user.id, pending.id);
-      return fail(409, m.errors.generic); // changed already: no old-site passkey is left to change
-    }
-    const deleted = await db
-      .delete(credentials)
-      .where(and(eq(credentials.id, pending.id), eq(credentials.state, "pending"), notExists(keyChangesThatMayLand(db, user.id))))
-      .returning({ id: credentials.id });
-    if (deleted.length === 0) return fail(409, m.errors.onItsWay);
-  }
-  try {
-    await db.insert(credentials).values({ id: input.credentialId, userId: user.id, publicKey, userHandle: input.userHandle, rpId, state: "pending" });
-  } catch (error) {
-    if (isUniqueViolation(error)) return fail(409, m.errors.onItsWay); // another start of theirs got its pending passkey in first
-    throw error;
-  }
-  session.keyChange = input.credentialId;
-  await session.save();
-  return { ok: true, publicKey };
+    session.keyChange = input.credentialId;
+    await session.save();
+    return { ok: true, publicKey } as const;
+  });
+  return locked.ran ? locked.value : fail(503, m.errors.generic); // a swap of theirs is being sent, or another start runs: try again
 }
 
 /**

@@ -13,14 +13,16 @@ import {
   MAX_OPERATION_GAS,
   type OperationCall,
   type Sponsorship,
-  acceptedKeyChange,
   authorizeBundlerRequest,
   checkBundlerAnswer,
   checkBundlerRequest,
   checkCalls,
   checkSponsoredGas,
+  isKeyChangeSend,
   keyChangeCallKey,
   operationCalls,
+  refusedByBundler,
+  userOperationHash,
 } from "../src/lib/bundler-proxy";
 import { cashOutCalls } from "../src/lib/cash-out";
 import { contributeCalls } from "../src/lib/contribute";
@@ -32,6 +34,7 @@ import { MAX_MEMBERS, ProposalAction, memberFundAbi } from "../src/lib/fund-abi"
 import { cancelDeploy, createDraft, deployCall, frozenCreateFunds, joinFund } from "../src/lib/funds";
 import { es } from "../src/lib/i18n/es";
 import { addMemberCalls, voteCalls } from "../src/lib/vote";
+import { type RpcOperation, entryPointHash } from "./support/entry-point";
 import { AGENT } from "./support/fixtures";
 import { WARS as WARS_UNIT, addLiveFund, addUser, randomAccount, testDb } from "./support/db";
 import { MULTI_SEND, MULTI_SEND_CALL_ONLY, execute, multiSend, multiSendAbi, packed, safeCallData } from "./support/safe";
@@ -409,22 +412,66 @@ describe("checkBundlerAnswer", () => {
   });
 });
 
-describe("acceptedKeyChange", () => {
+describe("a key change's send", () => {
   const PUBLIC_KEY = createFakePasskey().credential.publicKey;
-  const HASH: Hex = `0x${"ab".repeat(32)}`;
   const asked = (method: string, callData: string): BundlerRequest => ({ jsonrpc: "2.0", id: 1, method, params: [op(ME, callData), entryPoint07Address] });
-  const answer = (result: unknown) => JSON.stringify({ jsonrpc: "2.0", id: 1, result });
+  /** A key change as viem sends it for a Safe not yet deployed: with its factory, the paymaster's fields and its signature. */
+  const sent: RpcOperation = {
+    sender: ME,
+    nonce: numberToHex((7n << 64n) | 3n), // a key of viem's, sequence 3
+    factory: getAddress("0x4e1DCf7AD4e460CfD30791CCC4F9c8a4f820ec67"),
+    factoryData: "0x1688f0b9000000000000000000000000",
+    callData: keyChangeCallData(PUBLIC_KEY),
+    callGasLimit: numberToHex(300_000n),
+    verificationGasLimit: numberToHex(700_000n),
+    preVerificationGas: numberToHex(80_000n),
+    maxFeePerGas: numberToHex(10_000_000_000n),
+    maxPriorityFeePerGas: numberToHex(1_000_000_000n),
+    paymaster: getAddress("0x00000000000000000000000000000000000fa575"),
+    paymasterVerificationGasLimit: numberToHex(40_000n),
+    paymasterPostOpGasLimit: numberToHex(30_000n),
+    paymasterData: "0x01020304",
+    signature: "0xabcdef",
+  };
 
-  it("gives the hash the bundler accepted a key change's send with, and nothing for any other request or answer", () => {
-    expect(acceptedKeyChange(asked("eth_sendUserOperation", keyChangeCallData(PUBLIC_KEY)), answer(HASH))).toBe(HASH);
-    const cases: Record<string, [BundlerRequest, string]> = {
-      "another operation's send": [asked("eth_sendUserOperation", safeCallData(contribute(FUND))), answer(HASH)],
-      "the key change's estimate": [asked("eth_estimateUserOperationGas", keyChangeCallData(PUBLIC_KEY)), answer(HASH)],
-      "a refused send": [asked("eth_sendUserOperation", keyChangeCallData(PUBLIC_KEY)), JSON.stringify({ jsonrpc: "2.0", id: 1, error: { message: "AA23" } })],
-      "an answer that isn't JSON": [asked("eth_sendUserOperation", keyChangeCallData(PUBLIC_KEY)), "<html>Bad gateway</html>"],
-      "a result that isn't a hash": [asked("eth_sendUserOperation", keyChangeCallData(PUBLIC_KEY)), answer("0x01")],
-    };
-    for (const [why, [request, text]] of Object.entries(cases)) expect(acceptedKeyChange(request, text), why).toBeNull();
+  it("is told apart from any other request: only the send of a key change", () => {
+    expect(isKeyChangeSend(asked("eth_sendUserOperation", keyChangeCallData(PUBLIC_KEY)))).toBe(true);
+    expect(isKeyChangeSend(asked("eth_sendUserOperation", safeCallData(contribute(FUND))))).toBe(false);
+    for (const method of ["pm_getPaymasterStubData", "eth_estimateUserOperationGas", "pm_getPaymasterData"]) {
+      expect(isKeyChangeSend(asked(method, keyChangeCallData(PUBLIC_KEY))), method).toBe(false);
+    }
+  });
+
+  it("is hashed as EntryPoint v0.7 hashes it on Celo, with or without its factory and paymaster, whatever its signature", () => {
+    expect(userOperationHash(sent)).toBe(entryPointHash(sent));
+    expect(userOperationHash({ ...sent, signature: "0x1234" })).toBe(entryPointHash(sent));
+    const { factory, factoryData, paymaster, paymasterVerificationGasLimit, paymasterPostOpGasLimit, paymasterData, ...deployed } = sent;
+    expect(userOperationHash(deployed)).toBe(entryPointHash(deployed));
+    expect(userOperationHash(deployed)).not.toBe(userOperationHash(sent));
+  });
+
+  it("can't be hashed when a field is missing or isn't a quantity that fits", () => {
+    const { sender, ...noSender } = sent;
+    for (const [why, userOp] of Object.entries({
+      "no sender": noSender,
+      "a nonce that isn't hex": { ...sent, nonce: "three" },
+      "a gas limit over 128 bits": { ...sent, callGasLimit: numberToHex(1n << 128n) },
+      "not an object": "0x1234",
+    })) {
+      expect(userOperationHash(userOp), why).toBeNull();
+    }
+  });
+
+  it("is refused by the bundler only when it answers a JSON-RPC error and no result", () => {
+    const error = JSON.stringify({ jsonrpc: "2.0", id: 1, error: { code: -32500, message: "AA23 reverted" } });
+    expect(refusedByBundler({ status: 200, text: error })).toBe(true);
+    expect(refusedByBundler({ status: 400, text: error })).toBe(true);
+    expect(refusedByBundler({ status: 429, text: JSON.stringify({ jsonrpc: "2.0", id: 1, error: { code: -32005, message: "rate limited" } }) })).toBe(true);
+    // A gateway's failure, or anything that isn't a refusal, says nothing for sure: the operation may have gone in.
+    expect(refusedByBundler({ status: 500, text: error })).toBe(false);
+    expect(refusedByBundler({ status: 502, text: "<html>Bad gateway</html>" })).toBe(false);
+    expect(refusedByBundler({ status: 200, text: JSON.stringify({ jsonrpc: "2.0", id: 1, result: `0x${"ab".repeat(32)}` }) })).toBe(false);
+    expect(refusedByBundler({ status: 200, text: "not json" })).toBe(false);
   });
 });
 

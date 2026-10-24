@@ -19,13 +19,14 @@ import {
 import { toWebAuthnAccount } from "viem/account-abstraction";
 import { celo } from "viem/chains";
 import { describe, expect, it } from "vitest";
-import { authorizeBundlerRequest } from "../src/lib/bundler-proxy";
+import { authorizeBundlerRequest, userOperationHash } from "../src/lib/bundler-proxy";
 import { contributeCalls } from "../src/lib/contribute";
 import type { Db } from "../src/lib/db/client";
 import { createDraft, deployCall, joinFund } from "../src/lib/funds";
 import { es } from "../src/lib/i18n/es";
 import { voteCalls } from "../src/lib/vote";
 import { WARS, addLiveFund, addUser, randomAccount, testDb } from "./support/db";
+import { type RpcOperation, entryPointHash } from "./support/entry-point";
 
 const POLICY = "sp_server";
 const FAST = 5_000_000_000n;
@@ -180,6 +181,10 @@ describe("the requests viem really sends for a sponsored operation", () => {
       if (method.startsWith("pm_")) expect(params[3], method).toEqual({ sponsorshipPolicyId: POLICY });
     }
     expect(forwarded.map(({ method }) => method)).toContain("eth_getUserOperationReceipt"); // read in no fund
+    // What /api/bundler records it under before it goes out is EntryPoint v0.7's hash of the operation viem really sends.
+    const sent = forwarded.find(({ method }) => method === "eth_sendUserOperation")?.params[0] as RpcOperation;
+    expect(sent.paymaster).toBe(PAYMASTER);
+    expect(userOperationHash(sent)).toBe(entryPointHash(sent));
 
     // The same to a key this session didn't make or prove, or with no key change ready (not even a read then): nothing goes out.
     forwarded.length = 0;

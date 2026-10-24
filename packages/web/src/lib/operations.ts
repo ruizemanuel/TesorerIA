@@ -18,9 +18,12 @@ export type OperationInput = {
 /** After this long without a receipt, an operation stops showing as "en camino" (and a createFund may be released, see funds.ts). */
 export const PENDING_FOR_MS = 15 * 60_000;
 
-/** Keeps a member's operation as soon as the bundler took it, before its receipt (spec, 6). */
-export async function recordOperation(db: Db, userId: string, input: OperationInput): Promise<void> {
-  await db
+/**
+ * Keeps a member's operation as soon as the bundler took it, before its receipt (spec, 6); a key change, before it
+ * goes to the bundler (/api/bundler). Whether this call kept it: false if it was kept already, which changes nothing.
+ */
+export async function recordOperation(db: Db, userId: string, input: OperationInput): Promise<boolean> {
+  const kept = await db
     .insert(operations)
     .values({
       userId,
@@ -32,7 +35,20 @@ export async function recordOperation(db: Db, userId: string, input: OperationIn
       token: input.token ?? null,
       nonce: input.nonce ?? null,
     })
-    .onConflictDoNothing();
+    .onConflictDoNothing()
+    .returning({ userOpHash: operations.userOpHash });
+  return kept.length > 0;
+}
+
+/**
+ * The bundler refused the operation outright: it never went out, so it can't land. Only one with no outcome yet is
+ * marked, so a receipt's word stands.
+ */
+export async function recordRefused(db: Db, userId: string, userOpHash: Hash): Promise<void> {
+  await db
+    .update(operations)
+    .set({ success: false })
+    .where(and(eq(operations.userOpHash, userOpHash), eq(operations.userId, userId), isNull(operations.success)));
 }
 
 /** Whether this member created the draft: only they can say an operation deploys it. */
