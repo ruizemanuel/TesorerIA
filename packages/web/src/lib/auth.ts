@@ -15,9 +15,8 @@ export type AuthResult = { ok: true; userId: string } | { ok: false; status: num
 /** Derives a member's Safe from their passkey. On the server, never from the browser's word. */
 export type DeriveAccount = (credential: { id: string; publicKey: Hex }) => Promise<Address>;
 
-export type Registration = {
-  name: string;
-  email?: string;
+/** A passkey a creation ceremony just made, as the page posts it. */
+export type NewPasskey = {
   credentialId: string;
   /**
    * What the authenticator answered the creation with: the passkey's key is read from here, never from a field the
@@ -29,6 +28,8 @@ export type Registration = {
   /** The creation ceremony's client data, to check its challenge and origin. */
   clientDataJSON: string;
 };
+
+export type Registration = NewPasskey & { name: string; email?: string };
 
 /** A fresh challenge for the next passkey ceremony; the caller saves the session. */
 export function issueChallenge(session: Session, now = Date.now()): Hex {
@@ -78,32 +79,9 @@ export async function registerMember({
   if (problem !== null) return fail(400, problem);
   const name = input.name.trim();
   const email = input.email?.trim() || undefined;
-  // The passkey must be the one this site asked for: for this site, with the person verified, and under the id the page says.
-  const attestation = attestationOf(input.attestationObject);
-  if (
-    attestation === null ||
-    attestation.rpIdHash !== sha256(stringToBytes(rpId)) ||
-    !attestation.userVerified ||
-    attestation.credentialId !== input.credentialId
-  ) {
-    return fail(400, m.auth.badPasskey);
-  }
-  if (!isHex(input.userHandle) || size(input.userHandle) !== 16) return fail(400, m.auth.badPasskey);
-  let client: { type?: unknown; challenge?: unknown; origin?: unknown } | null;
-  try {
-    client = JSON.parse(input.clientDataJSON);
-  } catch {
-    return fail(400, m.auth.badPasskey);
-  }
-  if (
-    client?.type !== "webauthn.create" ||
-    client.origin !== origin ||
-    client.challenge !== Base64.fromHex(challenge, { url: true, pad: false })
-  ) {
-    return fail(400, m.auth.badPasskey);
-  }
+  const publicKey = attestedKey(input, { challenge, rpId, origin });
+  if (publicKey === null) return fail(400, m.auth.badPasskey);
 
-  const { publicKey } = attestation;
   const account = await deriveAccount({ id: input.credentialId, publicKey });
   // A credential id someone else registered would leave a person without a passkey behind: check it first.
   const taken = await db.select({ id: users.id }).from(users).where(eq(users.account, account));
@@ -132,7 +110,40 @@ export async function registerMember({
   return { ok: true, userId };
 }
 
-/** `readAttestation` throws on anything that isn't the attestation of a P-256 passkey; for a registration that is a passkey we can't take. */
+/**
+ * The key of the passkey a creation ceremony made, read from its attestation, if it is the one this site asked for:
+ * made for `rpId`, with the person verified, under the id the page says, with a 16-byte user handle, and answering
+ * `challenge` from `origin`. Null otherwise, which is a passkey we can't take. A registration and a key change
+ * (key-change.ts) both check a new passkey with it.
+ */
+export function attestedKey(input: NewPasskey, { challenge, rpId, origin }: { challenge: Hex; rpId: string; origin: string }): Hex | null {
+  const attestation = attestationOf(input.attestationObject);
+  if (
+    attestation === null ||
+    attestation.rpIdHash !== sha256(stringToBytes(rpId)) ||
+    !attestation.userVerified ||
+    attestation.credentialId !== input.credentialId
+  ) {
+    return null;
+  }
+  if (!isHex(input.userHandle) || size(input.userHandle) !== 16) return null;
+  let client: { type?: unknown; challenge?: unknown; origin?: unknown } | null;
+  try {
+    client = JSON.parse(input.clientDataJSON);
+  } catch {
+    return null;
+  }
+  if (
+    client?.type !== "webauthn.create" ||
+    client.origin !== origin ||
+    client.challenge !== Base64.fromHex(challenge, { url: true, pad: false })
+  ) {
+    return null;
+  }
+  return attestation.publicKey;
+}
+
+/** `readAttestation` throws on anything that isn't the attestation of a P-256 passkey; for a new passkey that is one we can't take. */
 function attestationOf(attestationObject: Hex | undefined): Attestation | null {
   if (attestationObject === undefined) return null;
   try {
@@ -146,7 +157,7 @@ function attestationOf(attestationObject: Hex | undefined): Attestation | null {
  * Postgres' unique_violation (23505). The driver's error carries the code, and drizzle wraps it as the `cause`
  * of its own, so both are looked at. Anything else (an outage, a bug) is not a taken passkey and must surface.
  */
-function isUniqueViolation(error: unknown): boolean {
+export function isUniqueViolation(error: unknown): boolean {
   for (let depth = 0; depth < 3 && typeof error === "object" && error !== null; depth++) {
     const { code, cause } = error as { code?: unknown; cause?: unknown };
     if (code === "23505") return true;
@@ -158,7 +169,9 @@ function isUniqueViolation(error: unknown): boolean {
 /**
  * Checks a passkey's answer to this session's challenge, and starts the session (spec, 6). Each passkey is checked
  * against the site it was made for, so one from tesoreriaia.vercel.app still logs in on tesoreria.finance (spec, 9.5).
- * A pending passkey is the person's own, proved by its signature; a retired one is not accepted.
+ * A pending passkey is the person's own, proved by its signature, and a session that logs in with it is ready for the
+ * key change (key-change.ts). Only an active or a pending one is accepted: a retired one, or a state this code doesn't
+ * name (the column is plain text), keeps the passkey out.
  */
 export async function logIn({
   db,
@@ -183,19 +196,21 @@ export async function logIn({
   const [row] = await db.select().from(credentials).where(eq(credentials.id, assertion.credentialId));
   if (
     row === undefined ||
-    row.state === "retired" ||
+    (row.state !== "active" && row.state !== "pending") ||
     !isValidAnswer({ assertion, publicKey: row.publicKey as Hex, challenge, rpId: row.rpId, origin })
   ) {
     await session.save();
     return { ok: false, status: 401, error: m.auth.unknownPasskey };
   }
   session.userId = row.userId;
+  // It signed this session's challenge, which proves the pending passkey as `proveKeyChange` does.
+  if (row.state === "pending") session.keyChange = row.id;
   await session.save();
   return { ok: true, userId: row.userId };
 }
 
-/** `verifyPasskeyAssertion` throws on some malformed input; for a login that is just an answer that doesn't verify. */
-function isValidAnswer(args: Parameters<typeof verifyPasskeyAssertion>[0]): boolean {
+/** `verifyPasskeyAssertion` throws on some malformed input; for a login or a proof that is just an answer that doesn't verify. */
+export function isValidAnswer(args: Parameters<typeof verifyPasskeyAssertion>[0]): boolean {
   try {
     return verifyPasskeyAssertion(args);
   } catch {

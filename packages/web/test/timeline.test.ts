@@ -230,6 +230,11 @@ describe("buildTimeline", () => {
     expect(timeline({ pending: [pass] })).toEqual([]);
   });
 
+  it("leaves a key change out: it swaps the passkey of the member's own account (spec, 9.5)", () => {
+    const change = { userOpHash: "0xkey", kind: "key-change" as const, amount: null, token: null, createdAt: NOW };
+    expect(timeline({ pending: [change] })).toEqual([]);
+  });
+
   it("says the viewer's own proposal on its way, in Spanish and English (spec, 9.4)", () => {
     const pending = [{ userOpHash: "0xp", kind: "propose", amount: null, token: null, createdAt: NOW }] as const;
     expect(timeline({ pending }).map((i) => [i.text, i.pending])).toEqual([["Tu propuesta está en camino.", true]]);

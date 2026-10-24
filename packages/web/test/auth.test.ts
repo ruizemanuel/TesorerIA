@@ -1,6 +1,6 @@
 import { signPasskeyChallenge } from "@tesoreria/wallet";
 import { type FakePasskey, createFakePasskey } from "@tesoreria/wallet/testing";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { Base64, Bytes, Cbor } from "ox";
 import { type Hex, getAddress, keccak256, slice, toHex } from "viem";
 import { beforeAll, describe, expect, it } from "vitest";
@@ -403,7 +403,17 @@ describe("logIn", () => {
     const assertion = await signPasskeyChallenge({ challenge: issueChallenge(session, NOW), rpId: RP_ID, getFn: pending.getFn });
     expect(await logIn({ db, session, assertion, origin: ORIGIN, now: NOW, m: es })).toEqual({ ok: true, userId });
     expect(session.userId).toBe(userId);
-    expect(session.keyChange).toBeUndefined(); // that the session proved it holds the pending passkey is the key change's to say
+  });
+
+  it("refuses a passkey in a state it doesn't know", async () => {
+    // The column is plain text in Postgres: a state the code doesn't name keeps the passkey out.
+    const unknown = createFakePasskey();
+    await addPasskey(unknown, { rpId: RP_ID });
+    await db.execute(sql`update ${credentials} set state = 'lost' where id = ${unknown.credential.id}`);
+    const session = fakeSession();
+    const assertion = await signPasskeyChallenge({ challenge: issueChallenge(session, NOW), rpId: RP_ID, getFn: unknown.getFn });
+    expect(await logIn({ db, session, assertion, origin: ORIGIN, now: NOW, m: es })).toEqual({ ok: false, status: 401, error: es.auth.unknownPasskey });
+    expect(session.userId).toBeUndefined();
   });
 });
 

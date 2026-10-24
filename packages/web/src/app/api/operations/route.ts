@@ -10,7 +10,7 @@ import { addressSchema, hashSchema } from "../../../lib/schemas";
 const Operation = z
   .object({
     userOpHash: hashSchema,
-    kind: z.enum(["create-fund", "contribute", "vote", "execute", "cash-out", "propose"]),
+    kind: z.enum(["create-fund", "contribute", "vote", "execute", "cash-out", "propose", "key-change"]),
     fund: addressSchema.optional(),
     /** The draft a `create-fund` deploys. */
     draftId: z.uuid().optional(),
@@ -26,8 +26,8 @@ const Operation = z
       .optional(),
   })
   .refine(({ draftId, kind }) => draftId === undefined || kind === "create-fund")
-  // A pass to pesos leaves the member's own account: it belongs to no fund.
-  .refine(({ fund, kind }) => fund === undefined || kind !== "cash-out");
+  // A pass to pesos leaves the member's own account, and a key change swaps its passkey: they belong to no fund.
+  .refine(({ fund, kind }) => fund === undefined || (kind !== "cash-out" && kind !== "key-change"));
 
 export async function POST(request: Request) {
   const m = messagesFor(localeOf(request));

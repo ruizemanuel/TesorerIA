@@ -87,6 +87,11 @@ describe("POST /api/operations", () => {
     ]);
   });
 
+  it("keeps a key change, with no fund: it swaps the passkey of the member's own account (spec, 9.5)", async () => {
+    expect((await record(post("/api/operations", { userOpHash: OP, kind: "key-change" }))).status).toBe(200);
+    expect(await db.select().from(operations)).toMatchObject([{ userOpHash: OP, userId: ana.id, kind: "key-change", fund: null, success: null }]);
+  });
+
   it("keeps the draft a create-fund deploys, only if it is the caller's", async () => {
     expect((await record(post("/api/operations", { userOpHash: OP, kind: "create-fund", draftId }))).status).toBe(200);
     expect(await db.select().from(operations)).toMatchObject([{ userOpHash: OP, kind: "create-fund", draftId }]);
@@ -109,6 +114,7 @@ describe("POST /api/operations", () => {
       { userOpHash: OP, kind: "vote", fund: FUND, nonce: "-1" },
       { userOpHash: OP, kind: "vote", fund: FUND, nonce: "0x1" },
       { userOpHash: OP, kind: "cash-out", fund: FUND, amount: "1", token: "wars" },
+      { userOpHash: OP, kind: "key-change", fund: FUND },
     ];
     for (const body of bad) expect((await record(post("/api/operations", body))).status, JSON.stringify(body)).toBe(400);
     expect(await db.select().from(operations)).toEqual([]);

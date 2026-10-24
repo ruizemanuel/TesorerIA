@@ -41,7 +41,7 @@ export type TimelineExpense = { id: string; by: string; amount: bigint; note: st
 
 export type TimelinePending = {
   userOpHash: string;
-  kind: "create-fund" | "contribute" | "vote" | "execute" | "cash-out" | "propose";
+  kind: "create-fund" | "contribute" | "vote" | "execute" | "cash-out" | "propose" | "key-change";
   amount: bigint | null;
   token: "wars" | "usdt" | null;
   createdAt: Date;
@@ -320,8 +320,9 @@ export function buildTimeline({
   }
 
   for (const operation of pending) {
-    // A createFund isn't the fund's yet, and a pass to pesos moves the member's own account (spec, 9.2).
-    if (operation.kind === "create-fund" || operation.kind === "cash-out") continue;
+    // A createFund isn't the fund's yet, a pass to pesos moves the member's own account (spec, 9.2), and a key change
+    // swaps that account's passkey (9.5).
+    if (operation.kind === "create-fund" || operation.kind === "cash-out" || operation.kind === "key-change") continue;
     const text =
       operation.kind === "vote"
         ? t.onItsWay.vote
