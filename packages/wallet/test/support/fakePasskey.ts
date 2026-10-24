@@ -1,4 +1,4 @@
-import { Base64, Bytes, Hash, P256, PublicKey } from "ox";
+import { Base64, Bytes, Cbor, Hash, P256, PublicKey } from "ox";
 import type { Hex } from "viem";
 import type { ToWebAuthnAccountParameters } from "viem/account-abstraction";
 
@@ -8,6 +8,11 @@ type RequestOptions = Parameters<GetFn>[0];
 export type FakePasskey = {
   credential: { id: string; publicKey: Hex };
   getFn: GetFn;
+  /** Stands in for `navigator.credentials.create`: the two parts of a registration the server reads. */
+  attest: (options: { challenge: Hex; rpId?: string; origin?: string }) => {
+    attestationObject: Hex;
+    clientDataJSON: string;
+  };
 };
 
 /**
@@ -16,6 +21,11 @@ export type FakePasskey = {
  * authenticatorData = sha256(rpId) || flags (UP|UV) || signCount,
  * clientDataJSON = {"type":"webauthn.get","challenge":<b64url>,"origin":...,"crossOrigin":false},
  * signature = DER(low-s ECDSA P-256 over sha256(authenticatorData || sha256(clientDataJSON))).
+ *
+ * `attest` stands in for registration (`navigator.credentials.create`): the attestationObject is CBOR with
+ * fmt "none" and authData = sha256(rpId) || flags (UP|UV|AT) || signCount 0 || 16 zero bytes (aaguid) ||
+ * id length || id || the COSE key, written byte by byte as an authenticator does, and the clientDataJSON is a
+ * "webauthn.create" one. `rpId` and `origin` default to the ones the passkey was made for.
  */
 export function createFakePasskey({
   rpId = "localhost",
@@ -73,7 +83,31 @@ export function createFakePasskey({
     };
   };
 
-  return { credential: { id, publicKey }, getFn };
+  const attest: FakePasskey["attest"] = ({ challenge, rpId: attestedRpId = rpId, origin: attestedOrigin = origin }) => {
+    const key = Bytes.fromHex(publicKey);
+    const authData = Bytes.concat(
+      Hash.sha256(Bytes.fromString(attestedRpId)),
+      Uint8Array.of(0x45), // UP | UV | AT
+      new Uint8Array(4), // signCount
+      new Uint8Array(16), // aaguid
+      Bytes.fromNumber(rawId.length, { size: 2 }),
+      rawId,
+      // COSE_Key { 1: 2 (EC2), 3: -7 (ES256), -1: 1 (P-256), -2: x, -3: y }
+      Uint8Array.of(0xa5, 0x01, 0x02, 0x03, 0x26, 0x20, 0x01, 0x21, 0x58, 0x20),
+      key.slice(0, 32),
+      Uint8Array.of(0x22, 0x58, 0x20),
+      key.slice(32),
+    );
+    const clientDataJSON = JSON.stringify({
+      type: "webauthn.create",
+      challenge: Base64.fromHex(challenge, { url: true, pad: false }),
+      origin: attestedOrigin,
+      crossOrigin: false,
+    });
+    return { attestationObject: Cbor.encode({ fmt: "none", attStmt: {}, authData }), clientDataJSON };
+  };
+
+  return { credential: { id, publicKey }, getFn, attest };
 }
 
 function toBytes(source: ArrayBuffer | ArrayBufferView): Uint8Array {

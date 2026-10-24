@@ -10,5 +10,11 @@ export {
   safeKeyOf,
   sendKeyChange,
 } from "./key-change";
-export { type PasskeyAssertion, signPasskeyChallenge, verifyPasskeyAssertion } from "./passkey";
+export {
+  type Attestation,
+  type PasskeyAssertion,
+  readAttestation,
+  signPasskeyChallenge,
+  verifyPasskeyAssertion,
+} from "./passkey";
 export { type Call, type SendTaggedCallsResult, sendTaggedCalls } from "./send";
