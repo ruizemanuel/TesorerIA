@@ -1,3 +1,4 @@
+import { type Address, getAddress } from "viem";
 import { z } from "zod";
 import { hashSchema } from "./schemas";
 
@@ -29,6 +30,17 @@ const schema = z
       z
         .string()
         .regex(/^0x[0-9a-fA-F]{40}$/)
+        .optional(),
+    ),
+    /**
+     * The one account that sees the request to swap its passkey for one of tesoreria.finance (spec, 9.5, "El piloto"),
+     * checksummed. Without it, everyone with a passkey of the old site does.
+     */
+    KEY_CHANGE_PILOT: blank(
+      z
+        .string()
+        .regex(/^0x[0-9a-fA-F]{40}$/)
+        .transform((value): Address => getAddress(value))
         .optional(),
     ),
     /**

@@ -27,6 +27,7 @@ export async function POST(request: Request) {
     session: await getSession(),
     input: body.value,
     deriveAccount,
+    rpId: env().RP_ID,
     origin: env().ORIGIN,
     m,
   });

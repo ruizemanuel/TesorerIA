@@ -50,6 +50,7 @@ export async function registerMember({
   session,
   input,
   deriveAccount,
+  rpId,
   origin,
   now = Date.now(),
   m,
@@ -58,6 +59,8 @@ export async function registerMember({
   session: Session;
   input: Registration;
   deriveAccount: DeriveAccount;
+  /** The site the new passkey belongs to: kept with it. */
+  rpId: string;
   origin: string;
   now?: number;
   m: Messages;
@@ -104,7 +107,7 @@ export async function registerMember({
   try {
     await db
       .insert(credentials)
-      .values({ id: input.credentialId, userId, publicKey: input.publicKey, userHandle: input.userHandle });
+      .values({ id: input.credentialId, userId, publicKey: input.publicKey, userHandle: input.userHandle, rpId });
   } catch (error) {
     // No transactions over Neon's HTTP driver: take the person we just added out again, so none is left without a passkey.
     await db.delete(users).where(eq(users.id, userId)).catch(() => undefined);

@@ -106,6 +106,23 @@ describe("parseEnv", () => {
     expect(problem({ ...base, CREATE_FUND_DAILY_LIMIT: "2.5" })).toMatch(/CREATE_FUND_DAILY_LIMIT/);
   });
 
+  it("names the account that gets the key change first, or none: an empty value counts as missing", () => {
+    expect(parseEnv(base).KEY_CHANGE_PILOT).toBeUndefined();
+    expect(parseEnv({ ...base, KEY_CHANGE_PILOT: "" }).KEY_CHANGE_PILOT).toBeUndefined();
+    // It comes out checksummed, like the accounts in the database, whatever case it was written in.
+    const checksummed = "0x52908400098527886E0F7030069857D2E4169EE7";
+    expect(parseEnv({ ...base, KEY_CHANGE_PILOT: checksummed }).KEY_CHANGE_PILOT).toBe(checksummed);
+    expect(parseEnv({ ...base, KEY_CHANGE_PILOT: checksummed.toLowerCase() }).KEY_CHANGE_PILOT).toBe(checksummed);
+  });
+
+  it("refuses a pilot that isn't an address, naming the variable and not what was written", () => {
+    const notAnAddress = "my-own-account";
+    const message = problem({ ...base, KEY_CHANGE_PILOT: notAnAddress });
+    expect(message).toContain("KEY_CHANGE_PILOT");
+    expect(message).not.toContain(notAnAddress);
+    expect(problem({ ...base, KEY_CHANGE_PILOT: "0x1234" })).toContain("KEY_CHANGE_PILOT");
+  });
+
   it("takes the scripted model only on the fork: it must never answer on mainnet", () => {
     expect(problem({ ...base, CHAT_MODEL: "mock" })).toMatch(/CHAT_MODEL/);
     expect(parseEnv({ ...base, CHAIN_MODE: "fork", CHAT_MODEL: "mock" }).CHAT_MODEL).toBe("mock");

@@ -3,7 +3,13 @@ import { cookies } from "next/headers";
 import type { Hex } from "viem";
 import { env } from "./env";
 
-export type SessionData = { userId?: string; challenge?: Hex; challengeAt?: number };
+export type SessionData = {
+  userId?: string;
+  challenge?: Hex;
+  challengeAt?: number;
+  /** The id of the pending passkey this session created or proved it holds, for the key change (spec, 9.5). */
+  keyChange?: string;
+};
 
 /** What the auth functions need from a session: iron-session's, or a plain object in the tests. */
 export type Session = SessionData & { save(): Promise<void>; destroy(): void };

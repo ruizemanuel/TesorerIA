@@ -1,5 +1,6 @@
 import { signPasskeyChallenge } from "@tesoreria/wallet";
 import { createFakePasskey } from "@tesoreria/wallet/testing";
+import { eq } from "drizzle-orm";
 import { Base64 } from "ox";
 import { type Hex, getAddress, keccak256, slice, toHex } from "viem";
 import { beforeAll, describe, expect, it } from "vitest";
@@ -49,7 +50,7 @@ async function register(
     clientDataJSON: creation(challenge, change.origin, change.type),
     ...change.input,
   };
-  const result = await registerMember({ db: change.db ?? db, session, input, deriveAccount, origin: ORIGIN, now: change.now ?? NOW, m: change.m ?? es });
+  const result = await registerMember({ db: change.db ?? db, session, input, deriveAccount, rpId: RP_ID, origin: ORIGIN, now: change.now ?? NOW, m: change.m ?? es });
   return { result, session, passkey };
 }
 
@@ -86,6 +87,12 @@ describe("registerMember", () => {
     expect(session.challenge).toBeUndefined();
   });
 
+  it("keeps the passkey as the person's active one, for the site it was made on", async () => {
+    const { passkey } = await register();
+    const [row] = await db.select().from(credentials).where(eq(credentials.id, passkey.credential.id));
+    expect(row).toMatchObject({ rpId: RP_ID, state: "active" });
+  });
+
   it("refuses an old challenge, another ceremony, another origin, and a key whose account already exists", async () => {
     expect((await register(createFakePasskey(), { now: NOW + CHALLENGE_TTL_MS + 1 })).result).toMatchObject({ ok: false, status: 400 });
     expect((await register(createFakePasskey(), { type: "webauthn.get" })).result).toMatchObject({ ok: false, status: 400 });
@@ -112,7 +119,7 @@ describe("registerMember", () => {
       userHandle: toHex(crypto.getRandomValues(new Uint8Array(16))),
       clientDataJSON: creation(issueChallenge(fakeSession(), NOW)),
     };
-    expect(await registerMember({ db, session, input, deriveAccount, origin: ORIGIN, now: NOW, m: es })).toMatchObject({ ok: false, status: 400 });
+    expect(await registerMember({ db, session, input, deriveAccount, rpId: RP_ID, origin: ORIGIN, now: NOW, m: es })).toMatchObject({ ok: false, status: 400 });
   });
 
   it("refuses a name, an email, a key or a user handle that doesn't fit", async () => {

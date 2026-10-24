@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import {
   bigint,
   boolean,
@@ -10,6 +11,7 @@ import {
   text,
   timestamp,
   unique,
+  uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
 
@@ -32,18 +34,34 @@ export const users = pgTable("users", {
   createdAt: createdAt(),
 });
 
-export const credentials = pgTable("credentials", {
-  /** WebAuthn credential id, base64url. */
-  id: text("id").primaryKey(),
-  userId: uuid("user_id")
-    .notNull()
-    .references(() => users.id),
-  /** Uncompressed P-256 key, 0x + x ‖ y: the Safe's owner. A later login doesn't return it (spec, 6). */
-  publicKey: text("public_key").notNull(),
-  /** The random user.id given to the authenticator (spec, 6): never derived from a name or a mail. */
-  userHandle: text("user_handle").notNull(),
-  createdAt: createdAt(),
-});
+export const credentials = pgTable(
+  "credentials",
+  {
+    /** WebAuthn credential id, base64url. */
+    id: text("id").primaryKey(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id),
+    /** Uncompressed P-256 key, 0x + x ‖ y: the Safe's owner. A later login doesn't return it (spec, 6). */
+    publicKey: text("public_key").notNull(),
+    /** The random user.id given to the authenticator (spec, 6): never derived from a name or a mail. */
+    userHandle: text("user_handle").notNull(),
+    /** The site the passkey belongs to: the browser only offers it there, and signs for that RP ID alone (spec, 9.5). */
+    rpId: text("rp_id").notNull(),
+    /**
+     * `pending` is a new passkey whose key the member's Safe doesn't have yet; it becomes `active` once the chain
+     * confirms the swap, and the `active` one it replaces is `retired`. A person has at most one of each (spec, 9.5).
+     */
+    state: text("state", { enum: ["active", "pending", "retired"] })
+      .notNull()
+      .default("active"),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex("credentials_one_active").on(t.userId).where(sql`${t.state} = 'active'`),
+    uniqueIndex("credentials_one_pending").on(t.userId).where(sql`${t.state} = 'pending'`),
+  ],
+);
 
 export const funds = pgTable("funds", {
   id: uuid("id").primaryKey().defaultRandom(),
