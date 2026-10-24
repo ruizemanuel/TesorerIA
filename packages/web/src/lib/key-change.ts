@@ -71,8 +71,8 @@ export function keyChangeLock(userId: string): string {
 }
 
 /**
- * Longer than either holds it: /api/bundler waits 30 s at most for the bundler, and a start's chain read, with viem's
- * own tries (four, of 10 s at most), takes some 41 s at worst. A lock whose holder died frees itself after this.
+ * Longer than either holds it: /api/bundler waits 30 s at most for the bundler, and a start's chain read gets one try
+ * of 15 s (the start route's CHAIN_READ_MS). A lock whose holder died frees itself after this.
  */
 export const KEY_CHANGE_LOCK_TTL_MS = 60_000;
 
