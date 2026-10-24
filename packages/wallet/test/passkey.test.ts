@@ -165,9 +165,19 @@ describe("readAttestation", () => {
     expect(() => readAttestation(rewrite(attestationObject, setByte(FLAGS, 0x05)))).toThrow(/attested credential/);
   });
 
-  it("refuses extension data, which this site never asks for", () => {
-    const { attestationObject } = createFakePasskey().attest({ challenge });
-    expect(() => readAttestation(rewrite(attestationObject, setByte(FLAGS, 0x45 | 0x80)))).toThrow(/extension/);
+  it("reads the key when extension data follows it, as when the browser asks for credProtect on its own", () => {
+    const passkey = createFakePasskey({ rpId: SITE, origin: `https://${SITE}` });
+    const { attestationObject } = passkey.attest({ challenge });
+    // 0xc5 is UP | UV | AT | ED, and the extensions are a CBOR map after the key: credProtect's output, level 2.
+    const extended = rewrite(attestationObject, (authData) =>
+      Bytes.concat(setByte(FLAGS, 0xc5)(authData), Bytes.fromHex(Cbor.encode({ credProtect: 2 }))),
+    );
+    expect(readAttestation(extended)).toEqual({
+      credentialId: passkey.credential.id,
+      publicKey: passkey.credential.publicKey,
+      rpIdHash: Hash.sha256(Bytes.fromString(SITE), { as: "Hex" }),
+      userVerified: true,
+    });
   });
 
   it("refuses a key that is not ES256 on P-256", () => {
@@ -211,7 +221,7 @@ describe("readAttestation", () => {
     });
   });
 
-  it("refuses anything after the key, since extension data is refused", () => {
+  it("refuses anything after the key when the flags declare no extension data", () => {
     const { attestationObject } = createFakePasskey().attest({ challenge });
     const trailing = rewrite(attestationObject, (authData) => Bytes.concat(authData, Uint8Array.of(0)));
     expect(() => readAttestation(trailing)).toThrow(/extra bytes/);

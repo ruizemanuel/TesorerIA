@@ -112,7 +112,10 @@ const ID_OFFSET = 55;
  * with. The key comes from here and never from a field the browser fills in: a Safe has one owner and no recovery,
  * so a wrong key locks its funds for good. The attestation statement is not checked (`fmt` and `attStmt` can be
  * anything): the key is only trusted after its owner signs in with it. Throws if the data has no attested
- * credential, carries extensions, or holds a key that is not ES256 on P-256.
+ * credential, or holds a key that is not ES256 on P-256.
+ *
+ * Extension data (flag ED) is taken: the browser may ask for one on its own (credProtect, for a passkey that lives
+ * on the device or a security key), and with the statement unchecked, refusing it would keep nothing out.
  */
 export function readAttestation(attestationObject: Hex.Hex): Attestation {
   const authData = (decodeCbor(attestationObject, "attestation") as { authData?: unknown } | null)?.authData;
@@ -123,9 +126,6 @@ export function readAttestation(attestationObject: Hex.Hex): Attestation {
   if (!(flags & FLAG_ATTESTED_CREDENTIAL)) {
     throw new Error("The authenticator data has no attested credential (flag AT)");
   }
-  if (flags & FLAG_EXTENSIONS) {
-    throw new Error("The authenticator data has extension data (flag ED), which this site never asks for");
-  }
 
   const view = new DataView(authData.buffer, authData.byteOffset, authData.byteLength);
   const keyOffset = ID_OFFSET + view.getUint16(ID_LENGTH_OFFSET);
@@ -135,18 +135,21 @@ export function readAttestation(attestationObject: Hex.Hex): Attestation {
 
   return {
     credentialId: Base64.fromBytes(authData.subarray(ID_OFFSET, keyOffset), { url: true, pad: false }),
-    publicKey: readCoseKey(authData.subarray(keyOffset)),
+    publicKey: readCoseKey(authData.subarray(keyOffset), (flags & FLAG_EXTENSIONS) !== 0),
     rpIdHash: Hex.fromBytes(authData.subarray(0, FLAGS_OFFSET)),
     userVerified: (flags & FLAG_USER_VERIFIED) !== 0,
   };
 }
 
-/** x ‖ y of an ES256 COSE key (map: 1 kty, 3 alg, -1 crv, -2 x, -3 y), read from the map whatever its key order. */
-function readCoseKey(bytes: Uint8Array): Hex.Hex {
+/**
+ * x ‖ y of an ES256 COSE key (map: 1 kty, 3 alg, -1 crv, -2 x, -3 y), read from the map whatever its key order. The
+ * key is the first CBOR item of `bytes`; the extensions map follows it when `extensions` (flag ED) says so.
+ */
+function readCoseKey(bytes: Uint8Array, extensions: boolean): Hex.Hex {
   const key = decodeCbor(bytes, "credential public key") as Record<string, unknown> | null;
-  // ox's decoder stops after the first item and ignores what follows it, and extension data is refused, so nothing
-  // may follow the key: if the bytes minus the last one still decode, that last byte is not part of the key.
-  if (isCbor(bytes.subarray(0, -1))) throw new Error("The credential public key is followed by extra bytes");
+  // ox's decoder stops after the first item and ignores what follows it. Without extension data nothing may follow
+  // the key: if the bytes minus the last one still decode, that last byte is not part of the key.
+  if (!extensions && isCbor(bytes.subarray(0, -1))) throw new Error("The credential public key is followed by extra bytes");
 
   if (key?.["1"] !== 2 || key["3"] !== -7 || key["-1"] !== 1) {
     throw new Error("The passkey's key is not ES256 on P-256 (COSE kty 2, alg -7, crv 1)");
