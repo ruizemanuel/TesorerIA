@@ -1,6 +1,6 @@
 import { readSafeKey } from "@tesoreria/wallet";
 import { z } from "zod";
-import { celoClient } from "../../../../lib/chain";
+import { quickCeloClient } from "../../../../lib/chain";
 import { currentUser } from "../../../../lib/current-user";
 import { getDb } from "../../../../lib/db/client";
 import { env } from "../../../../lib/env";
@@ -10,6 +10,12 @@ import { messagesFor } from "../../../../lib/i18n/messages";
 import { startKeyChange } from "../../../../lib/key-change";
 import { attestationSchema, hexSchema } from "../../../../lib/schemas";
 import { getSession } from "../../../../lib/session";
+
+/**
+ * How long the chain gets to show a pending key, read while the start holds the person's key-change lock: well inside
+ * KEY_CHANGE_LOCK_TTL_MS, so the lock can't expire and let a send in between the read and the replace.
+ */
+const CHAIN_READ_MS = 15_000;
 
 // A new passkey as a registration posts it, and never without its attestation.
 const KeyChangeStart = z.object({
@@ -35,7 +41,7 @@ export async function POST(request: Request) {
     rpId: RP_ID,
     pilot: KEY_CHANGE_PILOT, // due only for them while it's set, as /api/me says
     origin: ORIGIN,
-    readKey: (account) => readSafeKey(celoClient(), account),
+    readKey: (account) => readSafeKey(quickCeloClient(CHAIN_READ_MS), account),
     m,
   });
   return result.ok ? Response.json({ publicKey: result.publicKey }) : jsonError(result.status, result.error);

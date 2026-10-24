@@ -9,6 +9,7 @@ import { acquireLock, releaseLock } from "../src/lib/db/lock";
 import { credentials, operations } from "../src/lib/db/schema";
 import { es } from "../src/lib/i18n/es";
 import {
+  KEY_CHANGE_LOCK_TTL_MS,
   type KeyChangeInput,
   confirmKeyChange,
   keyChangeKeyFor,
@@ -659,5 +660,22 @@ describe("the key routes", () => {
     expect((await startWith(second)).status).toBe(200);
     expect(await rowOf(first)).toBeUndefined();
     expect(await rowOf(second)).toMatchObject({ state: "pending" });
+  });
+
+  it("bounds the start's chain read well inside the lock it holds, so the lock can't expire under it", async () => {
+    const { user, passkey: old } = await member();
+    const session = sessionOf(user);
+    state.session = session;
+    const startWith = (passkey: FakePasskey) =>
+      post(startRoute, "/api/auth/key", { credentialId: passkey.credential.id, userHandle: userHandle(), ...passkey.attest({ challenge: issueChallenge(session) }) });
+    expect((await startWith(newPasskey())).status).toBe(200);
+    // Replacing that pending passkey reads the chain while the start holds the person's lock.
+    state.readSafeKey = holding(old);
+    state.clients.length = 0;
+    expect((await startWith(newPasskey())).status).toBe(200);
+    expect(state.clients).toHaveLength(1);
+    const [, within] = /^celo within (\d+) ms$/.exec(state.clients[0] ?? "") ?? [];
+    expect(Number(within)).toBeGreaterThan(0);
+    expect(Number(within)).toBeLessThanOrEqual(KEY_CHANGE_LOCK_TTL_MS / 2);
   });
 });
