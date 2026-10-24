@@ -1,5 +1,5 @@
 import { AGENT_ADDRESS, FUND_FACTORY } from "@tesoreria/agent";
-import { ATTRIBUTION_SUFFIX, type Call, createMemberAccount, createPimlicoBundlerClient } from "@tesoreria/wallet";
+import { ATTRIBUTION_SUFFIX, type Call, createMemberAccount, createPimlicoBundlerClient, keyChangeCallData, sendKeyChange } from "@tesoreria/wallet";
 import { createFakePasskey } from "@tesoreria/wallet/testing";
 import {
   type Address,
@@ -10,6 +10,7 @@ import {
   decodeFunctionData,
   encodeAbiParameters,
   getAddress,
+  isAddress,
   numberToHex,
   pad,
   parseAbi,
@@ -20,6 +21,7 @@ import { celo } from "viem/chains";
 import { describe, expect, it } from "vitest";
 import { authorizeBundlerRequest } from "../src/lib/bundler-proxy";
 import { contributeCalls } from "../src/lib/contribute";
+import type { Db } from "../src/lib/db/client";
 import { createDraft, deployCall, joinFund } from "../src/lib/funds";
 import { es } from "../src/lib/i18n/es";
 import { voteCalls } from "../src/lib/vote";
@@ -30,6 +32,8 @@ const FAST = 5_000_000_000n;
 const OP: Hash = pad("0x01", { size: 32 });
 const PAYMASTER: Address = getAddress("0x00000000000000000000000000000000000fa575");
 const fee = { maxFeePerGas: numberToHex(FAST), maxPriorityFeePerGas: numberToHex(1_000_000_000n) };
+/** The operations the sponsored flow sends, in the order viem sends them. */
+const WITH_OPERATION = ["pm_getPaymasterStubData", "eth_estimateUserOperationGas", "pm_getPaymasterData", "eth_sendUserOperation"];
 
 const PROXY_CREATION_CODE = toFunctionSelector("proxyCreationCode()");
 const entryPointNonceAbi = parseAbi(["function getNonce(address sender, uint192 key) view returns (uint256)"]);
@@ -51,6 +55,54 @@ const node = custom({
   },
 });
 
+type Forwarded = { method: string; params: unknown[] };
+
+/**
+ * /api/bundler without the HTTP, for `user`: each request is checked as the route checks it, kept in `forwarded`
+ * once it passes, and answered as Pimlico would.
+ */
+function gate(db: Db, user: Parameters<typeof authorizeBundlerRequest>[1], forwarded: Forwarded[]) {
+  return custom({
+    async request({ method, params }: { method: string; params?: unknown }) {
+      const check = await authorizeBundlerRequest(db, user, { jsonrpc: "2.0", id: 1, method, params }, POLICY, async () => FAST, () => AGENT_ADDRESS, 10);
+      if (!check.ok) throw new Error(`${method}: ${check.status} ${check.error}`);
+      forwarded.push({ method, params: check.request.params });
+      const creating = JSON.stringify(params).toLowerCase().includes(FUND_FACTORY.slice(2).toLowerCase());
+      switch (method) {
+        case "eth_chainId":
+          return numberToHex(celo.id);
+        case "pimlico_getUserOperationGasPrice":
+          return { slow: fee, standard: fee, fast: fee };
+        case "pm_getPaymasterStubData":
+          return {
+            paymaster: PAYMASTER,
+            paymasterData: "0x",
+            paymasterVerificationGasLimit: numberToHex(40_000n),
+            paymasterPostOpGasLimit: numberToHex(30_000n),
+          };
+        case "eth_estimateUserOperationGas":
+          return {
+            callGasLimit: numberToHex(creating ? 5_000_000n : 300_000n), // createFund deploys a whole Fund
+            verificationGasLimit: numberToHex(700_000n),
+            preVerificationGas: numberToHex(80_000n),
+            paymasterVerificationGasLimit: numberToHex(40_000n),
+            paymasterPostOpGasLimit: numberToHex(30_000n),
+          };
+        case "pm_getPaymasterData":
+          return { paymaster: PAYMASTER, paymasterData: "0x" };
+        case "eth_sendUserOperation":
+          return OP;
+        case "eth_getUserOperationReceipt":
+          return { userOpHash: OP, success: true, receipt: { transactionHash: pad("0x02", { size: 32 }), blockNumber: numberToHex(79_700_001n) } };
+      }
+      throw new Error(`unexpected bundler RPC: ${method}`);
+    },
+  });
+}
+
+/** The requests in `forwarded` that carry an operation, which the paymaster pays for. */
+const withOperation = (forwarded: Forwarded[]) => forwarded.filter(({ params }) => typeof params[0] === "object" && params[0] !== null);
+
 describe("the requests viem really sends for a sponsored operation", () => {
   it("all get through the gate for every call the web makes, each as the member's own, with the server's policy", async () => {
     const client = createPublicClient({ chain: celo, transport: node });
@@ -67,45 +119,10 @@ describe("the requests viem really sends for a sponsored operation", () => {
     if (!deploy.ok) throw new Error(deploy.error);
     const fund = randomAccount();
     await addLiveFund(db, { creatorId: ana.id, address: fund, members: [ana.id] });
-    const user = { id: ana.id, account: account.address };
+    const user = { id: ana.id, account: account.address, keyChangeKey: null };
 
-    const forwarded: { method: string; params: unknown[] }[] = [];
-    // /api/bundler without the HTTP: each request is checked as the route checks it, and answered as Pimlico would.
-    const gate = custom({
-      async request({ method, params }: { method: string; params?: unknown }) {
-        const check = await authorizeBundlerRequest(db, user, { jsonrpc: "2.0", id: 1, method, params }, POLICY, async () => FAST, () => AGENT_ADDRESS, 10);
-        if (!check.ok) throw new Error(`${method}: ${check.status} ${check.error}`);
-        forwarded.push({ method, params: check.request.params });
-        const creating = JSON.stringify(params).toLowerCase().includes(FUND_FACTORY.slice(2).toLowerCase());
-        switch (method) {
-          case "eth_chainId":
-            return numberToHex(celo.id);
-          case "pimlico_getUserOperationGasPrice":
-            return { slow: fee, standard: fee, fast: fee };
-          case "pm_getPaymasterStubData":
-            return {
-              paymaster: PAYMASTER,
-              paymasterData: "0x",
-              paymasterVerificationGasLimit: numberToHex(40_000n),
-              paymasterPostOpGasLimit: numberToHex(30_000n),
-            };
-          case "eth_estimateUserOperationGas":
-            return {
-              callGasLimit: numberToHex(creating ? 5_000_000n : 300_000n), // createFund deploys a whole Fund
-              verificationGasLimit: numberToHex(700_000n),
-              preVerificationGas: numberToHex(80_000n),
-              paymasterVerificationGasLimit: numberToHex(40_000n),
-              paymasterPostOpGasLimit: numberToHex(30_000n),
-            };
-          case "pm_getPaymasterData":
-            return { paymaster: PAYMASTER, paymasterData: "0x" };
-          case "eth_sendUserOperation":
-            return OP;
-        }
-        throw new Error(`unexpected bundler RPC: ${method}`);
-      },
-    });
-    const bundler = createPimlicoBundlerClient({ client, transport: gate, sponsorshipPolicyId: "set by the server" });
+    const forwarded: Forwarded[] = [];
+    const bundler = createPimlicoBundlerClient({ client, transport: gate(db, user, forwarded), sponsorshipPolicyId: "set by the server" });
 
     // Every call shape the web sends: deploy-form's createFund, Aportar's two, and VoteButton's two (lib/vote.ts).
     const shapes: Record<string, Call[]> = {
@@ -126,16 +143,53 @@ describe("the requests viem really sends for a sponsored operation", () => {
         expect(params[3], `${shape}, ${method}`).toEqual({ sponsorshipPolicyId: POLICY });
       }
       // viem tags the callData before it asks for anything, so the estimate and the stub carry the tag too.
-      const withOperation = forwarded.filter(({ params }) => typeof params[0] === "object" && params[0] !== null);
       expect(
-        withOperation.map(({ method }) => method),
+        withOperation(forwarded).map(({ method }) => method),
         shape,
-      ).toEqual(["pm_getPaymasterStubData", "eth_estimateUserOperationGas", "pm_getPaymasterData", "eth_sendUserOperation"]);
-      for (const { method, params } of withOperation) {
+      ).toEqual(WITH_OPERATION);
+      for (const { method, params } of withOperation(forwarded)) {
         expect((params[0] as { callData: string }).callData.endsWith(ATTRIBUTION_SUFFIX.slice(2)), `${shape}, ${method}`).toBe(true);
       }
     }
     // A createFund on the key viem would pick by itself isn't one the gate counts, so it never gets through.
     await expect(bundler.sendUserOperation({ account, calls: [deploy.call] })).rejects.toThrow("403 A createFund is sponsored only on EntryPoint nonce key 0");
+  });
+
+  it("the key change viem really sends gets through, for a Safe not yet deployed", async () => {
+    const client = createPublicClient({ chain: celo, transport: node });
+    const active = createFakePasskey();
+    const account = await createMemberAccount({ client, owner: toWebAuthnAccount({ ...active, rpId: "localhost" }) });
+    const db = await testDb();
+    const ema = await addUser(db, "Ema", account.address); // in no fund, creating none
+    const pending = createFakePasskey().credential.publicKey;
+    const forwarded: Forwarded[] = [];
+    const bundlerFor = (keyChangeKey: Hex | null) =>
+      createPimlicoBundlerClient({ client, transport: gate(db, { id: ema.id, account: account.address, keyChangeKey }, forwarded), sponsorshipPolicyId: "set by the server" });
+
+    // As the page sends it: through sendKeyChange, with the client the page uses, and waiting for its receipt.
+    const result = await sendKeyChange({ bundlerClient: bundlerFor(pending), account, publicKey: pending, timeout: 5_000 });
+    expect(result).toMatchObject({ userOpHash: OP, success: true });
+
+    expect(withOperation(forwarded).map(({ method }) => method)).toEqual(WITH_OPERATION);
+    for (const { method, params } of withOperation(forwarded)) {
+      const userOp = params[0] as { callData: Hex; factory?: Address; factoryData?: Hex };
+      expect(userOp.callData, method).toBe(keyChangeCallData(pending)); // the tag once: what the gate decodes is what viem sends
+      // The first operation deploys the Safe, with its old key, before it changes it.
+      expect(isAddress(userOp.factory ?? "", { strict: false }), method).toBe(true);
+      expect(userOp.factoryData?.length, method).toBeGreaterThan(2);
+      if (method.startsWith("pm_")) expect(params[3], method).toEqual({ sponsorshipPolicyId: POLICY });
+    }
+    expect(forwarded.map(({ method }) => method)).toContain("eth_getUserOperationReceipt"); // read in no fund
+
+    // The same to a key this session didn't make or prove, or with no key change ready (not even a read then): nothing goes out.
+    forwarded.length = 0;
+    const other = createFakePasskey().credential.publicKey;
+    await expect(sendKeyChange({ bundlerClient: bundlerFor(pending), account, publicKey: other, timeout: 5_000 })).rejects.toThrow(
+      "403 Only a key change to the passkey this session made or proved is sponsored",
+    );
+    await expect(sendKeyChange({ bundlerClient: bundlerFor(null), account, publicKey: pending, timeout: 5_000 })).rejects.toThrow(
+      "403 Only members of a fund use the bundler",
+    );
+    expect(withOperation(forwarded)).toEqual([]);
   });
 });

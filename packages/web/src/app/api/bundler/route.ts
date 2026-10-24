@@ -1,11 +1,14 @@
 import { shortMessage } from "@tesoreria/agent";
 import { createForkBundler } from "@tesoreria/wallet/fork";
 import { agentAddress } from "../../../lib/agent-address";
-import { type BundlerRequest, authorizeBundlerRequest, checkBundlerAnswer } from "../../../lib/bundler-proxy";
+import { type BundlerRequest, acceptedKeyChange, authorizeBundlerRequest, checkBundlerAnswer } from "../../../lib/bundler-proxy";
 import { currentUser } from "../../../lib/current-user";
 import { getDb } from "../../../lib/db/client";
 import { env } from "../../../lib/env";
+import { keyChangeKeyFor } from "../../../lib/key-change";
+import { recordOperation } from "../../../lib/operations";
 import { hexSchema } from "../../../lib/schemas";
+import { getSession } from "../../../lib/session";
 
 const shared = globalThis as { tesoreriaForkBundler?: ReturnType<typeof createForkBundler> };
 
@@ -52,9 +55,11 @@ export async function POST(request: Request) {
   const user = await currentUser();
   const body: unknown = await request.json().catch(() => undefined);
   const { CHAIN_MODE, PIMLICO_SPONSORSHIP_POLICY_ID, CREATE_FUND_DAILY_LIMIT } = env();
+  const db = await getDb();
   const check = await authorizeBundlerRequest(
-    await getDb(),
-    user,
+    db,
+    // The only key change sponsored: to the pending passkey this session made or proved it holds (spec, 9.5).
+    user === null ? null : { id: user.id, account: user.account, keyChangeKey: await keyChangeKeyFor(db, user, await getSession()) },
     body,
     PIMLICO_SPONSORSHIP_POLICY_ID ?? "fork",
     CHAIN_MODE === "fork" ? null : fastMaxFeePerGas, // the fork has no paymaster to protect
@@ -72,5 +77,15 @@ export async function POST(request: Request) {
   }
   const checked = checkBundlerAnswer(check.request.method, answer.text);
   if (!checked.ok) return rpcError(check.request.id, checked.status, checked.error);
+  const keyChange = acceptedKeyChange(check.request, answer.text);
+  if (keyChange !== null && user !== null) {
+    // Recorded here, as the bundler took it, so it counts as on its way even if the page's record (the same row,
+    // which then changes nothing) never comes. It's out either way: a failure here doesn't hide the answer.
+    try {
+      await recordOperation(db, user.id, { userOpHash: keyChange, kind: "key-change" });
+    } catch (error) {
+      console.error(`/api/bundler could not record the key change ${keyChange}: ${shortMessage(error)}`);
+    }
+  }
   return new Response(answer.text, { status: answer.status, headers: { "content-type": "application/json" } });
 }

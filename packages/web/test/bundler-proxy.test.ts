@@ -1,21 +1,25 @@
 import { FUND_FACTORY, USDT, WARS, fundFactoryAbi } from "@tesoreria/agent";
-import { ATTRIBUTION_SUFFIX, type Call } from "@tesoreria/wallet";
+import { ATTRIBUTION_SUFFIX, type Call, SAFE_P256_VERIFIERS, SAFE_WEBAUTHN_SHARED_SIGNER, keyChangeCallData, safeKeyOf } from "@tesoreria/wallet";
+import { createFakePasskey } from "@tesoreria/wallet/testing";
 import { eq, sql } from "drizzle-orm";
 import { drizzle as drizzleNeon } from "drizzle-orm/neon-http";
 import { type Address, type Hex, concat, decodeFunctionData, encodeFunctionData, erc20Abi, getAddress, numberToHex, parseAbi, zeroAddress } from "viem";
 import { entryPoint07Address } from "viem/account-abstraction";
 import { describe, expect, it, vi } from "vitest";
 import {
+  type BundlerRequest,
   MAX_CREATE_FUND_GAS,
   MAX_FEE_MULTIPLE,
   MAX_OPERATION_GAS,
   type OperationCall,
   type Sponsorship,
+  acceptedKeyChange,
   authorizeBundlerRequest,
   checkBundlerAnswer,
   checkBundlerRequest,
   checkCalls,
   checkSponsoredGas,
+  keyChangeCallKey,
   operationCalls,
 } from "../src/lib/bundler-proxy";
 import { cashOutCalls } from "../src/lib/cash-out";
@@ -157,6 +161,51 @@ describe("operationCalls", () => {
       "nothing at all": tag("0x"),
     };
     for (const [why, callData] of Object.entries(cases)) expect(operationCalls(callData), why).toBeNull();
+  });
+});
+
+describe("keyChangeCallKey", () => {
+  const PUBLIC_KEY = createFakePasskey().credential.publicKey;
+  const SIGNER = SAFE_WEBAUTHN_SHARED_SIGNER;
+  const signerAbi = parseAbi([
+    "function configure((uint256 x, uint256 y, uint176 verifiers) signer)",
+    "function getConfiguration(address account) view returns ((uint256 x, uint256 y, uint176 verifiers) signer)",
+  ]);
+  /** The shared signer's `configure` with the passkey's key, and with these verifiers. */
+  const configure = (verifiers = BigInt(SAFE_P256_VERIFIERS)) =>
+    encodeFunctionData({ abi: signerAbi, functionName: "configure", args: [{ ...safeKeyOf(PUBLIC_KEY), verifiers }] });
+  const tag = (data: Hex) => concat([data, ATTRIBUTION_SUFFIX]);
+
+  it("reads the passkey's key out of the key change keyChangeCallData builds, tagged or not", () => {
+    expect(keyChangeCallKey(keyChangeCallData(PUBLIC_KEY))).toBe(PUBLIC_KEY.toLowerCase());
+    expect(keyChangeCallKey(tag(execute(SIGNER, 0n, configure(), 1)))).toBe(PUBLIC_KEY.toLowerCase()); // the same, by hand
+    expect(keyChangeCallKey(execute(SIGNER, 0n, configure(), 1))).toBe(PUBLIC_KEY.toLowerCase());
+  });
+
+  it("reads nothing but that one delegatecall to the shared signer, byte for byte", () => {
+    // The verifiers' word, the third of configure's arguments, with a bit set above its 176.
+    const at = 2 + 2 * (4 + 64);
+    const dirty = `${configure().slice(0, at)}01${configure().slice(at + 2)}` as Hex;
+    const cases: Record<string, string> = {
+      "other verifiers": tag(execute(SIGNER, 0n, configure(BigInt(SAFE_P256_VERIFIERS) + 1n), 1)),
+      "no verifiers": tag(execute(SIGNER, 0n, configure(0n), 1)),
+      "verifiers with a bit above their 176": tag(execute(SIGNER, 0n, dirty, 1)),
+      "a call to the signer (operation 0)": tag(execute(SIGNER, 0n, configure(), 0)),
+      "a delegatecall to another target": tag(execute(OTHER, 0n, configure(), 1)),
+      "a delegatecall with value": tag(execute(SIGNER, 1n, configure(), 1)),
+      "configure in a MultiSendCallOnly batch": tag(execute(MULTI_SEND_CALL_ONLY, 0n, multiSend([{ to: SIGNER, data: configure(), operation: 1 }]), 1)),
+      "configure in a MultiSend batch": tag(execute(MULTI_SEND, 0n, multiSend([{ to: SIGNER, data: configure(), operation: 1 }]), 1)),
+      "configure called in a batch": tag(execute(MULTI_SEND_CALL_ONLY, 0n, multiSend([{ to: SIGNER, data: configure() }]), 1)),
+      "executeUserOp instead of executeUserOpWithErrorString": tag(execute(SIGNER, 0n, configure(), 1, "executeUserOp")),
+      "another function of the signer": tag(execute(SIGNER, 0n, encodeFunctionData({ abi: signerAbi, functionName: "getConfiguration", args: [OTHER] }), 1)),
+      "a byte more in configure": tag(execute(SIGNER, 0n, concat([configure(), "0x00"]), 1)),
+      "bytes between the call and the tag": tag(concat([execute(SIGNER, 0n, configure(), 1), `0x${"00".repeat(32)}`])),
+      "a byte after the tag": concat([keyChangeCallData(PUBLIC_KEY), "0x00"]),
+      "the tag twice": tag(keyChangeCallData(PUBLIC_KEY)),
+      "nothing at all": tag("0x"),
+      "not hex": "a key change",
+    };
+    for (const [why, callData] of Object.entries(cases)) expect(keyChangeCallKey(callData), why).toBeNull();
   });
 });
 
@@ -360,9 +409,28 @@ describe("checkBundlerAnswer", () => {
   });
 });
 
+describe("acceptedKeyChange", () => {
+  const PUBLIC_KEY = createFakePasskey().credential.publicKey;
+  const HASH: Hex = `0x${"ab".repeat(32)}`;
+  const asked = (method: string, callData: string): BundlerRequest => ({ jsonrpc: "2.0", id: 1, method, params: [op(ME, callData), entryPoint07Address] });
+  const answer = (result: unknown) => JSON.stringify({ jsonrpc: "2.0", id: 1, result });
+
+  it("gives the hash the bundler accepted a key change's send with, and nothing for any other request or answer", () => {
+    expect(acceptedKeyChange(asked("eth_sendUserOperation", keyChangeCallData(PUBLIC_KEY)), answer(HASH))).toBe(HASH);
+    const cases: Record<string, [BundlerRequest, string]> = {
+      "another operation's send": [asked("eth_sendUserOperation", safeCallData(contribute(FUND))), answer(HASH)],
+      "the key change's estimate": [asked("eth_estimateUserOperationGas", keyChangeCallData(PUBLIC_KEY)), answer(HASH)],
+      "a refused send": [asked("eth_sendUserOperation", keyChangeCallData(PUBLIC_KEY)), JSON.stringify({ jsonrpc: "2.0", id: 1, error: { message: "AA23" } })],
+      "an answer that isn't JSON": [asked("eth_sendUserOperation", keyChangeCallData(PUBLIC_KEY)), "<html>Bad gateway</html>"],
+      "a result that isn't a hash": [asked("eth_sendUserOperation", keyChangeCallData(PUBLIC_KEY)), answer("0x01")],
+    };
+    for (const [why, [request, text]] of Object.entries(cases)) expect(acceptedKeyChange(request, text), why).toBeNull();
+  });
+});
+
 describe("authorizeBundlerRequest", () => {
-  /** What `currentUser` gives: the account checksummed. */
-  const asUser = (user: { id: string; account: string }) => ({ id: user.id, account: getAddress(user.account) });
+  /** What the route gives: the account checksummed (`currentUser`), and no key change ready unless one is given. */
+  const asUser = (user: { id: string; account: string }, keyChangeKey: Hex | null = null) => ({ id: user.id, account: getAddress(user.account), keyChangeKey });
   const price = async () => FAST;
   /** The server's agent, as `agentAddress` gives it. */
   const agent = () => AGENT;
@@ -403,6 +471,37 @@ describe("authorizeBundlerRequest", () => {
     }
     expect(await authorizeBundlerRequest(db, asUser(stranger), rpc("eth_chainId"), POLICY, price, agent, DAILY_LIMIT)).toMatchObject({ ok: false, status: 403 });
     expect(await authorizeBundlerRequest(db, null, rpc("eth_chainId"), POLICY, price, agent, DAILY_LIMIT)).toMatchObject({ ok: false, status: 401 });
+  });
+
+  it("sponsors a key change only to the key it's given, in any case, within the 2M ceiling, with no fund and no agent", async () => {
+    const db: Db = await testDb();
+    const ema = await addUser(db, "Ema"); // in no fund, creating none
+    const KEY = createFakePasskey().credential.publicKey;
+    const unread = vi.fn((): Address => {
+      throw new Error("A key change needs no agent");
+    });
+    const ask = (keyChangeKey: Hex | null, method: string, callData: Hex, change: Record<string, unknown> = {}, total = MAX_OPERATION_GAS) =>
+      authorizeBundlerRequest(db, asUser(ema, keyChangeKey), request(method, sponsored(ema.account, change, total, callData)), POLICY, price, unread, DAILY_LIMIT);
+    const toKey = keyChangeCallData(KEY);
+    for (const method of SPONSORED) {
+      expect(await ask(KEY, method, toKey), method).toMatchObject({ ok: true });
+      expect(await ask(`0x${KEY.slice(2).toUpperCase()}`, method, toKey), `${method}, the key in upper case`).toMatchObject({ ok: true });
+      expect(await ask(KEY, method, toKey, { nonce: hex((1n << 48n) << 64n) }), `${method}, on another nonce key`).toMatchObject({ ok: true });
+      const refused = { ok: false, status: 403, error: "Only a key change to the passkey this session made or proved is sponsored" };
+      expect(await ask(KEY, method, keyChangeCallData(createFakePasskey().credential.publicKey)), `${method}, to another key`).toEqual(refused);
+      expect(await ask(null, method, toKey), `${method}, with no key change ready`).toEqual(refused);
+    }
+    expect(await ask(KEY, "pm_getPaymasterData", toKey, {}, MAX_OPERATION_GAS + 1n)).toMatchObject({ ok: false, status: 400, error: "Gas limits too high" });
+    const overpaying = { maxFeePerGas: hex(MAX_FEE_MULTIPLE * FAST + 1n), maxPriorityFeePerGas: hex(1n) };
+    expect(await ask(KEY, "pm_getPaymasterData", toKey, overpaying)).toMatchObject({ ok: false, status: 400, error: "maxFeePerGas too high" });
+    // Whoever has a key change ready reads, in a fund or not.
+    expect(await authorizeBundlerRequest(db, asUser(ema, KEY), rpc("eth_getUserOperationReceipt", ["0x01"]), POLICY, price, unread, DAILY_LIMIT)).toMatchObject({ ok: true });
+    expect(await authorizeBundlerRequest(db, asUser(ema), rpc("eth_getUserOperationReceipt", ["0x01"]), POLICY, price, unread, DAILY_LIMIT)).toMatchObject({
+      ok: false,
+      status: 403,
+    });
+    expect(unread).not.toHaveBeenCalled();
+    expect(await db.$count(createFundNonces)).toBe(0);
   });
 
   it("refuses calls off the list before reading any price, whoever asks", async () => {

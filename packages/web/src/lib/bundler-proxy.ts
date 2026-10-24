@@ -1,10 +1,12 @@
 import { FUND_FACTORY, USDT, WARS, shortMessage } from "@tesoreria/agent";
-import { ATTRIBUTION_SUFFIX } from "@tesoreria/wallet";
+import { ATTRIBUTION_SUFFIX, SAFE_P256_VERIFIERS, SAFE_WEBAUTHN_SHARED_SIGNER } from "@tesoreria/wallet";
 import { and, eq, isNotNull } from "drizzle-orm";
 import {
   type Abi,
   type Address,
+  type Hash,
   type Hex,
+  concat,
   decodeFunctionData,
   encodeFunctionData,
   erc20Abi,
@@ -27,6 +29,7 @@ import { funds, memberships } from "./db/schema";
 import { ProposalAction, memberFundAbi } from "./fund-abi";
 import { frozenCreateFunds } from "./funds";
 import { sponsoredJoinRequests } from "./join-requests";
+import { hashSchema } from "./schemas";
 
 /** The JSON-RPC methods a member's browser needs to send a sponsored UserOperation, and nothing else. */
 export const BUNDLER_METHODS = new Set([
@@ -138,6 +141,11 @@ function unpackMultiSend(transactions: Hex): OperationCall[] | null {
   return calls.length > 0 ? calls : null;
 }
 
+/** The callData without the attribution suffix, if it ends with it (once: a second one is left for the decoder to refuse). */
+function untagged(callData: Hex): Hex {
+  return callData.toLowerCase().endsWith(SUFFIX) ? slice(callData, 0, size(callData) - size(ATTRIBUTION_SUFFIX)) : callData;
+}
+
 /**
  * The calls a member's Safe makes for this callData, without the attribution suffix: Safe4337Module's
  * `executeUserOp` or `executeUserOpWithErrorString`, with one call, or with a batch delegated to MultiSendCallOnly.
@@ -145,14 +153,34 @@ function unpackMultiSend(transactions: Hex): OperationCall[] | null {
  */
 export function operationCalls(callData: string): OperationCall[] | null {
   if (!isHex(callData)) return null;
-  const body = callData.toLowerCase().endsWith(SUFFIX) ? slice(callData, 0, size(callData) - size(ATTRIBUTION_SUFFIX)) : callData;
-  const executed = decodeExactly(safe4337Abi, body);
+  const executed = decodeExactly(safe4337Abi, untagged(callData));
   if (executed === null) return null;
   const [to, value, data, operation] = executed.args;
   if (operation === 0) return [{ to: getAddress(to), value, data }];
   if (operation !== 1 || !isAddressEqual(to, MULTI_SEND_CALL_ONLY) || value !== 0n) return null;
   const batch = decodeExactly(multiSendAbi, data);
   return batch === null ? null : unpackMultiSend(batch.args[0]);
+}
+
+const sharedSignerAbi = parseAbi(["function configure((uint256 x, uint256 y, uint176 verifiers) signer)"]);
+
+/**
+ * The passkey key a key change sets (spec, 9.5), `0x` + x ‖ y in lower case, if the callData is exactly the one
+ * `keyChangeCallData` builds, without the attribution suffix: `executeUserOpWithErrorString` delegatecalling
+ * `configure({ x, y, verifiers })` on SAFE_WEBAUTHN_SHARED_SIGNER, with no value and SAFE_P256_VERIFIERS. A
+ * delegatecall runs with the whole Safe's power, so anything else is null: another target, function, value or
+ * verifiers, a call, a batch, `executeUserOp`, a byte more.
+ */
+export function keyChangeCallKey(callData: string): Hex | null {
+  if (!isHex(callData)) return null;
+  const executed = decodeExactly(safe4337Abi, untagged(callData));
+  if (executed?.functionName !== "executeUserOpWithErrorString") return null;
+  const [to, value, data, operation] = executed.args;
+  if (operation !== 1 || !isAddressEqual(to, SAFE_WEBAUTHN_SHARED_SIGNER) || value !== 0n) return null;
+  const configured = decodeExactly(sharedSignerAbi, data);
+  if (configured === null) return null;
+  const [{ x, y, verifiers }] = configured.args;
+  return verifiers === BigInt(SAFE_P256_VERIFIERS) ? concat([numberToHex(x, { size: 32 }), numberToHex(y, { size: 32 })]) : null;
 }
 
 /** Who may be sponsored, and for which funds. */
@@ -331,10 +359,29 @@ async function sponsorshipOf(db: Db, userId: string, agent: () => Address): Prom
 }
 
 /**
+ * `checkSponsoredGas` at Pimlico's current price, which `fastMaxFeePerGas` reads: refused with 502 if it can't be
+ * read, rather than signed blind. Nothing to check without it, as on the fork.
+ */
+async function checkGasNow(userOp: unknown, fastMaxFeePerGas: (() => Promise<bigint>) | null, maxGas: bigint) {
+  if (fastMaxFeePerGas === null) return { ok: true } as const;
+  let price: bigint;
+  try {
+    price = await fastMaxFeePerGas();
+  } catch {
+    return { ok: false, status: 502, error: "Couldn't read the current gas price" } as const;
+  }
+  return checkSponsoredGas(userOp, price, maxGas);
+}
+
+/**
  * `checkBundlerRequest`, and then who gets what:
- * - reading (the chain's id, a receipt, the price) is for anyone in a fund, draft or live;
- * - what carries the sponsorship (estimating, stubbing, signing or sending an operation) is only for a member of a
- *   live fund, or the creator of a draft being created (deployCall freezes it to `deploying` before the browser
+ * - reading (the chain's id, a receipt, the price) is for anyone in a fund, draft or live, and for whoever has a key
+ *   change ready (`keyChangeKey`), who may be in none;
+ * - a key change (`keyChangeCallKey`) is sponsored only to `keyChangeKey`, the pending passkey's key, which the route
+ *   gives only once this session made that passkey or proved it holds it (`keyChangeKeyFor`, spec 9.5): never to a
+ *   key the browser names. It needs no fund and isn't one of `checkCalls`'s, and it's held to MAX_OPERATION_GAS;
+ * - what else carries the sponsorship (estimating, stubbing, signing or sending an operation) is only for a member
+ *   of a live fund, or the creator of a draft being created (deployCall freezes it to `deploying` before the browser
  *   asks for anything), and only for the calls `checkCalls` allows: a stranger who makes an account and a draft
  *   gets nothing paid, and a creator only the createFund deployCall built for their frozen draft, naming `agent()`
  *   (the server's, `agentAddress`), and only on EntryPoint nonce key 0, the one the web sends it on. `agent` is
@@ -354,7 +401,7 @@ async function sponsorshipOf(db: Db, userId: string, agent: () => Address): Prom
  */
 export async function authorizeBundlerRequest(
   db: Db,
-  user: { id: string; account: Address } | null,
+  user: { id: string; account: Address; keyChangeKey: Hex | null } | null,
   body: unknown,
   sponsorshipPolicyId: string,
   fastMaxFeePerGas: (() => Promise<bigint>) | null,
@@ -365,14 +412,25 @@ export async function authorizeBundlerRequest(
   if (!check.ok || user === null) return check; // without a user the check never passes
   const { method, params } = check.request;
   if (!WITH_USER_OP.has(method)) {
+    if (user.keyChangeKey !== null) return check; // changing their passkey, in a fund or not: the price, then the receipt
     const [membership] = await db.select({ fundId: memberships.fundId }).from(memberships).where(eq(memberships.userId, user.id)).limit(1);
     return membership === undefined ? { ok: false, status: 403, error: "Only members of a fund use the bundler" } : check;
+  }
+  const callData = (params[0] as { callData: string }).callData; // a string: checkBundlerRequest saw its tag
+  const keyChange = keyChangeCallKey(callData);
+  if (keyChange !== null) {
+    if (user.keyChangeKey === null || keyChange !== user.keyChangeKey.toLowerCase()) {
+      return { ok: false, status: 403, error: "Only a key change to the passkey this session made or proved is sponsored" };
+    }
+    if (method !== "pm_getPaymasterData") return check;
+    const gas = await checkGasNow(params[0], fastMaxFeePerGas, MAX_OPERATION_GAS);
+    return gas.ok ? check : gas;
   }
   const sponsorship = await sponsorshipOf(db, user.id, agent);
   if (sponsorship.liveFunds.length === 0 && sponsorship.createFundCalls.length === 0) {
     return { ok: false, status: 403, error: "Only members of a live fund, and the creator of a fund being created, are sponsored" };
   }
-  const calls = operationCalls((params[0] as { callData: string }).callData); // a string: checkBundlerRequest saw its tag
+  const calls = operationCalls(callData);
   if (calls === null) return { ok: false, status: 403, error: "Only a Safe's calls, one or a MultiSendCallOnly batch, are sponsored" };
   const allowed = checkCalls(calls, sponsorship);
   if (!allowed.ok) return allowed;
@@ -382,16 +440,8 @@ export async function authorizeBundlerRequest(
   if (nonce !== undefined && nonce >> 64n !== 0n) return { ok: false, status: 403, error: "A createFund is sponsored only on EntryPoint nonce key 0" };
 
   if (method !== "pm_getPaymasterData") return check;
-  if (fastMaxFeePerGas !== null) {
-    let price: bigint;
-    try {
-      price = await fastMaxFeePerGas();
-    } catch {
-      return { ok: false, status: 502, error: "Couldn't read the current gas price" };
-    }
-    const gas = checkSponsoredGas(params[0], price, allowed.createsFund ? MAX_CREATE_FUND_GAS : MAX_OPERATION_GAS);
-    if (!gas.ok) return gas;
-  }
+  const gas = await checkGasNow(params[0], fastMaxFeePerGas, allowed.createsFund ? MAX_CREATE_FUND_GAS : MAX_OPERATION_GAS);
+  if (!gas.ok) return gas;
   if (nonce !== undefined && !(await claimCreateFundNonce(db, user.id, nonce, createFundDailyLimit))) {
     return {
       ok: false,
@@ -418,4 +468,23 @@ export function checkBundlerAnswer(method: string, text: string): { ok: true } |
   const result = typeof answer === "object" && answer !== null ? (answer as { result?: unknown }).result : undefined;
   const isFinal = typeof result === "object" && result !== null && (result as { isFinal?: unknown }).isFinal === true;
   return isFinal ? { ok: false, status: 502, error: "The paymaster's stub must not be final" } : { ok: true };
+}
+
+/**
+ * The hash the bundler answered a key change's `eth_sendUserOperation` with, once it accepted it; null for any
+ * other request, and for an answer with no hash as its result. /api/bundler records it at once (spec, 9.5): from
+ * then on the operation may land, and the pending passkey must not be replaced under it (`startKeyChange`), even
+ * if the page's own record of it never arrives.
+ */
+export function acceptedKeyChange(request: BundlerRequest, text: string): Hash | null {
+  if (request.method !== "eth_sendUserOperation") return null;
+  if (keyChangeCallKey((request.params[0] as { callData: string }).callData) === null) return null; // checked: a tagged operation
+  let answer: unknown;
+  try {
+    answer = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  const result = typeof answer === "object" && answer !== null ? (answer as { result?: unknown }).result : undefined;
+  return hashSchema.safeParse(result).success ? (result as Hash) : null;
 }

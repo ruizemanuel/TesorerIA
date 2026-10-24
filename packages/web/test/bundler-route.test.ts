@@ -1,24 +1,49 @@
 import { AGENT_ADDRESS, FUND_FACTORY, fundFactoryAbi } from "@tesoreria/agent";
-import { type Address, type Hex, decodeFunctionData, encodeFunctionData, erc20Abi, getAddress, numberToHex } from "viem";
+import { keyChangeCallData } from "@tesoreria/wallet";
+import { createFakePasskey } from "@tesoreria/wallet/testing";
+import { eq } from "drizzle-orm";
+import { type Address, type Hex, decodeFunctionData, encodeFunctionData, erc20Abi, getAddress, numberToHex, toHex } from "viem";
 import { entryPoint07Address } from "viem/account-abstraction";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CurrentUser } from "../src/lib/current-user";
 import type { Db } from "../src/lib/db/client";
 import { contributeCalls } from "../src/lib/contribute";
+import { credentials, operations } from "../src/lib/db/schema";
 import { cancelDeploy, createDraft, deployCall, joinFund } from "../src/lib/funds";
 import { es } from "../src/lib/i18n/es";
+import { LEGACY_RP_ID } from "../src/lib/passkey-sites";
+import type { Session } from "../src/lib/session";
 import { WARS, addLiveFund, addUser, randomAccount, testDb } from "./support/db";
 import { safeCallData } from "./support/safe";
+import { fakeSession } from "./support/session";
 
 // The route as the server runs it, with the session and the database standing in, and Pimlico's answer faked.
 const KEY = "pim_test_key_8b1f";
 const POLICY = "sp_server_policy";
-const state = vi.hoisted(() => ({ user: null as CurrentUser | null, db: null as unknown, agentKeyIsWrong: false }));
+const state = vi.hoisted(() => ({
+  user: null as CurrentUser | null,
+  session: null as unknown,
+  db: null as unknown,
+  agentKeyIsWrong: false,
+  recordFails: false,
+}));
 vi.mock("../src/lib/current-user", () => ({ currentUser: async () => state.user }));
+vi.mock("../src/lib/session", () => ({ getSession: async () => state.session }));
 vi.mock("../src/lib/db/client", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../src/lib/db/client")>()),
   getDb: async () => state.db,
 }));
+vi.mock("../src/lib/operations", async (importOriginal) => {
+  const real = await importOriginal<typeof import("../src/lib/operations")>();
+  return {
+    ...real,
+    // With `recordFails`, what a database that is down does.
+    recordOperation: async (...args: Parameters<typeof real.recordOperation>) => {
+      if (state.recordFails) throw new Error("the database is down");
+      return real.recordOperation(...args);
+    },
+  };
+});
 vi.mock("../src/lib/agent-address", async (importOriginal) => {
   const real = await importOriginal<typeof import("../src/lib/agent-address")>();
   return {
@@ -41,6 +66,7 @@ const op = (sender: string, callData: string = safeCallData(contributeCalls({ fu
 const rpc = (method: string, params: unknown[] = []) => ({ jsonrpc: "2.0", id: 5, method, params });
 
 let POST: (request: Request) => Promise<Response>;
+let recordRoute: (request: Request) => Promise<Response>;
 let member: CurrentUser;
 let stranger: CurrentUser;
 const pimlico = vi.fn<(url: string, init: RequestInit) => Promise<Response>>();
@@ -62,6 +88,7 @@ beforeAll(async () => {
   member = { id: ana.id, name: ana.name, account: getAddress(ana.account) };
   stranger = { id: outsider.id, name: outsider.name, account: getAddress(outsider.account) };
   ({ POST } = await import("../src/app/api/bundler/route"));
+  ({ POST: recordRoute } = await import("../src/app/api/operations/route"));
 });
 const FAST = 5_000_000_000n; // Pimlico's "fast" maxFeePerGas in these tests: 5 gwei
 const priceAnswer = () => {
@@ -73,6 +100,7 @@ const asked = () => pimlico.mock.calls.map(([, init]) => (JSON.parse(init.body a
 
 beforeEach(() => {
   state.user = member;
+  state.session = fakeSession(); // no key change ready
   vi.stubGlobal("fetch", pimlico);
   pimlico.mockImplementation(async (_url, init) =>
     (JSON.parse(init.body as string) as { method: string }).method === "pimlico_getUserOperationGasPrice"
@@ -83,6 +111,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.clearAllMocks();
   state.agentKeyIsWrong = false;
+  state.recordFails = false;
 });
 
 function call(body: unknown, contentType = "application/json") {
@@ -274,6 +303,146 @@ describe("POST /api/bundler", () => {
       expect(response.status).toBe(403);
       expect(pimlico).not.toHaveBeenCalled();
       logged.mockRestore();
+    });
+  });
+
+  describe("a key change", () => {
+    /** Someone in no fund, with the old site's passkey active and a new one pending. */
+    let changer: CurrentUser;
+    let pending: Hex;
+    let pendingId: string;
+    const SENT: Hex = `0x${"5e".repeat(32)}`; // the hash Pimlico gives the operation it accepts
+
+    beforeAll(async () => {
+      const db = state.db as Db;
+      const user = await addUser(db, "Changer");
+      changer = { id: user.id, name: user.name, account: getAddress(user.account) };
+      const old = createFakePasskey({ rpId: LEGACY_RP_ID });
+      const fresh = createFakePasskey({ rpId: "tesoreria.finance" });
+      const userHandle = toHex(crypto.getRandomValues(new Uint8Array(16)));
+      await db.insert(credentials).values([
+        { id: old.credential.id, userId: user.id, publicKey: old.credential.publicKey, userHandle, rpId: LEGACY_RP_ID },
+        { id: fresh.credential.id, userId: user.id, publicKey: fresh.credential.publicKey, userHandle, rpId: "tesoreria.finance", state: "pending" },
+      ]);
+      pending = fresh.credential.publicKey;
+      pendingId = fresh.credential.id;
+    });
+
+    /** The changer's session, which made or proved the passkey `keyChange` names (the pending one, by default), or none. */
+    function sessionFor(keyChange: string | null = pendingId): Session {
+      const session = fakeSession();
+      session.userId = changer.id;
+      session.keyChange = keyChange ?? undefined;
+      return session;
+    }
+    const send = (method: string, callData: Hex, change: Record<string, unknown> = {}) => {
+      const userOp = {
+        ...op(changer.account, callData),
+        maxFeePerGas: numberToHex(2n * FAST),
+        maxPriorityFeePerGas: numberToHex(1_000_000_000n),
+        callGasLimit: numberToHex(1_000_000n),
+        verificationGasLimit: numberToHex(900_000n),
+        preVerificationGas: numberToHex(100_000n),
+        ...change,
+      };
+      return call(rpc(method, method.startsWith("pm_") ? [userOp, entryPoint07Address, CELO, {}] : [userOp, entryPoint07Address]));
+    };
+    const SPONSORED = ["pm_getPaymasterStubData", "eth_estimateUserOperationGas", "pm_getPaymasterData", "eth_sendUserOperation"];
+    /** The key change operations the database keeps under this hash. */
+    const recorded = (userOpHash: Hex) => (state.db as Db).select().from(operations).where(eq(operations.userOpHash, userOpHash));
+
+    it("sponsors the key change to this session's pending key, for someone in no fund", async () => {
+      state.user = changer;
+      state.session = sessionFor();
+      for (const method of SPONSORED) expect((await send(method, keyChangeCallData(pending))).status, method).toBe(200);
+      expect(asked()).toEqual([...SPONSORED.slice(0, 2), "pimlico_getUserOperationGasPrice", ...SPONSORED.slice(2)]);
+      // Held to the 2M ceiling of anything that isn't a createFund.
+      expect((await send("pm_getPaymasterData", keyChangeCallData(pending), { callGasLimit: numberToHex(1_000_001n) })).status).toBe(400);
+    });
+
+    it("refuses a key change to any other key", async () => {
+      state.user = changer;
+      state.session = sessionFor();
+      for (const key of [createFakePasskey().credential.publicKey, createFakePasskey({ rpId: LEGACY_RP_ID }).credential.publicKey]) {
+        for (const method of SPONSORED) {
+          const response = await send(method, keyChangeCallData(key));
+          expect(response.status, method).toBe(403);
+          expect(await response.json()).toMatchObject({ error: { message: "Only a key change to the passkey this session made or proved is sponsored" } });
+        }
+      }
+      // Nor a member of a live fund to theirs: what their funds let them do has nothing to do with it.
+      state.user = member;
+      expect((await call(rpc("eth_sendUserOperation", [op(member.account, keyChangeCallData(pending)), entryPoint07Address]))).status).toBe(403);
+      expect(pimlico).not.toHaveBeenCalled();
+    });
+
+    it("refuses a key change when this session hasn't made or proved the pending passkey", async () => {
+      state.user = changer;
+      for (const session of [sessionFor(null), sessionFor("another-passkey")]) {
+        state.session = session;
+        for (const method of SPONSORED) expect((await send(method, keyChangeCallData(pending))).status, `${method}: ${session.keyChange}`).toBe(403);
+        expect((await call(rpc("eth_getUserOperationReceipt", [SENT]))).status).toBe(403); // and, in no fund, nothing to read
+      }
+      expect(pimlico).not.toHaveBeenCalled();
+    });
+
+    it("lets someone with a key change on its way read receipts", async () => {
+      state.user = changer;
+      state.session = sessionFor();
+      for (const method of ["eth_getUserOperationReceipt", "eth_getUserOperationByHash"]) expect((await call(rpc(method, [SENT]))).status, method).toBe(200);
+      expect((await call(rpc("eth_chainId"))).status).toBe(200);
+      expect(asked()).toEqual(["eth_getUserOperationReceipt", "eth_getUserOperationByHash", "eth_chainId"]);
+    });
+
+    it("records the key change as soon as the bundler accepts it, and the page's own record of it changes nothing", async () => {
+      state.user = changer;
+      state.session = sessionFor();
+      pimlico.mockImplementation(async () => Response.json({ jsonrpc: "2.0", id: 5, result: SENT }));
+      expect(await (await send("eth_sendUserOperation", keyChangeCallData(pending))).json()).toEqual({ jsonrpc: "2.0", id: 5, result: SENT });
+      const row = { userOpHash: SENT, userId: changer.id, kind: "key-change", fund: null, success: null, transactionHash: null };
+      expect(await recorded(SENT)).toEqual([expect.objectContaining(row)]);
+
+      // The page records the hash viem gave it, as it does every operation: the same row, kept once.
+      const posted = await recordRoute(
+        new Request("http://localhost:3000/api/operations", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ userOpHash: SENT, kind: "key-change" }),
+        }),
+      );
+      expect(posted.status).toBe(200);
+      expect(await recorded(SENT)).toEqual([expect.objectContaining(row)]);
+    });
+
+    it("records nothing the bundler didn't accept, and no other operation", async () => {
+      state.user = changer;
+      state.session = sessionFor();
+      const refused: Hex = `0x${"7a".repeat(32)}`;
+      pimlico.mockImplementation(async () => Response.json({ jsonrpc: "2.0", id: 5, error: { code: -32500, message: `AA23 reverted ${refused}` } }));
+      expect((await send("eth_sendUserOperation", keyChangeCallData(pending))).status).toBe(200);
+      for (const method of ["pm_getPaymasterStubData", "eth_estimateUserOperationGas"]) {
+        pimlico.mockImplementation(async () => Response.json({ jsonrpc: "2.0", id: 5, result: refused }));
+        expect((await send(method, keyChangeCallData(pending))).status, method).toBe(200);
+      }
+      // A member's contribution is the page's to record, as always.
+      state.user = member;
+      expect((await call(rpc("eth_sendUserOperation", [op(member.account), entryPoint07Address]))).status).toBe(200);
+      expect(await recorded(refused)).toEqual([]);
+    });
+
+    it("still answers with the bundler's answer when the key change can't be recorded: it's out", async () => {
+      state.user = changer;
+      state.session = sessionFor();
+      state.recordFails = true;
+      const lost: Hex = `0x${"0d".repeat(32)}`;
+      pimlico.mockImplementation(async () => Response.json({ jsonrpc: "2.0", id: 5, result: lost }));
+      const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+      const response = await send("eth_sendUserOperation", keyChangeCallData(pending));
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ jsonrpc: "2.0", id: 5, result: lost });
+      expect(logged).toHaveBeenCalledWith(expect.stringContaining("the database is down"));
+      logged.mockRestore();
+      expect(await recorded(lost)).toEqual([]);
     });
   });
 
