@@ -1,9 +1,13 @@
 import {
   type Call,
+  type SendTaggedCallsResult,
   createMemberAccount,
   createPimlicoBundlerClient,
+  isSafeKey,
   isUserOpAttributed,
   pimlicoTransport,
+  readSafeKey,
+  sendKeyChange,
   sendTaggedCalls,
 } from "@tesoreria/wallet";
 import {
@@ -29,8 +33,12 @@ const TOKENS = {
   wars: { address: WARS, decimals: 18 },
 } as const;
 const STORAGE_KEY = "tesoreria-probe-credential";
+// "Change key": the new passkey until the Safe holds its key, and the one it replaced, kept rather than dropped.
+const PENDING_KEY = "tesoreria-probe-pending-credential";
+const PREVIOUS_KEY = "tesoreria-probe-previous-credential";
 
-type StoredCredential = { id: string; publicKey: Hex };
+/** `address` is set once the key changed: the new key no longer gives the Safe's address. */
+type StoredCredential = { id: string; publicKey: Hex; address?: Address };
 
 const client = createPublicClient({ chain: celo, transport: http("https://forno.celo.org") });
 let account: SmartAccount | undefined;
@@ -38,7 +46,7 @@ let lastOperation: { hash: Hash; sender: Address } | undefined;
 
 const element = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 const setText = (id: string, text: string) => (element(id).textContent = text);
-const accountButtons = ["refresh", "send-test", "return"];
+const accountButtons = ["refresh", "send-test", "return", "change-key"];
 const lockedButtons = new Set<string>(); // stay disabled after their action finishes
 
 function showError(error: unknown) {
@@ -65,8 +73,8 @@ function onClick(id: string, action: () => Promise<void>) {
   });
 }
 
-function loadCredential(): StoredCredential | undefined {
-  const saved = localStorage.getItem(STORAGE_KEY);
+function loadCredential(key = STORAGE_KEY): StoredCredential | undefined {
+  const saved = localStorage.getItem(key);
   return saved ? (JSON.parse(saved) as StoredCredential) : undefined;
 }
 
@@ -75,7 +83,13 @@ async function connect(credential: StoredCredential) {
   lockButton("create");
   setText("credential", credential.id);
   setText("public-key", credential.publicKey);
-  account = await createMemberAccount({ client, owner: toWebAuthnAccount({ credential }) });
+  setText("pending", loadCredential(PENDING_KEY)?.id ?? "none");
+  const { id, publicKey, address } = credential;
+  account = await createMemberAccount({
+    client,
+    owner: toWebAuthnAccount({ credential: { id, publicKey } }),
+    ...(address === undefined ? {} : { address }),
+  });
   setText("address", account.address);
   for (const id of accountButtons) element<HTMLButtonElement>(id).disabled = false;
   await refresh();
@@ -113,17 +127,22 @@ async function checkAttribution() {
   setText("attributed", attributed === null ? "unknown (retry)" : attributed ? "yes" : "NO");
 }
 
-async function send(calls: Call[]) {
+function bundlerClient() {
   const apiKey = import.meta.env.VITE_PIMLICO_API_KEY;
   const sponsorshipPolicyId = import.meta.env.VITE_PIMLICO_SPONSORSHIP_POLICY_ID;
   if (!apiKey || !sponsorshipPolicyId)
     throw new Error("Set VITE_PIMLICO_API_KEY and VITE_PIMLICO_SPONSORSHIP_POLICY_ID in .env.local.");
+  return createPimlicoBundlerClient({ client, transport: pimlicoTransport(apiKey), sponsorshipPolicyId });
+}
 
+async function send(calls: Call[]) {
   const sender = requireAccount();
+  const bundler = bundlerClient();
   for (const id of ["user-op-hash", "transaction", "success", "attributed"]) setText(id, "…");
-  const bundlerClient = createPimlicoBundlerClient({ client, transport: pimlicoTransport(apiKey), sponsorshipPolicyId });
-  const result = await sendTaggedCalls({ bundlerClient, account: sender, calls });
+  await showResult(await sendTaggedCalls({ bundlerClient: bundler, account: sender, calls }), sender);
+}
 
+async function showResult(result: SendTaggedCallsResult, sender: SmartAccount) {
   setText("user-op-hash", result.userOpHash);
   const link = element<HTMLAnchorElement>("transaction");
   link.href = `https://celoscan.io/tx/${result.transactionHash}`;
@@ -168,6 +187,39 @@ onClick("return", async () => {
   if (amount <= 0n) throw new Error("Amount must be greater than zero.");
   await send([tokenTransfer(token.address, destination, amount)]);
 });
+
+// The new passkey is stored as pending before the swap goes out, so a page closed halfway can't lose it: the next
+// "Change key" reuses it, and makes it the current one as soon as the Safe holds its key.
+onClick("change-key", async () => {
+  const current = loadCredential();
+  if (!current) throw new Error("Create a passkey first.");
+  const sender = requireAccount();
+  const bundler = bundlerClient();
+  let pending = loadCredential(PENDING_KEY);
+  if (pending && isSafeKey(await readSafeKey(client, sender.address), pending.publicKey)) return promote(current, pending);
+  if (!pending) {
+    const name = `TesorerIA probe ${new Date().toISOString()}`; // a random user handle, as in "Create passkey"
+    const { id, publicKey } = await createWebAuthnCredential({
+      name,
+      user: { id: crypto.getRandomValues(new Uint8Array(16)), name },
+    });
+    pending = { id, publicKey, address: sender.address };
+    localStorage.setItem(PENDING_KEY, JSON.stringify(pending));
+    setText("pending", id);
+  }
+  for (const id of ["user-op-hash", "transaction", "success", "attributed"]) setText(id, "…");
+  await showResult(await sendKeyChange({ bundlerClient: bundler, account: sender, publicKey: pending.publicKey }), sender);
+  if (!isSafeKey(await readSafeKey(client, sender.address), pending.publicKey))
+    throw new Error("The Safe doesn't show the new key yet. Press Change key again to check: it reuses the pending passkey.");
+  await promote(current, pending);
+});
+
+async function promote(current: StoredCredential, pending: StoredCredential) {
+  localStorage.setItem(PREVIOUS_KEY, JSON.stringify({ ...current, address: pending.address }));
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(pending));
+  localStorage.removeItem(PENDING_KEY);
+  await connect(pending);
+}
 
 const saved = loadCredential();
 if (saved) connect(saved).catch(showError);
