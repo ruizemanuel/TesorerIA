@@ -27,9 +27,10 @@ const api = vi.hoisted(() => ({ post: vi.fn(async (_path: string, _body?: unknow
 vi.mock("../src/lib/client/api", () => api);
 
 import { OnItsWayError, UserFacingError, userMessage } from "../src/lib/client/errors";
-import { type Me, sendCalls, settleOperation } from "../src/lib/client/wallet";
+import { type Me, loadMe, sendCalls, settleOperation } from "../src/lib/client/wallet";
 import { es } from "../src/lib/i18n/es";
 import { LEGACY_RP_ID } from "../src/lib/passkey-sites";
+import { SITE_KEY, stubLocalStorage } from "./support/storage";
 
 const ACCOUNT = getAddress("0x2F8218c7cF6d822091EDe24Db9c46B0324c21A6F");
 // A member of the old site, who has not changed their key: the Safe holds this passkey, made for LEGACY_RP_ID.
@@ -84,6 +85,44 @@ beforeEach(() => {
 afterEach(() => {
   vi.clearAllMocks();
   vi.unstubAllGlobals();
+});
+
+describe("loadMe", () => {
+  it("remembers the site of the passkey the server says is active, so the next login asks for that one", async () => {
+    const items = stubLocalStorage();
+    api.get.mockResolvedValueOnce(me);
+    await expect(loadMe()).resolves.toBe(me);
+    expect(api.get).toHaveBeenCalledWith("/api/me");
+    expect(items.get(SITE_KEY)).toBe("legacy"); // an old-site passkey is the active one
+
+    // Once the key was changed, from this browser or from another device, the active passkey is the new site's.
+    const renewed: Me = { ...me, credential: { id: "new", publicKey: "0xabcd", rpId: "tesoreria.finance" } };
+    api.get.mockResolvedValueOnce(renewed);
+    await loadMe();
+    expect(items.get(SITE_KEY)).toBe("current");
+  });
+
+  it("replaces a site that was remembered wrongly, in either direction", async () => {
+    const items = stubLocalStorage({ [SITE_KEY]: "legacy" });
+    api.get.mockResolvedValueOnce({ ...me, credential: { ...me.credential, rpId: "tesoreria.finance" } });
+    await loadMe();
+    expect(items.get(SITE_KEY)).toBe("current");
+
+    api.get.mockResolvedValueOnce(me);
+    await loadMe();
+    expect(items.get(SITE_KEY)).toBe("legacy");
+  });
+
+  it("still answers when the browser won't keep anything, and when the server can't", async () => {
+    stubLocalStorage({}, true);
+    api.get.mockResolvedValueOnce(me);
+    await expect(loadMe()).resolves.toBe(me);
+
+    const items = stubLocalStorage({ [SITE_KEY]: "legacy" });
+    api.get.mockRejectedValueOnce(new UserFacingError("Entrá con tu passkey."));
+    await expect(loadMe()).rejects.toThrow("Entrá con tu passkey.");
+    expect(items.get(SITE_KEY)).toBe("legacy"); // nothing was learned
+  });
 });
 
 describe("sendCalls", () => {

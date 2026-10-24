@@ -3,6 +3,7 @@ import { type Hex, bytesToHex } from "viem";
 import { createWebAuthnCredential } from "viem/account-abstraction";
 import { LEGACY_RP_ID } from "../passkey-sites";
 import { post } from "./api";
+import { RefusedError } from "./errors";
 
 /**
  * The site a passkey was made for (spec, 9.5): the current one, the server's RP ID, or the old one every passkey
@@ -49,7 +50,11 @@ export async function createAccount({ name, email }: { name: string; email?: str
   await post("/api/auth/register", { name, email, ...(await createPasskey(name)) });
 }
 
-/** The site the person last logged in with, so the next login asks for the same passkeys. The current one if nothing is saved or the storage fails. */
+/**
+ * The site whose passkeys the next login asks for. It follows what the server says is the person's active passkey
+ * (`siteOf`, set by `loadMe` and by a key change), and the last login that worked. The current one if nothing is
+ * saved or the storage fails.
+ */
 export function lastPasskeySite(): PasskeySite {
   try {
     return localStorage.getItem(SITE_KEY) === "legacy" ? "legacy" : "current";
@@ -58,16 +63,37 @@ export function lastPasskeySite(): PasskeySite {
   }
 }
 
-/**
- * Logs in with a passkey of `site`: the phone lets the person pick among that site's. The old site's passkeys sign
- * with its RP ID from this page too (related origins). The site is remembered once the login works.
- */
-export async function logInWithPasskey(site: PasskeySite = lastPasskeySite()): Promise<void> {
-  const { challenge, rpId } = await freshChallenge();
-  await post("/api/auth/login", await signPasskeyChallenge({ challenge, rpId: site === "legacy" ? LEGACY_RP_ID : rpId }));
+/** Keeps `site` for the next login. Not remembering is only a convenience lost, so a storage that fails is let be. */
+export function rememberPasskeySite(site: PasskeySite): void {
   try {
     localStorage.setItem(SITE_KEY, site);
   } catch {
-    // Not remembering is only a convenience lost.
+    // a private window, or blocked site data
   }
+}
+
+/** The site a passkey made for `rpId` belongs to. */
+export function siteOf(rpId: string): PasskeySite {
+  return rpId === LEGACY_RP_ID ? "legacy" : "current";
+}
+
+/**
+ * Logs in with a passkey of `site`: the phone lets the person pick among that site's. The old site's passkeys sign
+ * with its RP ID from this page too (related origins). The site is remembered once the login works.
+ *
+ * If the server doesn't know the old site's passkey the person signed with (401), it is a retired one: the key was
+ * changed, maybe on another device that this browser never heard of. The memory goes back to the current site, so
+ * the next tap asks for the new passkey, and the error is shown as it is: no second prompt comes by itself. A prompt
+ * the person dismissed, or any other refusal, says nothing of which site is the right one.
+ */
+export async function logInWithPasskey(site: PasskeySite = lastPasskeySite()): Promise<void> {
+  const { challenge, rpId } = await freshChallenge();
+  const assertion = await signPasskeyChallenge({ challenge, rpId: site === "legacy" ? LEGACY_RP_ID : rpId });
+  try {
+    await post("/api/auth/login", assertion);
+  } catch (error) {
+    if (site === "legacy" && error instanceof RefusedError && error.status === 401) rememberPasskeySite("current");
+    throw error;
+  }
+  rememberPasskeySite(site);
 }

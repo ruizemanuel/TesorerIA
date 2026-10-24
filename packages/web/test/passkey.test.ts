@@ -17,24 +17,13 @@ vi.mock("viem/account-abstraction", async (importOriginal) => ({
 const api = vi.hoisted(() => ({ post: vi.fn(async (_path: string, _body?: unknown): Promise<unknown> => ({ ok: true })) }));
 vi.mock("../src/lib/client/api", () => api);
 
+import { RefusedError } from "../src/lib/client/errors";
 import { createAccount, lastPasskeySite, logInWithPasskey } from "../src/lib/client/passkey";
+import { SITE_KEY, stubLocalStorage as storage } from "./support/storage";
 
 /** The attestation a phone answers with: opaque bytes here, the server reads them. */
 const ATTESTATION = new Uint8Array([0xa3, 0x63, 0x66, 0x6d, 0x74]);
 const CLIENT_DATA = '{"type":"webauthn.create"}';
-
-/** `localStorage` as a map, or a storage that throws (a private window, blocked site data). */
-function storage(initial: Record<string, string> = {}, broken = false) {
-  const items = new Map(Object.entries(initial));
-  const fail = () => {
-    if (broken) throw new DOMException("blocked", "SecurityError");
-  };
-  vi.stubGlobal("localStorage", {
-    getItem: (key: string) => (fail(), items.get(key) ?? null),
-    setItem: (key: string, value: string) => (fail(), void items.set(key, value)),
-  });
-  return items;
-}
 
 beforeEach(() => {
   api.post.mockImplementation(async (path: string) => (path === "/api/auth/challenge" ? { challenge: CHALLENGE, rpId: RP_ID } : { ok: true }));
@@ -78,18 +67,18 @@ describe("logInWithPasskey", () => {
     await logInWithPasskey();
     expect(wallet.signPasskeyChallenge).toHaveBeenCalledWith({ challenge: CHALLENGE, rpId: RP_ID });
     expect(api.post).toHaveBeenLastCalledWith("/api/auth/login", { credentialId: "cred", signed: true });
-    expect(items.get("tesoreria.passkey-site")).toBe("current");
+    expect(items.get(SITE_KEY)).toBe("current");
   });
 
   it("signs for the old site when asked to, and remembers that instead", async () => {
     const items = storage();
     await logInWithPasskey("legacy");
     expect(wallet.signPasskeyChallenge).toHaveBeenCalledWith({ challenge: CHALLENGE, rpId: LEGACY });
-    expect(items.get("tesoreria.passkey-site")).toBe("legacy");
+    expect(items.get(SITE_KEY)).toBe("legacy");
   });
 
   it("goes back to the site it last logged in with", async () => {
-    storage({ "tesoreria.passkey-site": "legacy" });
+    storage({ [SITE_KEY]: "legacy" });
     await logInWithPasskey();
     expect(wallet.signPasskeyChallenge).toHaveBeenCalledWith({ challenge: CHALLENGE, rpId: LEGACY });
   });
@@ -104,6 +93,58 @@ describe("logInWithPasskey", () => {
     expect(items.size).toBe(0);
   });
 
+  describe("when the server refuses the old site's passkey as unknown", () => {
+    // After a key change the old passkey is retired: the server no longer knows it for login, and the memory of the
+    // old site would send every next tap to it.
+    const refuse = (status: number) =>
+      api.post.mockImplementation(async (path: string) => {
+        if (path === "/api/auth/login") throw new RefusedError("No pudimos reconocer tu passkey.", status);
+        return { challenge: CHALLENGE, rpId: RP_ID };
+      });
+
+    it("goes back to the current site, and surfaces the error without trying again", async () => {
+      const items = storage({ [SITE_KEY]: "legacy" });
+      refuse(401);
+
+      await expect(logInWithPasskey()).rejects.toThrow("No pudimos reconocer tu passkey.");
+
+      expect(items.get(SITE_KEY)).toBe("current");
+      expect(lastPasskeySite()).toBe("current"); // the next tap asks for the new passkey
+      expect(wallet.signPasskeyChallenge).toHaveBeenCalledTimes(1); // no second prompt
+      expect(api.post.mock.calls.filter(([path]) => path === "/api/auth/login")).toHaveLength(1);
+    });
+
+    it("does the same for the old site asked for explicitly, the second door's", async () => {
+      const items = storage();
+      refuse(401);
+      await expect(logInWithPasskey("legacy")).rejects.toBeInstanceOf(RefusedError);
+      expect(items.get(SITE_KEY)).toBe("current");
+    });
+
+    it("keeps the old site when the person cancelled the prompt", async () => {
+      const items = storage({ [SITE_KEY]: "legacy" });
+      wallet.signPasskeyChallenge.mockRejectedValueOnce(new DOMException("not allowed", "NotAllowedError"));
+      await expect(logInWithPasskey()).rejects.toThrow("not allowed");
+      expect(items.get(SITE_KEY)).toBe("legacy");
+      expect(api.post.mock.calls.some(([path]) => path === "/api/auth/login")).toBe(false);
+    });
+
+    it("keeps the old site for any other refusal: the challenge ran late, the server failed", async () => {
+      for (const status of [400, 500]) {
+        const items = storage({ [SITE_KEY]: "legacy" });
+        refuse(status);
+        await expect(logInWithPasskey()).rejects.toBeInstanceOf(RefusedError);
+        expect(items.get(SITE_KEY)).toBe("legacy");
+      }
+    });
+
+    it("still surfaces the refusal when the browser won't keep anything", async () => {
+      storage({}, true);
+      refuse(401);
+      await expect(logInWithPasskey("legacy")).rejects.toBeInstanceOf(RefusedError);
+    });
+  });
+
   it("logs in all the same when the browser won't keep anything", async () => {
     storage({}, true);
     await expect(logInWithPasskey("legacy")).resolves.toBeUndefined();
@@ -114,16 +155,16 @@ describe("logInWithPasskey", () => {
 describe("lastPasskeySite", () => {
   it("is the current site unless the old one was the last that worked", () => {
     expect(lastPasskeySite()).toBe("current"); // nothing saved
-    storage({ "tesoreria.passkey-site": "legacy" });
+    storage({ [SITE_KEY]: "legacy" });
     expect(lastPasskeySite()).toBe("legacy");
-    storage({ "tesoreria.passkey-site": "current" });
+    storage({ [SITE_KEY]: "current" });
     expect(lastPasskeySite()).toBe("current");
-    storage({ "tesoreria.passkey-site": "somewhere-else" });
+    storage({ [SITE_KEY]: "somewhere-else" });
     expect(lastPasskeySite()).toBe("current");
   });
 
   it("is the current site when the storage fails, or there is none", () => {
-    storage({ "tesoreria.passkey-site": "legacy" }, true);
+    storage({ [SITE_KEY]: "legacy" }, true);
     expect(lastPasskeySite()).toBe("current");
     vi.unstubAllGlobals(); // no localStorage at all: the reference itself throws
     expect(lastPasskeySite()).toBe("current");

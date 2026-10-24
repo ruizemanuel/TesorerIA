@@ -2,7 +2,7 @@ import { sendKeyChange, signPasskeyChallenge } from "@tesoreria/wallet";
 import type { Hash, Hex } from "viem";
 import { post } from "./api";
 import { RefusedError, UserFacingError, wasCancelled } from "./errors";
-import { createPasskey, freshChallenge } from "./passkey";
+import { createPasskey, freshChallenge, rememberPasskeySite } from "./passkey";
 import { type Me, celoBrowserClient, memberAccount, memberBundlerClient, recordDone } from "./wallet";
 
 export type KeyChangeStep = "create" | "prove" | "sign" | "confirm";
@@ -114,12 +114,17 @@ async function swap(me: Me, publicKey: Hex): Promise<void> {
   if (!result.success) throw new UserFacingError({ key: "notCompleted" });
 }
 
-/** Asks the server to confirm the swap from the chain. Whatever stops it from answering, the swap is still out: "waiting". */
+/**
+ * Asks the server to confirm the swap from the chain. Whatever stops it from answering, the swap is still out: "waiting".
+ * Once changed, the old passkey is retired and the next login must ask for the new one: the site is remembered as current.
+ */
 async function confirm(): Promise<"changed" | "waiting"> {
   try {
     const { result } = await post<{ result: "changed" | "waiting" | "none" }>("/api/auth/key/confirm");
     // "none": nothing is pending any more because another tab, or /api/me, already made the new passkey the active one.
-    return result === "waiting" ? "waiting" : "changed";
+    if (result === "waiting") return "waiting";
+    rememberPasskeySite("current");
+    return "changed";
   } catch {
     return "waiting";
   }

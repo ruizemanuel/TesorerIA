@@ -4,6 +4,7 @@ import { UserOperationReceiptNotFoundError, createBundlerClient, toWebAuthnAccou
 import { celo } from "viem/chains";
 import { get, post } from "./api";
 import { OnItsWayError, UserFacingError } from "./errors";
+import { rememberPasskeySite, siteOf } from "./passkey";
 
 /** Where the member is in swapping their old-site passkey for a tesoreria.finance one (`keyChangeOf`, spec 9.5). */
 export type KeyChange = {
@@ -28,8 +29,15 @@ export function celoBrowserClient() {
   return createPublicClient({ chain: celo, transport: http(process.env.NEXT_PUBLIC_CELO_RPC_URL ?? "https://forno.celo.org") });
 }
 
-export function loadMe(): Promise<Me> {
-  return get<Me>("/api/me");
+/**
+ * The member, as the server has them. Their active passkey says which site the next login asks for, so it is
+ * remembered here, in the one place every page loads it from: after a key change made on another device, the old
+ * site's passkey is retired and the main login button must stop asking for it.
+ */
+export async function loadMe(): Promise<Me> {
+  const me = await get<Me>("/api/me");
+  rememberPasskeySite(siteOf(me.credential.rpId));
+  return me;
 }
 
 /** Above the 30 s /api/bundler waits for Pimlico: if the browser gave up first, an operation Pimlico accepted would look unsent and invite a second one. */
