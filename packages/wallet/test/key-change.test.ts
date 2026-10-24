@@ -35,6 +35,13 @@ describe("safeKeyOf", () => {
     expect(() => safeKeyOf(PUBLIC_KEY.slice(0, -2) as Hex)).toThrow(/64 bytes/);
   });
 
+  it("rejects an odd number of hex digits, which viem would still count as 64 bytes", () => {
+    const unpadded = PUBLIC_KEY.slice(0, -1) as Hex; // 127 digits: ceil(127 / 2) = 64 "bytes", but y would shift by a nibble
+    expect(() => safeKeyOf(unpadded)).toThrow(/64 bytes/);
+    expect(() => keyChangeCallData(unpadded)).toThrow(/64 bytes/);
+    expect(() => safeKeyOf(`${PUBLIC_KEY}0` as Hex)).toThrow(/64 bytes/); // 129 digits
+  });
+
   it("rejects something that is not hex", () => {
     expect(() => safeKeyOf("not a key" as Hex)).toThrow(/64 bytes/);
   });

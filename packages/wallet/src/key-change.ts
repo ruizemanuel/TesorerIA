@@ -1,4 +1,4 @@
-import { type Address, type Hash, type Hex, concat, encodeFunctionData, hexToBigInt, isHex, parseAbi, size, slice } from "viem";
+import { type Address, type Hash, type Hex, concat, encodeFunctionData, hexToBigInt, parseAbi, slice } from "viem";
 import type { BundlerClient, SmartAccount } from "viem/account-abstraction";
 import { readContract } from "viem/actions";
 import { type CeloClient, SAFE_P256_VERIFIERS } from "./account";
@@ -23,13 +23,17 @@ const safe4337Abi = parseAbi([
   "function executeUserOpWithErrorString(address to, uint256 value, bytes data, uint8 operation)",
 ]);
 
+/** `0x` and 128 hex digits: x ‖ y, 32 bytes each. */
+const PUBLIC_KEY_SHAPE = /^0x[0-9a-fA-F]{128}$/;
+
 /**
  * The shared signer's key for a passkey's public key: `0x` + x ‖ y (64 bytes, as `credentials.public_key` keeps it),
  * with the verifiers every member's Safe is set up with. Throws if the key is not 64 bytes, so a key with the
  * `04` prefix (65) never becomes a Safe's owner.
  */
 export function safeKeyOf(publicKey: Hex): SafeKey {
-  if (!isHex(publicKey, { strict: true }) || size(publicKey) !== 64) {
+  // The exact shape, not `size()`: viem rounds an odd number of digits up, so 127 would pass for 64 bytes and shift y.
+  if (!PUBLIC_KEY_SHAPE.test(publicKey)) {
     throw new Error("A passkey's public key is 64 bytes: x and y, 32 bytes each, with no 04 prefix");
   }
   return {
