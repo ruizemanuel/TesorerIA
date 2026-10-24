@@ -4,7 +4,6 @@ import { UserOperationReceiptNotFoundError, createBundlerClient, toWebAuthnAccou
 import { celo } from "viem/chains";
 import { get, post } from "./api";
 import { OnItsWayError, UserFacingError } from "./errors";
-import { rememberPasskeySite, siteOf } from "./passkey";
 
 /** Where the member is in swapping their old-site passkey for a tesoreria.finance one (`keyChangeOf`, spec 9.5). */
 export type KeyChange = {
@@ -32,16 +31,13 @@ export function celoBrowserClient() {
 }
 
 /**
- * The member, as the server has them. Their active passkey says which site the next login asks for, so it is
- * remembered here, in the one place every page loads it from: after a key change made on another device, the old
- * site's passkey is retired and the main login button must stop asking for it.
+ * The member, as the server has them.
  *
  * Without an active passkey nothing can sign, so nothing is tried: the person is told to try again in a while.
  */
 export async function loadMe(): Promise<Me> {
   const me = await get<MeAnswer>("/api/me");
   if (!me.credential) throw new UserFacingError({ key: "generic" });
-  rememberPasskeySite(siteOf(me.credential.rpId));
   return me as Me;
 }
 

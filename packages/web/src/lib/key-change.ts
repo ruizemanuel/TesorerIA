@@ -105,16 +105,6 @@ export async function keyChangeOf(
   };
 }
 
-/** Whether anyone's active passkey is still of the old site: while so, the login keeps its second door for them (spec, 9.5). */
-export async function legacyPasskeysRemain(db: Db): Promise<boolean> {
-  const rows = await db
-    .select({ id: credentials.id })
-    .from(credentials)
-    .where(and(eq(credentials.rpId, LEGACY_RP_ID), eq(credentials.state, "active")))
-    .limit(1);
-  return rows.length > 0;
-}
-
 /**
  * Keeps the new passkey a person just made as their pending one, and marks this session ready (spec, 9.5). It takes
  * one whose key change is due (`isDue`, with `rpId` and `pilot`), and checks the new one as a registration does

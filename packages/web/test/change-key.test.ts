@@ -25,7 +25,7 @@ const created = vi.hoisted(() => ({
   createPasskey: vi.fn(async (_name: string) => ({ credentialId: "fresh", attestationObject: "0xa1", userHandle: "0xb2", clientDataJSON: "{}" })),
   freshChallenge: vi.fn(async () => ({ challenge: "0xc0ffee" as Hex, rpId: "tesoreria.finance" })),
 }));
-// Only the passkeys it makes and the challenge are replaced: the memory of the site is the real one, over a stubbed storage.
+// Only the passkeys it makes and the challenge are replaced.
 vi.mock("../src/lib/client/passkey", async (importOriginal) => ({ ...(await importOriginal<typeof import("../src/lib/client/passkey")>()), ...created }));
 
 const api = vi.hoisted(() => ({ post: vi.fn(async (_path: string, _body?: unknown): Promise<unknown> => ({ ok: true })), get: vi.fn() }));
@@ -36,7 +36,6 @@ import { RefusedError, UserFacingError, userMessage } from "../src/lib/client/er
 import type { Me } from "../src/lib/client/wallet";
 import { es } from "../src/lib/i18n/es";
 import { LEGACY_RP_ID } from "../src/lib/passkey-sites";
-import { SITE_KEY, stubLocalStorage } from "./support/storage";
 
 const ACCOUNT = getAddress("0x2F8218c7cF6d822091EDe24Db9c46B0324c21A6F");
 const OLD = { id: "old", publicKey: "0x1234", rpId: LEGACY_RP_ID } as const;
@@ -65,7 +64,6 @@ function run(me: Me) {
 
 beforeEach(() => {
   vi.stubGlobal("window", { location: { origin: "http://localhost:3000" } });
-  stubLocalStorage();
   answers();
   api.post.mockImplementation(async (path: string) => {
     const answer = routes[path] ?? { ok: true };
@@ -80,45 +78,6 @@ beforeEach(() => {
 afterEach(() => {
   vi.clearAllMocks();
   vi.unstubAllGlobals();
-});
-
-describe("the site remembered for the next login", () => {
-  // The old passkey is retired once the change is confirmed: from then on the main login button must ask for the new one.
-  const READY = () => member({ pending: PENDING, ready: true });
-
-  it("becomes the current one once the change is confirmed", async () => {
-    const items = stubLocalStorage({ [SITE_KEY]: "legacy" });
-    await expect(changeKey(READY())).resolves.toBe("changed");
-    expect(items.get(SITE_KEY)).toBe("current");
-  });
-
-  it("does too when another tab or /api/me had confirmed it already", async () => {
-    const items = stubLocalStorage({ [SITE_KEY]: "legacy" });
-    answers({ "/api/auth/key/confirm": { result: "none" } });
-    await expect(changeKey(READY())).resolves.toBe("changed");
-    expect(items.get(SITE_KEY)).toBe("current");
-  });
-
-  it("stays the old one while the chain doesn't show the new key yet: the old passkey is still the active one", async () => {
-    const items = stubLocalStorage({ [SITE_KEY]: "legacy" });
-    answers({ "/api/auth/key/confirm": { result: "waiting" } });
-    await expect(changeKey(READY())).resolves.toBe("waiting");
-    answers({ "/api/auth/key/confirm": new RefusedError({ key: "failed" }, 500) });
-    await expect(changeKey(READY())).resolves.toBe("waiting");
-    expect(items.get(SITE_KEY)).toBe("legacy");
-  });
-
-  it("stays the old one when the change doesn't go out", async () => {
-    const items = stubLocalStorage({ [SITE_KEY]: "legacy" });
-    wallet.sendKeyChange.mockRejectedValue(Object.assign(new Error("not allowed"), { name: "NotAllowedError" }));
-    await expect(changeKey(READY())).rejects.toThrow("not allowed");
-    expect(items.get(SITE_KEY)).toBe("legacy");
-  });
-
-  it("does not stop the change when the browser won't keep anything", async () => {
-    stubLocalStorage({}, true);
-    await expect(changeKey(READY())).resolves.toBe("changed");
-  });
 });
 
 describe("changeKey", () => {
@@ -196,7 +155,6 @@ describe("changeKey", () => {
     const CHANGED = () => ({ ...member({ due: false }), credential: { ...OLD, rpId: "tesoreria.finance" } });
 
     it("makes no passkey and says changed once the active passkey is the new site's", async () => {
-      const items = stubLocalStorage({ [SITE_KEY]: "legacy" });
       const { steps, result } = run(CHANGED());
 
       await expect(result).resolves.toBe("changed");
@@ -204,11 +162,9 @@ describe("changeKey", () => {
       expect(created.createPasskey).not.toHaveBeenCalled();
       expect(wallet.sendKeyChange).not.toHaveBeenCalled();
       expect(posted()).toEqual([]);
-      expect(items.get(SITE_KEY)).toBe("current"); // the next login asks for the new passkey
     });
 
     it("makes no passkey and refuses while the active one is still the old site's: the change isn't theirs yet", async () => {
-      const items = stubLocalStorage({ [SITE_KEY]: "current" });
       const { steps, result } = run(member({ due: false }));
 
       const error = await result.catch((caught) => caught);
@@ -217,7 +173,6 @@ describe("changeKey", () => {
       expect(steps).toEqual([]);
       expect(created.createPasskey).not.toHaveBeenCalled();
       expect(posted()).toEqual([]);
-      expect(items.get(SITE_KEY)).toBe("legacy"); // the old passkey is still the one that logs in
     });
   });
 
@@ -332,10 +287,8 @@ describe("confirmOnLoad, for a page that finds a passkey pending", () => {
   });
 
   it("asks the server once to confirm from the chain, and says done once it changed", async () => {
-    const items = stubLocalStorage({ [SITE_KEY]: "legacy" });
     await expect(confirmOnLoad(true)).resolves.toBe(true);
     expect(posted()).toEqual(["/api/auth/key/confirm"]);
-    expect(items.get(SITE_KEY)).toBe("current");
   });
 
   it("says done when another tab or /api/me confirmed it first", async () => {

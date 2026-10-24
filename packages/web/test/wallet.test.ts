@@ -30,7 +30,7 @@ import { OnItsWayError, UserFacingError, userMessage } from "../src/lib/client/e
 import { type Me, loadMe, sendCalls, settleOperation } from "../src/lib/client/wallet";
 import { es } from "../src/lib/i18n/es";
 import { LEGACY_RP_ID } from "../src/lib/passkey-sites";
-import { SITE_KEY, stubLocalStorage } from "./support/storage";
+import { stubLocalStorage } from "./support/storage";
 
 const ACCOUNT = getAddress("0x2F8218c7cF6d822091EDe24Db9c46B0324c21A6F");
 // A member of the old site, who has not changed their key: the Safe holds this passkey, made for LEGACY_RP_ID.
@@ -88,52 +88,27 @@ afterEach(() => {
 });
 
 describe("loadMe", () => {
-  it("remembers the site of the passkey the server says is active, so the next login asks for that one", async () => {
+  it("answers what /api/me says, and keeps nothing in the browser's storage", async () => {
     const items = stubLocalStorage();
     api.get.mockResolvedValueOnce(me);
     await expect(loadMe()).resolves.toBe(me);
     expect(api.get).toHaveBeenCalledWith("/api/me");
-    expect(items.get(SITE_KEY)).toBe("legacy"); // an old-site passkey is the active one
-
-    // Once the key was changed, from this browser or from another device, the active passkey is the new site's.
-    const renewed: Me = { ...me, credential: { id: "new", publicKey: "0xabcd", rpId: "tesoreria.finance" } };
-    api.get.mockResolvedValueOnce(renewed);
-    await loadMe();
-    expect(items.get(SITE_KEY)).toBe("current");
+    expect(items.size).toBe(0);
   });
 
-  it("replaces a site that was remembered wrongly, in either direction", async () => {
-    const items = stubLocalStorage({ [SITE_KEY]: "legacy" });
-    api.get.mockResolvedValueOnce({ ...me, credential: { ...me.credential, rpId: "tesoreria.finance" } });
-    await loadMe();
-    expect(items.get(SITE_KEY)).toBe("current");
-
-    api.get.mockResolvedValueOnce(me);
-    await loadMe();
-    expect(items.get(SITE_KEY)).toBe("legacy");
-  });
-
-  it("still answers when the browser won't keep anything, and when the server can't", async () => {
-    stubLocalStorage({}, true);
-    api.get.mockResolvedValueOnce(me);
-    await expect(loadMe()).resolves.toBe(me);
-
-    const items = stubLocalStorage({ [SITE_KEY]: "legacy" });
+  it("lets the server's failure through", async () => {
     api.get.mockRejectedValueOnce(new UserFacingError("Entrá con tu passkey."));
     await expect(loadMe()).rejects.toThrow("Entrá con tu passkey.");
-    expect(items.get(SITE_KEY)).toBe("legacy"); // nothing was learned
   });
 
   it("refuses, with words for the person and no TypeError, an answer without an active passkey", async () => {
     // Nothing can sign without one, so nothing is tried: the next load may find it again, once the server confirms the change.
-    const items = stubLocalStorage({ [SITE_KEY]: "legacy" });
     for (const credential of [undefined, null]) {
       api.get.mockResolvedValueOnce({ ...me, credential });
       const error = await loadMe().catch((caught) => caught);
       expect(error).toBeInstanceOf(UserFacingError);
       expect(userMessage(error, es)).toBe("No se pudo completar. Probá de nuevo en un rato.");
     }
-    expect(items.get(SITE_KEY)).toBe("legacy");
   });
 });
 

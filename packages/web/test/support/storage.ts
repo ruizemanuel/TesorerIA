@@ -1,6 +1,6 @@
 import { vi } from "vitest";
 
-/** The key the browser remembers the last passkey site under (passkey.ts). */
+/** The key an earlier version remembered the last passkey site under. Nothing reads it any more. */
 export const SITE_KEY = "tesoreria.passkey-site";
 
 /** `localStorage` as a map, or a storage that throws (a private window, blocked site data). Unstubbed by `vi.unstubAllGlobals()`. */

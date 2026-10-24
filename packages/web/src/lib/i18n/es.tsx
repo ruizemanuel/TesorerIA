@@ -145,11 +145,6 @@ export const es = {
     firstTime: (create: ReactNode) => <>¿Es tu primera vez? Entrá con el link de invitación que te pasaron, o {create}.</>,
     createLink: "creá un fondo",
     button: "Entrar con mi passkey",
-    /** Below the button, while someone still has a passkey of the old site (spec, 9.5): the link that asks for it. */
-    legacyLink: "¿Ya tenías cuenta antes de tesoreria.finance? Entrá con tu passkey anterior",
-    /** When the phone or browser refuses the old site's passkey here: it has no Related Origin Requests. */
-    updateDevice:
-      "Tu teléfono no puede usar tu passkey anterior en este sitio. Actualizá el sistema o el navegador, o entrá desde una computadora con Chrome y usá el teléfono con el código QR.",
     logOut: "Salir",
   },
   /**

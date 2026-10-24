@@ -127,9 +127,6 @@ export const en: Messages = {
     firstTime: (create: ReactNode) => <>First time here? Open the invitation link you were sent, or {create}.</>,
     createLink: "create a fund",
     button: "Log in with my passkey",
-    legacyLink: "Had an account before tesoreria.finance? Log in with your previous passkey",
-    updateDevice:
-      "Your phone can't use your previous passkey on this site. Update its system or browser, or log in from a computer with Chrome and use your phone with the QR code.",
     logOut: "Log out",
   },
   keyChange: {

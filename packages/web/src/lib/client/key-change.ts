@@ -2,7 +2,7 @@ import { sendKeyChange, signPasskeyChallenge } from "@tesoreria/wallet";
 import type { Hash, Hex } from "viem";
 import { post } from "./api";
 import { RefusedError, UserFacingError, wasCancelled } from "./errors";
-import { createPasskey, freshChallenge, rememberPasskeySite, siteOf } from "./passkey";
+import { createPasskey, freshChallenge } from "./passkey";
 import { type Me, celoBrowserClient, memberAccount, memberBundlerClient, recordDone } from "./wallet";
 
 export type KeyChangeStep = "create" | "prove" | "sign" | "confirm";
@@ -35,15 +35,14 @@ export function keyChangeSteps({ keyChange }: Me): KeyChangeStep[] {
  * passkey is replaced only when no swap to it could have been sent.
  *
  * With no steps at all (`keyChangeSteps`), the passkey the Safe holds is the active one `/api/me` names: "changed"
- * if it is of the new site, as when the swap landed before this tap. If it is still the old site's, there is nothing
- * the person can change yet, and it throws, as the server would refuse the start.
+ * if it is of the site the server makes passkeys for, as when the swap landed before this tap. If it is still of
+ * another, there is nothing the person can change yet, and it throws, as the server would refuse the start.
  */
 export async function changeKey(me: Me, onStep?: (step: KeyChangeStep) => void): Promise<"changed" | "waiting"> {
   const steps = keyChangeSteps(me);
   if (steps.length === 0) {
-    const site = siteOf(me.credential.rpId);
-    rememberPasskeySite(site);
-    if (site === "legacy") throw new UserFacingError({ key: "generic" });
+    const { rpId } = await freshChallenge(); // the site the server makes passkeys for: the new one
+    if (me.credential.rpId !== rpId) throw new UserFacingError({ key: "generic" });
     return "changed";
   }
   let publicKey = me.keyChange.pending?.publicKey; // the key to swap to
@@ -137,15 +136,12 @@ export async function confirmOnLoad(resume: boolean): Promise<boolean> {
 
 /**
  * Asks the server to confirm the swap from the chain. Whatever stops it from answering, the swap is still out: "waiting".
- * Once changed, the old passkey is retired and the next login must ask for the new one: the site is remembered as current.
  */
 async function confirm(): Promise<"changed" | "waiting"> {
   try {
     const { result } = await post<{ result: "changed" | "waiting" | "none" }>("/api/auth/key/confirm");
     // "none": nothing is pending any more because another tab, or /api/me, already made the new passkey the active one.
-    if (result === "waiting") return "waiting";
-    rememberPasskeySite("current");
-    return "changed";
+    return result === "waiting" ? "waiting" : "changed";
   } catch {
     return "waiting";
   }

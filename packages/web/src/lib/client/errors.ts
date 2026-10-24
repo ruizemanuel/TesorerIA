@@ -1,5 +1,4 @@
 import type { Messages } from "../i18n/messages";
-import type { PasskeySite } from "./passkey";
 
 /** The errors the browser makes on its own: their words are in the dictionary (`m.errors`), not in the code. */
 export type ErrorKey = "onItsWay" | "cancelled" | "generic" | "noPasskey" | "failed" | "wrongPasskey" | "notCompleted";
@@ -78,19 +77,10 @@ export function userMessage(error: unknown, m: Messages): string {
 }
 
 /**
- * Whether the browser refused the site the passkey was asked for (SecurityError): a phone or browser without Related
- * Origin Requests can't use a passkey of the old site from tesoreria.finance (spec, 9.5).
+ * `userMessage`, for logging in with a passkey. There the browser throws the same error when the person cancels and
+ * when this device has no passkey for the site, so it can't be read as a cancel: it says where the passkey may be
+ * instead.
  */
-export function wasSiteRefused(error: unknown): boolean {
-  return isNamed(error, "SecurityError");
-}
-
-/**
- * `userMessage`, for logging in with a passkey of `site`. There the browser throws the same error when the person
- * cancels and when this device has no passkey for the site, so it can't be read as a cancel: it says where the
- * passkey may be instead. A SecurityError on the old site says the phone is too old for it.
- */
-export function loginMessage(error: unknown, m: Messages, site: PasskeySite = "current"): string {
-  if (site === "legacy" && wasSiteRefused(error)) return m.login.updateDevice;
+export function loginMessage(error: unknown, m: Messages): string {
   return !(error instanceof UserFacingError) && wasCancelled(error) ? m.errors.noPasskey : userMessage(error, m);
 }
