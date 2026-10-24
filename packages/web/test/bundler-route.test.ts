@@ -386,6 +386,36 @@ describe("POST /api/bundler", () => {
       expect(pimlico).not.toHaveBeenCalled();
     });
 
+    it("sponsors nothing, not even a read, toward a pending passkey of the old site, though this session made it", async () => {
+      // What a crafted start on a deployment still on the old site would leave: two passkeys of that site.
+      const db = state.db as Db;
+      const user = await addUser(db, "Disposable");
+      const [old, second] = [createFakePasskey({ rpId: LEGACY_RP_ID }), createFakePasskey({ rpId: LEGACY_RP_ID })];
+      await db.insert(credentials).values([
+        { id: old.credential.id, userId: user.id, publicKey: old.credential.publicKey, userHandle: toHex(crypto.getRandomValues(new Uint8Array(16))), rpId: LEGACY_RP_ID },
+        {
+          id: second.credential.id,
+          userId: user.id,
+          publicKey: second.credential.publicKey,
+          userHandle: toHex(crypto.getRandomValues(new Uint8Array(16))),
+          rpId: LEGACY_RP_ID,
+          state: "pending",
+        },
+      ]);
+      state.user = { id: user.id, name: user.name, account: getAddress(user.account) };
+      const session = fakeSession();
+      session.userId = user.id;
+      session.keyChange = second.credential.id;
+      state.session = session;
+      const userOp = op(user.account, keyChangeCallData(second.credential.publicKey));
+      for (const method of SPONSORED) {
+        const params = method.startsWith("pm_") ? [userOp, entryPoint07Address, CELO, {}] : [userOp, entryPoint07Address];
+        expect((await call(rpc(method, params))).status, method).toBe(403);
+      }
+      expect((await call(rpc("eth_getUserOperationReceipt", [SENT]))).status).toBe(403);
+      expect(pimlico).not.toHaveBeenCalled();
+    });
+
     it("lets someone with a key change on its way read receipts", async () => {
       state.user = changer;
       state.session = sessionFor();

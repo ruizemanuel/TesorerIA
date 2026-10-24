@@ -26,13 +26,15 @@ export async function POST(request: Request) {
   if (user === null) return jsonError(401, m.errors.logIn);
   const body = await readJson(request, KeyChangeStart);
   if (!body.ok) return body.response;
+  const { RP_ID, KEY_CHANGE_PILOT, ORIGIN } = env();
   const result = await startKeyChange({
     db: await getDb(),
     session: await getSession(),
     user,
     input: body.value,
-    rpId: env().RP_ID,
-    origin: env().ORIGIN,
+    rpId: RP_ID,
+    pilot: KEY_CHANGE_PILOT, // due only for them while it's set, as /api/me says
+    origin: ORIGIN,
     readKey: (account) => readSafeKey(celoClient(), account),
     m,
   });

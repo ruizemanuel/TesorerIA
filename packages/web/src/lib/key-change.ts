@@ -60,21 +60,29 @@ function keyChangesThatMayLand(db: Db, userId: string) {
     );
 }
 
+/** The server's passkey settings a key change depends on: its RP ID, and KEY_CHANGE_PILOT. */
+export type KeyChangeSite = { rpId: string; pilot?: Address };
+
 /**
- * `due` once the site's passkeys are of another site than the person's active one, the old site's, and, while
- * KEY_CHANGE_PILOT (`pilot`) is set, only for that account: anyone else goes on with their old passkey (spec, 9.5).
- * `onItsWay` only with a pending passkey: once the swap is confirmed, its operation is over, receipt or not.
+ * Whether a key change is due: the site's passkeys are of another site than the person's active one, the old site's,
+ * and, while KEY_CHANGE_PILOT (`pilot`) is set, only for that account: anyone else goes on with their old passkey
+ * (spec, 9.5). Only then may one start: on the old site, a second passkey of it would make anyone's account ready.
  */
+function isDue(active: { rpId: string } | undefined, account: Address, { rpId, pilot }: KeyChangeSite): boolean {
+  return active?.rpId === LEGACY_RP_ID && rpId !== LEGACY_RP_ID && (pilot === undefined || isAddressEqual(pilot, account));
+}
+
+/** `due` as `isDue` says. `onItsWay` only with a pending passkey: once the swap is confirmed, its operation is over, receipt or not. */
 export async function keyChangeOf(
   db: Db,
   user: { id: string; account: Address },
   session: Pick<Session, "keyChange">,
-  { rpId, pilot }: { rpId: string; pilot?: Address },
+  site: KeyChangeSite,
 ): Promise<KeyChangeState> {
   const { active, pending } = await passkeysOf(db, user.id);
   const onItsWay = pending !== undefined && (await keyChangesThatMayLand(db, user.id).limit(1)).length > 0;
   return {
-    due: active?.rpId === LEGACY_RP_ID && rpId !== LEGACY_RP_ID && (pilot === undefined || isAddressEqual(pilot, user.account)),
+    due: isDue(active, user.account, site),
     pending: pending ?? null,
     ready: pending !== undefined && session.keyChange === pending.id,
     onItsWay,
@@ -83,8 +91,8 @@ export async function keyChangeOf(
 
 /**
  * Keeps the new passkey a person just made as their pending one, and marks this session ready (spec, 9.5). It takes
- * one whose active passkey is the old site's, and checks the new one as a registration does (`attestedKey`): for
- * `rpId`, on this session's challenge.
+ * one whose key change is due (`isDue`, with `rpId` and `pilot`), and checks the new one as a registration does
+ * (`attestedKey`): for `rpId`, on this session's challenge.
  *
  * A pending passkey from before is replaced only if nothing says the Safe holds, or may come to hold, its key: a
  * Safe has one owner and no recovery, and it would be left with the key of a passkey the server forgot.
@@ -99,6 +107,7 @@ export async function startKeyChange({
   user,
   input,
   rpId,
+  pilot,
   origin,
   now = Date.now(),
   readKey,
@@ -109,6 +118,7 @@ export async function startKeyChange({
   user: { id: string; account: Address };
   input: KeyChangeInput;
   rpId: string;
+  pilot?: Address;
   origin: string;
   now?: number;
   readKey: SafeKeyReader;
@@ -121,7 +131,7 @@ export async function startKeyChange({
   };
   if (challenge === null) return fail(400, m.auth.late);
   const { active, pending } = await passkeysOf(db, user.id);
-  if (active?.rpId !== LEGACY_RP_ID) return fail(409, m.errors.generic);
+  if (!isDue(active, user.account, { rpId, pilot })) return fail(409, m.errors.generic); // nothing to change, or not theirs yet
   const publicKey = attestedKey(input, { challenge, rpId, origin });
   if (publicKey === null) return fail(400, m.auth.badPasskey);
   if (pending !== undefined) {
@@ -235,8 +245,11 @@ async function activate(db: Db, userId: string, pendingId: string): Promise<bool
   return (await passkeysOf(db, userId)).active?.id === pendingId;
 }
 
-/** The pending passkey's key if this session made or proved it (`ready`), or null: the one key change /api/bundler sponsors. */
+/**
+ * The pending passkey's key if this session made or proved it (`ready`), or null: the one key change /api/bundler
+ * sponsors. Never toward the old site, however that pending passkey got there: a change is only ever away from it.
+ */
 export async function keyChangeKeyFor(db: Db, user: { id: string }, session: Pick<Session, "keyChange">): Promise<Hex | null> {
   const { pending } = await passkeysOf(db, user.id);
-  return pending !== undefined && session.keyChange === pending.id ? pending.publicKey : null;
+  return pending !== undefined && pending.rpId !== LEGACY_RP_ID && session.keyChange === pending.id ? pending.publicKey : null;
 }

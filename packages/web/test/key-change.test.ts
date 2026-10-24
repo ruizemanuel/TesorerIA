@@ -22,13 +22,16 @@ const state = vi.hoisted(() => ({
   db: null as unknown,
   session: null as unknown,
   readSafeKey: null as unknown as (account: Address) => Promise<SafeKey>,
+  pilot: undefined as Address | undefined,
 }));
 vi.mock("../src/lib/db/client", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../src/lib/db/client")>()),
   getDb: async () => state.db,
 }));
 vi.mock("../src/lib/session", () => ({ getSession: async () => state.session }));
-vi.mock("../src/lib/env", () => ({ env: () => ({ RP_ID: "tesoreria.finance", ORIGIN: "https://tesoreria.finance" }) }));
+vi.mock("../src/lib/env", () => ({
+  env: () => ({ RP_ID: "tesoreria.finance", ORIGIN: "https://tesoreria.finance", KEY_CHANGE_PILOT: state.pilot }),
+}));
 vi.mock("../src/lib/chain", () => ({ celoClient: () => "celo" }));
 vi.mock("@tesoreria/wallet", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@tesoreria/wallet")>()),
@@ -86,7 +89,8 @@ const unread = async (): Promise<SafeKey> => {
 
 /**
  * The page's first step: it makes `passkey` on the session's challenge and posts what the authenticator answered.
- * The chain is read only to replace a pending passkey; by default, reading it fails, as forno would.
+ * The chain is read only to replace a pending passkey; by default, reading it fails, as forno would. `site` is the
+ * server's: by default tesoreria.finance, with no pilot.
  */
 async function start(
   user: Person,
@@ -96,17 +100,19 @@ async function start(
     attest = {},
     now = NOW,
     readKey = unread,
+    site = { rpId: RP_ID, origin: ORIGIN },
   }: {
     passkey?: FakePasskey;
     session?: ReturnType<typeof fakeSession>;
     attest?: { rpId?: string; origin?: string };
     now?: number;
     readKey?: (account: Address) => Promise<SafeKey>;
+    site?: { rpId: string; origin: string; pilot?: Address };
   } = {},
 ) {
   const challenge = issueChallenge(session, NOW);
   const input: KeyChangeInput = { credentialId: passkey.credential.id, userHandle: userHandle(), ...passkey.attest({ challenge, ...attest }) };
-  const result = await startKeyChange({ db, session, user, input, rpId: RP_ID, origin: ORIGIN, now, readKey, m: es });
+  const result = await startKeyChange({ db, session, user, input, ...site, now, readKey, m: es });
   return { result, session, passkey };
 }
 
@@ -173,6 +179,29 @@ describe("startKeyChange", () => {
     expect(session.challenge).toBeUndefined();
   });
 
+  it("refuses to start a key change while the site is still the old one", async () => {
+    // Every account has an old-site passkey there, so a second one of that site would make any of them ready.
+    const { user } = await member();
+    const oldSite = { rpId: LEGACY_RP_ID, origin: `https://${LEGACY_RP_ID}` };
+    const { result, session, passkey } = await start(user, { passkey: createFakePasskey(oldSite), site: oldSite });
+    expect(result).toEqual({ ok: false, status: 409, error: es.errors.generic });
+    expect(await rowOf(passkey)).toBeUndefined();
+    expect(session.keyChange).toBeUndefined();
+    expect(session.challenge).toBeUndefined();
+  });
+
+  it("refuses to start a key change for someone outside the pilot", async () => {
+    const pilot = await member();
+    const friend = await member();
+    const site = { rpId: RP_ID, origin: ORIGIN, pilot: pilot.user.account };
+    const refused = await start(friend.user, { site });
+    expect(refused.result).toEqual({ ok: false, status: 409, error: es.errors.generic });
+    expect(await rowOf(refused.passkey)).toBeUndefined();
+    expect(refused.session.keyChange).toBeUndefined();
+    const started = await start(pilot.user, { site });
+    expect(started.result).toEqual({ ok: true, publicKey: started.passkey.credential.publicKey });
+  });
+
   it("checks the new passkey as a registration does", async () => {
     const { user } = await member();
     const forTheOldSite = await start(user, { passkey: createFakePasskey({ rpId: LEGACY_RP_ID, origin: ORIGIN }) });
@@ -186,6 +215,28 @@ describe("startKeyChange", () => {
       expect(session.keyChange).toBeUndefined();
       expect(session.challenge).toBeUndefined();
     }
+  });
+});
+
+describe("keyChangeKeyFor", () => {
+  it("keyChangeKeyFor ignores a pending passkey of the old site", async () => {
+    // However it got there: no start keeps one, so the gate never sponsors a key change toward the old site.
+    const { user } = await member();
+    const oldSite = createFakePasskey({ rpId: LEGACY_RP_ID, origin: ORIGIN });
+    await db.insert(credentials).values({
+      id: oldSite.credential.id,
+      userId: user.id,
+      publicKey: oldSite.credential.publicKey,
+      userHandle: userHandle(),
+      rpId: LEGACY_RP_ID,
+      state: "pending",
+    });
+    const session = sessionOf(user);
+    session.keyChange = oldSite.credential.id;
+    expect(await keyChangeKeyFor(db, user, session)).toBeNull();
+    // The same row for the new site is the key change's.
+    await db.update(credentials).set({ rpId: RP_ID }).where(eq(credentials.id, oldSite.credential.id));
+    expect(await keyChangeKeyFor(db, user, session)).toBe(oldSite.credential.publicKey);
   });
 });
 
@@ -484,6 +535,26 @@ describe("the key routes", () => {
     expect(await (await post(confirmRoute, "/api/auth/key/confirm", {})).json()).toEqual({ result: "waiting" });
     state.readSafeKey = holding(passkey);
     expect(await (await post(confirmRoute, "/api/auth/key/confirm", {})).json()).toEqual({ result: "changed" });
+  });
+
+  it("start a key change only for the pilot while KEY_CHANGE_PILOT is set", async () => {
+    const pilot = await member();
+    const friend = await member();
+    state.pilot = pilot.user.account;
+    try {
+      for (const [{ user }, status] of [
+        [friend, 409],
+        [pilot, 200],
+      ] as const) {
+        const session = sessionOf(user);
+        state.session = session;
+        const passkey = newPasskey();
+        const answer = await post(startRoute, "/api/auth/key", { credentialId: passkey.credential.id, userHandle: userHandle(), ...passkey.attest({ challenge: issueChallenge(session) }) });
+        expect(answer.status, user.account).toBe(status);
+      }
+    } finally {
+      state.pilot = undefined;
+    }
   });
 
   it("replace a pending passkey only once the chain shows the Safe doesn't hold its key", async () => {
