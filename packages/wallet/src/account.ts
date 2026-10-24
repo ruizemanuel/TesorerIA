@@ -19,15 +19,22 @@ export const SAFE_P256_VERIFIERS = "0x0100A86e0054C51E4894D88762a017ECc5E5235f5D
 
 const entryPoint = { address: entryPoint07Address, version: "0.7" } as const;
 
-/** A member's ERC-4337 smart account (EntryPoint v0.7) owned by a passkey. */
+/**
+ * A member's ERC-4337 smart account (EntryPoint v0.7) owned by a passkey.
+ *
+ * `address` is the Safe's address when `owner` does not derive it: a Safe whose passkey was changed (see `sendKeyChange`)
+ * keeps its address, which its current key no longer gives. A Kernel account ignores it.
+ */
 export function createMemberAccount({
   client,
   owner,
   kind = "safe",
+  address,
 }: {
   client: CeloClient;
   owner: WebAuthnAccount;
   kind?: AccountKind;
+  address?: Address;
 }): Promise<SmartAccount> {
   if (kind === "kernel") {
     // Kernel 0.3.1 with the patched WebAuthn validator; verifies through Daimo's P256Verifier.
@@ -36,6 +43,7 @@ export function createMemberAccount({
   return toSafeSmartAccount({
     client,
     owners: [owner],
+    ...(address === undefined ? {} : { address }),
     version: "1.4.1",
     entryPoint,
     safeP256VerifierAddress: SAFE_P256_VERIFIERS,

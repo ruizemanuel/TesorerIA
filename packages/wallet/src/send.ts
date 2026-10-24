@@ -32,7 +32,7 @@ export async function sendTaggedCalls({
   bundlerClient,
   account,
   calls,
-  timeout = 120_000,
+  timeout,
   nonce,
   onSent,
 }: {
@@ -49,6 +49,24 @@ export async function sendTaggedCalls({
     dataSuffix: ATTRIBUTION_SUFFIX,
     ...(nonce === undefined ? {} : { nonce }),
   });
+  return waitForSentOperation({ bundlerClient, userOpHash, timeout, onSent });
+}
+
+/**
+ * What follows the send, for every UserOperation this package sends: hands `userOpHash` to `onSent`, then waits up
+ * to `timeout` ms (120 s by default) for the receipt. See `sendTaggedCalls` for what a failing hook and a failing wait mean.
+ */
+export async function waitForSentOperation({
+  bundlerClient,
+  userOpHash,
+  timeout = 120_000,
+  onSent,
+}: {
+  bundlerClient: BundlerClient;
+  userOpHash: Hash;
+  timeout?: number | undefined;
+  onSent?: ((userOpHash: Hash) => Promise<void> | void) | undefined;
+}): Promise<SendTaggedCallsResult> {
   let unrecorded: string | undefined;
   try {
     await onSent?.(userOpHash);
