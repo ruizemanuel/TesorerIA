@@ -153,6 +153,7 @@ const ARGS: Record<string, (k: Kit) => Case[]> = {
   "account.loggedInAs": () => [call(NAME)],
   "account.holds": ({ bold, pesos }) => [call(bold(pesos(1_016.1)))],
   "account.holdsAnd": ({ bold, pesos, usdt }) => [call(bold(pesos(1_016.1)), bold(usdt(5)))],
+  "account.inviteHow": ({ fund }) => [call(fund)],
   "contribute.sendAtLeast": ({ bold, pesos, usdt }) => [call(bold(usdt(6.26)), bold(pesos(10_000)))],
   "contribute.sendAtLeastMore": ({ bold, pesos, usdt }) => [call(bold(usdt(2.5)), bold(pesos(10_000)))],
   "contribute.binanceMinimum": ({ bold, usdt }) => [call(bold(usdt(5)))],
