@@ -75,7 +75,19 @@ function sessionOf(user: Person) {
   return session;
 }
 
-/** The page's first step: it makes `passkey` on the session's challenge and posts what the authenticator answered. */
+/** The chain, as `confirmKeyChange` and `startKeyChange` read it: the Safe holds this passkey's key. */
+const holding = (passkey: FakePasskey) => async (): Promise<SafeKey> => safeKeyOf(passkey.credential.publicKey);
+/** A Safe that isn't deployed yet reads as all zeros. */
+const undeployed = async (): Promise<SafeKey> => ({ x: 0n, y: 0n, verifiers: 0n });
+/** For a call that must not read the chain. */
+const unread = async (): Promise<SafeKey> => {
+  throw new Error("read the chain");
+};
+
+/**
+ * The page's first step: it makes `passkey` on the session's challenge and posts what the authenticator answered.
+ * The chain is read only to replace a pending passkey; by default, reading it fails, as forno would.
+ */
 async function start(
   user: Person,
   {
@@ -83,11 +95,18 @@ async function start(
     session = sessionOf(user),
     attest = {},
     now = NOW,
-  }: { passkey?: FakePasskey; session?: ReturnType<typeof fakeSession>; attest?: { rpId?: string; origin?: string }; now?: number } = {},
+    readKey = unread,
+  }: {
+    passkey?: FakePasskey;
+    session?: ReturnType<typeof fakeSession>;
+    attest?: { rpId?: string; origin?: string };
+    now?: number;
+    readKey?: (account: Address) => Promise<SafeKey>;
+  } = {},
 ) {
   const challenge = issueChallenge(session, NOW);
   const input: KeyChangeInput = { credentialId: passkey.credential.id, userHandle: userHandle(), ...passkey.attest({ challenge, ...attest }) };
-  const result = await startKeyChange({ db, session, user, input, rpId: RP_ID, origin: ORIGIN, now, m: es });
+  const result = await startKeyChange({ db, session, user, input, rpId: RP_ID, origin: ORIGIN, now, readKey, m: es });
   return { result, session, passkey };
 }
 
@@ -98,15 +117,6 @@ const rowOf = async (passkey: FakePasskey) => (await db.select().from(credential
 const signed = (passkey: FakePasskey, session: Session, rpId = RP_ID, now = NOW) =>
   signPasskeyChallenge({ challenge: issueChallenge(session, now), rpId, getFn: passkey.getFn });
 
-/** The chain, as `confirmKeyChange` reads it: the Safe holds this passkey's key. */
-const holding = (passkey: FakePasskey) => async (): Promise<SafeKey> => safeKeyOf(passkey.credential.publicKey);
-/** A Safe that isn't deployed yet reads as all zeros. */
-const undeployed = async (): Promise<SafeKey> => ({ x: 0n, y: 0n, verifiers: 0n });
-/** For a call that must not read the chain. */
-const unread = async (): Promise<SafeKey> => {
-  throw new Error("read the chain");
-};
-
 /** A key change of the person's, as the page records it once the bundler takes it: `success` stays null until its receipt. */
 async function sent(user: Person, success: boolean | null = null) {
   await db.insert(operations).values({ userOpHash: toHex(crypto.getRandomValues(new Uint8Array(32))), userId: user.id, kind: "key-change", success });
@@ -115,11 +125,11 @@ async function sent(user: Person, success: boolean | null = null) {
 describe("keyChangeOf", () => {
   it("is due for an old-site passkey, and not for a new one", async () => {
     const old = await member();
-    expect(await keyChangeOf(db, old.user, sessionOf(old.user), { rpId: RP_ID })).toEqual({ due: true, pending: null, ready: false });
+    expect(await keyChangeOf(db, old.user, sessionOf(old.user), { rpId: RP_ID })).toEqual({ due: true, pending: null, ready: false, onItsWay: false });
     // Nor while the site is still the old one: there would be nothing to change to.
     expect((await keyChangeOf(db, old.user, sessionOf(old.user), { rpId: LEGACY_RP_ID })).due).toBe(false);
     const fresh = await member(RP_ID);
-    expect(await keyChangeOf(db, fresh.user, sessionOf(fresh.user), { rpId: RP_ID })).toEqual({ due: false, pending: null, ready: false });
+    expect(await keyChangeOf(db, fresh.user, sessionOf(fresh.user), { rpId: RP_ID })).toEqual({ due: false, pending: null, ready: false, onItsWay: false });
   });
 
   it("is due only for the pilot while KEY_CHANGE_PILOT is set", async () => {
@@ -146,11 +156,11 @@ describe("startKeyChange", () => {
     expect(session.challenge).toBeUndefined();
     expect(session.saved).toBeGreaterThan(0);
     const pending = { id: passkey.credential.id, rpId: RP_ID, publicKey: passkey.credential.publicKey };
-    expect(await keyChangeOf(db, user, session, { rpId: RP_ID })).toEqual({ due: true, pending, ready: true });
+    expect(await keyChangeOf(db, user, session, { rpId: RP_ID })).toEqual({ due: true, pending, ready: true, onItsWay: false });
     expect(await keyChangeKeyFor(db, user, session)).toBe(passkey.credential.publicKey);
     // Another session of the same person neither made it nor proved it.
     const other = sessionOf(user);
-    expect(await keyChangeOf(db, user, other, { rpId: RP_ID })).toEqual({ due: true, pending, ready: false });
+    expect(await keyChangeOf(db, user, other, { rpId: RP_ID })).toEqual({ due: true, pending, ready: false, onItsWay: false });
     expect(await keyChangeKeyFor(db, user, other)).toBeNull();
   });
 
@@ -181,19 +191,63 @@ describe("startKeyChange", () => {
 
 describe("a key change on its way", () => {
   it("refuses a new pending passkey while a key change is on its way", async () => {
-    const { user } = await member();
+    const { user, passkey: old } = await member();
     const first = await start(user);
     await sent(user);
-    // A second tap, or a second tab of the same browser (Review Focus 3).
-    const second = await start(user, { session: first.session });
+    expect((await keyChangeOf(db, user, first.session, { rpId: RP_ID })).onItsWay).toBe(true);
+    // A second tap, or a second tab of the same browser (Review Focus 3). The chain doesn't have it yet.
+    const second = await start(user, { session: first.session, readKey: holding(old) });
     expect(second.result).toEqual({ ok: false, status: 409, error: es.errors.onItsWay });
     expect(await rowOf(first.passkey)).toMatchObject({ state: "pending" });
     expect(await rowOf(second.passkey)).toBeUndefined();
     expect(first.session.keyChange).toBe(first.passkey.credential.id);
-    // Landed and not confirmed yet: the Safe may hold the pending key already, so it isn't replaced either.
+    // Landed, with a node behind still showing the old key: the Safe may hold the pending key, so it isn't replaced either.
     await db.update(operations).set({ success: true }).where(eq(operations.userId, user.id));
-    expect((await start(user)).result).toEqual({ ok: false, status: 409, error: es.errors.onItsWay });
+    expect((await start(user, { readKey: holding(old) })).result).toEqual({ ok: false, status: 409, error: es.errors.onItsWay });
     expect(await rowOf(first.passkey)).toMatchObject({ state: "pending" });
+    expect((await keyChangeOf(db, user, first.session, { rpId: RP_ID })).onItsWay).toBe(true);
+  });
+
+  it("doesn't replace a pending passkey when the Safe already holds its key", async () => {
+    // The change landed, its record was lost, and nothing confirmed it: only the chain knows.
+    const { user, passkey: old } = await member();
+    const first = await start(user);
+    const second = await start(user, { readKey: holding(first.passkey) });
+    // It's confirmed instead, and the start is refused: no old-site passkey is left to change.
+    expect(second.result).toEqual({ ok: false, status: 409, error: es.errors.generic });
+    expect(await rowOf(first.passkey)).toMatchObject({ state: "active" });
+    expect(await rowOf(old)).toMatchObject({ state: "retired" });
+    expect(await rowOf(second.passkey)).toBeUndefined();
+    expect(second.session.keyChange).toBeUndefined();
+    expect(await keyChangeOf(db, user, second.session, { rpId: RP_ID })).toEqual({ due: false, pending: null, ready: false, onItsWay: false });
+  });
+
+  it("doesn't replace a pending passkey when the chain can't be read", async () => {
+    const { user, passkey: old } = await member();
+    const first = await start(user);
+    const second = await start(user); // the default reader fails
+    expect(second.result).toEqual({ ok: false, status: 503, error: es.errors.generic });
+    expect(await rowOf(first.passkey)).toMatchObject({ state: "pending" });
+    expect(await rowOf(old)).toMatchObject({ state: "active" });
+    expect(await rowOf(second.passkey)).toBeUndefined();
+    expect(second.session.keyChange).toBeUndefined();
+    expect(second.session.challenge).toBeUndefined();
+  });
+
+  it("doesn't replace a pending passkey when its key change is recorded while the chain is read", async () => {
+    // The read shows the old key, and the change is recorded before the delete (by the page's onSent, or by the server
+    // when the bundler takes it): the delete checks for it itself, so it removes nothing.
+    const { user, passkey: old } = await member();
+    const first = await start(user);
+    const readKey = async () => {
+      const key = await holding(old)();
+      await sent(user);
+      return key;
+    };
+    const second = await start(user, { readKey });
+    expect(second.result).toEqual({ ok: false, status: 409, error: es.errors.onItsWay });
+    expect(await rowOf(first.passkey)).toMatchObject({ state: "pending" });
+    expect(await rowOf(second.passkey)).toBeUndefined();
   });
 
   it("keeps one pending passkey when two starts race", async () => {
@@ -206,16 +260,18 @@ describe("a key change on its way", () => {
   });
 
   it("replaces a pending passkey when no key change is on its way", async () => {
-    const { user } = await member();
+    const { user, passkey: old } = await member();
     const first = await start(user);
     await sent(user, false); // one that failed changed nothing
     await sent((await member()).user); // and someone else's is theirs
-    // Another phone, without the pending passkey: it can't prove it, so it makes a new one (Review Focus 4).
-    const second = await start(user);
+    // Another phone, without the pending passkey: it can't prove it, so it makes a new one (Review Focus 4). The
+    // chain shows the Safe still holds the old key.
+    const second = await start(user, { readKey: holding(old) });
     expect(second.result).toEqual({ ok: true, publicKey: second.passkey.credential.publicKey });
     expect(await rowOf(first.passkey)).toBeUndefined();
     expect(await rowOf(second.passkey)).toMatchObject({ userId: user.id, state: "pending" });
     expect(second.session.keyChange).toBe(second.passkey.credential.id);
+    expect((await keyChangeOf(db, user, second.session, { rpId: RP_ID })).onItsWay).toBe(false);
     // The first session's passkey is gone: no key change it asks for is sponsored.
     expect((await keyChangeOf(db, user, first.session, { rpId: RP_ID })).ready).toBe(false);
     expect(await keyChangeKeyFor(db, user, first.session)).toBeNull();
@@ -286,7 +342,7 @@ describe("confirmKeyChange", () => {
     expect(await rowOf(old)).toMatchObject({ state: "retired" });
     expect(await rowOf(passkey)).toMatchObject({ state: "active" });
     expect(await confirmKeyChange(db, user, unread)).toBe("none");
-    expect(await keyChangeOf(db, user, sessionOf(user), { rpId: RP_ID })).toEqual({ due: false, pending: null, ready: false });
+    expect(await keyChangeOf(db, user, sessionOf(user), { rpId: RP_ID })).toEqual({ due: false, pending: null, ready: false, onItsWay: false });
     // The old passkey no longer gets in.
     const session = fakeSession();
     expect(await logIn({ db, session, assertion: await signed(old, session, LEGACY_RP_ID), origin: ORIGIN, now: NOW, m: es })).toMatchObject({ ok: false, status: 401 });
@@ -297,9 +353,32 @@ describe("confirmKeyChange", () => {
     const { passkey } = await start(user);
     // The first update went through and the call ended before the second: a pending passkey, and no active one.
     await db.update(credentials).set({ state: "retired" }).where(eq(credentials.id, old.credential.id));
-    expect(await confirmKeyChange(db, user, unread)).toBe("changed"); // the call that was cut had read the chain
+    // Finished only once the chain shows the pending key, as any confirmation.
+    expect(await confirmKeyChange(db, user, holding(old))).toBe("waiting");
+    expect(await rowOf(passkey)).toMatchObject({ state: "pending" });
+    expect(await confirmKeyChange(db, user, holding(passkey))).toBe("changed");
     expect(await rowOf(passkey)).toMatchObject({ state: "active" });
     expect(await rowOf(old)).toMatchObject({ state: "retired" });
+  });
+
+  it("says changed to two confirmations at once", async () => {
+    // /api/me and the page's own confirmation, say: one makes the change, and the other finds it made.
+    const { user, passkey: old } = await member();
+    const { passkey } = await start(user);
+    expect(await Promise.all([confirmKeyChange(db, user, holding(passkey)), confirmKeyChange(db, user, holding(passkey))])).toEqual(["changed", "changed"]);
+    expect(await rowOf(passkey)).toMatchObject({ state: "active" });
+    expect(await rowOf(old)).toMatchObject({ state: "retired" });
+  });
+
+  it("retires nothing when the pending passkey goes while the chain is read", async () => {
+    const { user, passkey: old } = await member();
+    const { passkey } = await start(user);
+    const readKey = async () => {
+      await db.delete(credentials).where(eq(credentials.id, passkey.credential.id)); // a concurrent delete
+      return safeKeyOf(passkey.credential.publicKey);
+    };
+    expect(await confirmKeyChange(db, user, readKey)).toBe("none");
+    expect(await rowOf(old)).toMatchObject({ state: "active" });
   });
 });
 
@@ -313,6 +392,7 @@ describe("GET /api/me", () => {
   it("confirms lazily from /api/me", async () => {
     const { user, passkey: old } = await member();
     const { passkey } = await start(user);
+    await sent(user);
     // The page closed before confirming, and the member comes back in another session (Review Focus 2).
     state.session = sessionOf(user);
     const reads: Address[] = [];
@@ -326,7 +406,7 @@ describe("GET /api/me", () => {
       name: "Ema",
       account: user.account,
       credential: { id: old.credential.id, publicKey: old.credential.publicKey, rpId: LEGACY_RP_ID },
-      keyChange: { due: true, pending, ready: false },
+      keyChange: { due: true, pending, ready: false, onItsWay: true },
     });
     // The chain has the new key now: /api/me confirms it before it answers, and answers with the new passkey.
     state.readSafeKey = chainHolding(passkey);
@@ -334,7 +414,8 @@ describe("GET /api/me", () => {
       name: "Ema",
       account: user.account,
       credential: { id: passkey.credential.id, publicKey: passkey.credential.publicKey, rpId: RP_ID },
-      keyChange: { due: false, pending: null, ready: false },
+      // Its operation never got a receipt, but with nothing pending nothing is on its way.
+      keyChange: { due: false, pending: null, ready: false, onItsWay: false },
     });
     expect(await rowOf(old)).toMatchObject({ state: "retired" });
     // With nothing pending, it doesn't read the chain.
@@ -403,5 +484,26 @@ describe("the key routes", () => {
     expect(await (await post(confirmRoute, "/api/auth/key/confirm", {})).json()).toEqual({ result: "waiting" });
     state.readSafeKey = holding(passkey);
     expect(await (await post(confirmRoute, "/api/auth/key/confirm", {})).json()).toEqual({ result: "changed" });
+  });
+
+  it("replace a pending passkey only once the chain shows the Safe doesn't hold its key", async () => {
+    const { user, passkey: old } = await member();
+    const session = sessionOf(user);
+    state.session = session;
+    const startWith = (passkey: FakePasskey) =>
+      post(startRoute, "/api/auth/key", { credentialId: passkey.credential.id, userHandle: userHandle(), ...passkey.attest({ challenge: issueChallenge(session) }) });
+    const first = newPasskey();
+    expect((await startWith(first)).status).toBe(200);
+    const second = newPasskey();
+    state.readSafeKey = async () => {
+      throw new Error("forno is down");
+    };
+    const refused = await startWith(second);
+    expect(refused.status).toBe(503);
+    expect(await refused.json()).toEqual({ error: es.errors.generic });
+    state.readSafeKey = holding(old);
+    expect((await startWith(second)).status).toBe(200);
+    expect(await rowOf(first)).toBeUndefined();
+    expect(await rowOf(second)).toMatchObject({ state: "pending" });
   });
 });

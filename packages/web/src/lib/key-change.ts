@@ -1,5 +1,6 @@
 import { type PasskeyAssertion, type SafeKey, isSafeKey } from "@tesoreria/wallet";
-import { and, eq, inArray, isNull, or } from "drizzle-orm";
+import { and, eq, exists, inArray, isNull, notExists, or } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { type Address, type Hex, isAddressEqual } from "viem";
 import { type AuthResult, type NewPasskey, attestedKey, isUniqueViolation, isValidAnswer, takeChallenge } from "./auth";
 import { type Db, inTransaction } from "./db/client";
@@ -13,11 +14,21 @@ import type { Session } from "./session";
  * - `due`: the app asks them to.
  * - `pending`: the new passkey, from the moment it's made until the chain confirms the swap.
  * - `ready`: this session made the pending passkey or proved it holds it, so the swap to its key is sponsored.
+ * - `onItsWay`: while a passkey is pending, a key change of theirs was sent with no receipt yet, or landed. Meanwhile
+ *   the pending passkey isn't replaced (`startKeyChange`): the page waits instead of making another.
  */
-export type KeyChangeState = { due: boolean; pending: { id: string; rpId: string; publicKey: Hex } | null; ready: boolean };
+export type KeyChangeState = {
+  due: boolean;
+  pending: { id: string; rpId: string; publicKey: Hex } | null;
+  ready: boolean;
+  onItsWay: boolean;
+};
 
 /** The new passkey, as the page posts it. Unlike a registration's, never without its attestation: no older page starts a key change. */
 export type KeyChangeInput = Required<NewPasskey>;
+
+/** The Safe's key as the chain has it now (`readSafeKey`). */
+export type SafeKeyReader = (account: Address) => Promise<SafeKey>;
 
 /** A person's active and pending passkeys: at most one of each. */
 async function passkeysOf(db: Db, userId: string) {
@@ -33,8 +44,26 @@ async function passkeysOf(db: Db, userId: string) {
 }
 
 /**
+ * This person's key changes that may have reached the chain: sent with no receipt yet (they can still land), or
+ * landed. Only a failed one changed nothing. Whoever records it, the page or the server, the row is the same.
+ */
+function keyChangesThatMayLand(db: Db, userId: string) {
+  return db
+    .select({ userOpHash: operations.userOpHash })
+    .from(operations)
+    .where(
+      and(
+        eq(operations.userId, userId),
+        eq(operations.kind, "key-change"),
+        or(isNull(operations.success), eq(operations.success, true)),
+      ),
+    );
+}
+
+/**
  * `due` once the site's passkeys are of another site than the person's active one, the old site's, and, while
  * KEY_CHANGE_PILOT (`pilot`) is set, only for that account: anyone else goes on with their old passkey (spec, 9.5).
+ * `onItsWay` only with a pending passkey: once the swap is confirmed, its operation is over, receipt or not.
  */
 export async function keyChangeOf(
   db: Db,
@@ -43,18 +72,26 @@ export async function keyChangeOf(
   { rpId, pilot }: { rpId: string; pilot?: Address },
 ): Promise<KeyChangeState> {
   const { active, pending } = await passkeysOf(db, user.id);
+  const onItsWay = pending !== undefined && (await keyChangesThatMayLand(db, user.id).limit(1)).length > 0;
   return {
     due: active?.rpId === LEGACY_RP_ID && rpId !== LEGACY_RP_ID && (pilot === undefined || isAddressEqual(pilot, user.account)),
     pending: pending ?? null,
     ready: pending !== undefined && session.keyChange === pending.id,
+    onItsWay,
   };
 }
 
 /**
  * Keeps the new passkey a person just made as their pending one, and marks this session ready (spec, 9.5). It takes
  * one whose active passkey is the old site's, and checks the new one as a registration does (`attestedKey`): for
- * `rpId`, on this session's challenge. A pending one from before is replaced, unless a key change may still land:
- * the Safe would then hold the key of a passkey the server forgot.
+ * `rpId`, on this session's challenge.
+ *
+ * A pending passkey from before is replaced only if nothing says the Safe holds, or may come to hold, its key: a
+ * Safe has one owner and no recovery, and it would be left with the key of a passkey the server forgot.
+ * - The chain is read first (`readKey`). If the Safe holds that key, the change is confirmed instead and the start
+ *   refused; if the chain can't be read, the start is refused too.
+ * - The delete itself checks that no key change of theirs is on its way or landed, so one recorded after the read
+ *   still keeps the pending passkey.
  */
 export async function startKeyChange({
   db,
@@ -64,15 +101,17 @@ export async function startKeyChange({
   rpId,
   origin,
   now = Date.now(),
+  readKey,
   m,
 }: {
   db: Db;
   session: Session;
-  user: { id: string };
+  user: { id: string; account: Address };
   input: KeyChangeInput;
   rpId: string;
   origin: string;
   now?: number;
+  readKey: SafeKeyReader;
   m: Messages;
 }): Promise<{ ok: true; publicKey: Hex } | { ok: false; status: number; error: string }> {
   const challenge = takeChallenge(session, now);
@@ -86,8 +125,21 @@ export async function startKeyChange({
   const publicKey = attestedKey(input, { challenge, rpId, origin });
   if (publicKey === null) return fail(400, m.auth.badPasskey);
   if (pending !== undefined) {
-    if (await keyChangeMayLand(db, user.id)) return fail(409, m.errors.onItsWay);
-    await db.delete(credentials).where(and(eq(credentials.id, pending.id), eq(credentials.state, "pending")));
+    let held: boolean;
+    try {
+      held = isSafeKey(await readKey(user.account), pending.publicKey);
+    } catch {
+      return fail(503, m.errors.generic); // without the chain, nothing is replaced
+    }
+    if (held) {
+      await activate(db, user.id, pending.id);
+      return fail(409, m.errors.generic); // changed already: no old-site passkey is left to change
+    }
+    const deleted = await db
+      .delete(credentials)
+      .where(and(eq(credentials.id, pending.id), eq(credentials.state, "pending"), notExists(keyChangesThatMayLand(db, user.id))))
+      .returning({ id: credentials.id });
+    if (deleted.length === 0) return fail(409, m.errors.onItsWay);
   }
   try {
     await db.insert(credentials).values({ id: input.credentialId, userId: user.id, publicKey, userHandle: input.userHandle, rpId, state: "pending" });
@@ -98,25 +150,6 @@ export async function startKeyChange({
   session.keyChange = input.credentialId;
   await session.save();
   return { ok: true, publicKey };
-}
-
-/**
- * Whether one of this person's key changes is on its way (sent, with no receipt yet) or landed: either way the Safe
- * may hold the pending key. Only a failed one changed nothing.
- */
-async function keyChangeMayLand(db: Db, userId: string): Promise<boolean> {
-  const [row] = await db
-    .select({ userOpHash: operations.userOpHash })
-    .from(operations)
-    .where(
-      and(
-        eq(operations.userId, userId),
-        eq(operations.kind, "key-change"),
-        or(isNull(operations.success), eq(operations.success, true)),
-      ),
-    )
-    .limit(1);
-  return row !== undefined;
 }
 
 /**
@@ -163,31 +196,43 @@ export async function proveKeyChange({
 /**
  * Makes the pending passkey the active one once the chain shows the Safe holds its key, and retires the one it
  * replaces: "changed". "waiting" while the Safe holds another key (or isn't deployed), "none" with nothing pending.
- * Never from the browser's word: from `readKey`, the Safe's key as the chain has it.
- *
- * The active one is retired first, as a person has at most one (credentials_one_active), in one transaction with the
- * second update. A pending passkey with no active one, as a cut between the two would leave it, is finished without
- * the chain: only a call that read the chain retires the active one.
+ * Never from the browser's word, nor without the chain: only `readKey`, the Safe's key as the chain has it, makes a
+ * passkey active. That includes a pending passkey with no active one, as a cut between the two updates would leave it.
  */
-export async function confirmKeyChange(
-  db: Db,
-  user: { id: string; account: Address },
-  readKey: (account: Address) => Promise<SafeKey>,
-): Promise<"changed" | "waiting" | "none"> {
-  const { active, pending } = await passkeysOf(db, user.id);
+export async function confirmKeyChange(db: Db, user: { id: string; account: Address }, readKey: SafeKeyReader): Promise<"changed" | "waiting" | "none"> {
+  const { pending } = await passkeysOf(db, user.id);
   if (pending === undefined) return "none";
-  const activate = (tx: Db) =>
-    tx.update(credentials).set({ state: "active" }).where(and(eq(credentials.id, pending.id), eq(credentials.state, "pending")));
-  if (active === undefined) {
-    await activate(db);
-    return "changed";
-  }
   if (!isSafeKey(await readKey(user.account), pending.publicKey)) return "waiting";
-  await inTransaction(db, (tx) => [
-    tx.update(credentials).set({ state: "retired" }).where(and(eq(credentials.id, active.id), eq(credentials.state, "active"))),
-    activate(tx),
+  return (await activate(db, user.id, pending.id)) ? "changed" : "none";
+}
+
+/**
+ * The pending passkey becomes active, and the active one is retired first, as a person has at most one
+ * (credentials_one_active), in one transaction. The retirement waits on the pending passkey still being pending, so
+ * if it went meanwhile, nothing changes. Whether the pending passkey is the active one afterwards.
+ */
+async function activate(db: Db, userId: string, pendingId: string): Promise<boolean> {
+  const stillPending = alias(credentials, "still_pending");
+  const [, activated] = await inTransaction(db, (tx) => [
+    tx
+      .update(credentials)
+      .set({ state: "retired" })
+      .where(
+        and(
+          eq(credentials.userId, userId),
+          eq(credentials.state, "active"),
+          exists(tx.select({ id: stillPending.id }).from(stillPending).where(and(eq(stillPending.id, pendingId), eq(stillPending.state, "pending")))),
+        ),
+      ),
+    tx
+      .update(credentials)
+      .set({ state: "active" })
+      .where(and(eq(credentials.id, pendingId), eq(credentials.state, "pending")))
+      .returning({ id: credentials.id }),
   ]);
-  return "changed";
+  if (activated.length > 0) return true;
+  // Another confirmation got there first, or the pending passkey is gone: the database says which.
+  return (await passkeysOf(db, userId)).active?.id === pendingId;
 }
 
 /** The pending passkey's key if this session made or proved it (`ready`), or null: the one key change /api/bundler sponsors. */

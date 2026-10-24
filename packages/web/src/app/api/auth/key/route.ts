@@ -1,4 +1,6 @@
+import { readSafeKey } from "@tesoreria/wallet";
 import { z } from "zod";
+import { celoClient } from "../../../../lib/chain";
 import { currentUser } from "../../../../lib/current-user";
 import { getDb } from "../../../../lib/db/client";
 import { env } from "../../../../lib/env";
@@ -31,6 +33,7 @@ export async function POST(request: Request) {
     input: body.value,
     rpId: env().RP_ID,
     origin: env().ORIGIN,
+    readKey: (account) => readSafeKey(celoClient(), account),
     m,
   });
   return result.ok ? Response.json({ publicKey: result.publicKey }) : jsonError(result.status, result.error);
