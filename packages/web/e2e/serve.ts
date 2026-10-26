@@ -65,6 +65,10 @@ const anvil = spawn(
     "--timeout", "10000",
     "--port", String(FORK_PORT),
     "--block-time", "1", "--mixed-mining",
+    // Dev accounts from a fresh mnemonic: the default ones have public keys, and on Celo mainnet the first carries an
+    // EIP-7702 delegation that sweeps any CELO it receives. The fork copies it, so handleOps paying the fork bundler's
+    // executor emptied it, and the next operation failed for gas (26/10).
+    "--mnemonic-random",
     "--silent",
   ],
   { stdio: ["ignore", "ignore", "inherit"] },

@@ -39,6 +39,10 @@ export default async function setup() {
       // A block every second, like Celo, besides one for each transaction: viem waits for a receipt by watching for
       // new blocks, so on an anvil that only mines transactions a wait that missed its block hangs until the next one.
       "--block-time", "1", "--mixed-mining",
+      // Dev accounts from a fresh mnemonic: the default ones have public keys, and on Celo mainnet the first carries
+      // an EIP-7702 delegation that sweeps any CELO it receives. The fork copies it, so handleOps paying the bundler's
+      // executor emptied it (26/10).
+      "--mnemonic-random",
       "--silent", // keeps anvil's dev-account banner out of the test output
     ],
     { stdio: ["ignore", "ignore", "pipe"] },
