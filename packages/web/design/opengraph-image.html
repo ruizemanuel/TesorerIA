@@ -1,0 +1,66 @@
+<!doctype html>
+<!--
+  The link preview (spec, 9.6): app/opengraph-image.png is a screenshot of this page at 1200 × 630, taken with
+  Playwright once the font has loaded. Everything is centred, because WhatsApp sometimes crops a square from the middle.
+-->
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Encode+Sans:wdth,wght@75..125,100..900&display=block" rel="stylesheet" />
+    <style>
+      html,
+      body {
+        margin: 0;
+      }
+      body {
+        width: 1200px;
+        height: 630px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 18px;
+        background: #2638b8;
+        color: #ffffff;
+        font-family: "Encode Sans", sans-serif;
+      }
+      /* Its own layer, so Chrome draws the text in greys: subpixel colours would fringe it in the PNG. */
+      body > * {
+        will-change: transform;
+      }
+      .mark {
+        width: 112px;
+        height: 112px;
+        border-radius: 50%;
+        background: #ffffff;
+        color: #2638b8;
+        display: grid;
+        place-items: center;
+        font-size: 46px;
+        font-weight: 800;
+      }
+      .name {
+        margin: 0;
+        font-size: 156px;
+        line-height: 1;
+        font-weight: 800;
+        font-stretch: 80%;
+        letter-spacing: -1px;
+      }
+      .tagline {
+        margin: 0;
+        font-size: 44px;
+        font-weight: 500;
+        font-stretch: 87%;
+        color: #e6e9f8;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="mark">IA</div>
+    <h1 class="name">TesorerIA</h1>
+    <p class="tagline">La plata del grupo, sin tesorero.</p>
+  </body>
+</html>
