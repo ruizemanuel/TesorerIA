@@ -201,7 +201,7 @@ test("three friends create a fund, contribute, get the agreed expense back, vote
   await beto.getByRole("button", { name: "¿Quién debe esta semana?" }).click();
   await expect(beto.getByText("Soy el agente de prueba: en el fork no hay modelo.")).toBeVisible();
   await beto.getByPlaceholder("Escribí tu pregunta").fill("Pagué $ 5.000 de pelotas nuevas");
-  await beto.getByRole("button", { name: "Mandar" }).click();
+  await beto.getByRole("button", { name: "Enviar" }).click();
   await expect(beto.getByText("Se vota: necesita 2 de 3 votos.")).toBeVisible();
   // The card refreshes the page under it. With the server slow to answer that refresh, closing the panel and opening
   // it again must open it, with the conversation: Next's router, left alone, held both behind the refresh and then

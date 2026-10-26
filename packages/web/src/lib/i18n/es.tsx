@@ -593,7 +593,7 @@ export const es = {
     typing: "El agente está escribiendo",
     questionLabel: "Tu pregunta",
     placeholder: "Escribí tu pregunta",
-    send: "Mandar",
+    send: "Enviar",
     /** Under the field from 400 letters: how many there are, of the most a message may have. */
     count: (used: number, max: number) => `${used} de ${max}`,
     /** The card the agent shows to load an expense. */

@@ -328,7 +328,7 @@ describe("the dictionaries", () => {
       "El agente está escribiendo",
       "Tu pregunta",
       "Escribí tu pregunta",
-      "Mandar",
+      "Enviar",
       "12 de 500",
     ]);
     expect([en.chat.typing, en.chat.questionLabel, en.chat.placeholder, en.chat.send, en.chat.count(12, 500)]).toEqual([
