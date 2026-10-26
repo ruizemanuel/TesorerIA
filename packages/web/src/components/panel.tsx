@@ -4,6 +4,7 @@ import { type ReactNode, useEffect, useRef } from "react";
 import { useMessages } from "../lib/i18n/client";
 import { REOPEN_PANEL, namesPanel } from "../lib/panel";
 import { useRefresh } from "./refresh-provider";
+import { BackArrow } from "./ui";
 
 /**
  * Aportar, Cargar gasto, the comprobante and the rest open here (spec, 9.2): a native <dialog>, which traps
@@ -74,20 +75,7 @@ export function Panel({
             aria-label={m.panels.back}
             onClick={() => dialog.current?.close()}
           >
-            {/* An SVG, not the "←" character: a glyph sits where its font puts it (3 px below the button's centre in
-                Encode Sans), while a drawing is centred exactly. */}
-            <svg
-              aria-hidden="true"
-              viewBox="0 0 24 24"
-              className="size-5"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth={2}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M19 12H5M12 19l-7-7 7-7" />
-            </svg>
+            <BackArrow />
           </button>
           {icon}
           <h2 id="panel-title" className="text-lg font-bold [font-stretch:87%]">

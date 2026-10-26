@@ -36,6 +36,27 @@ export function Logo({ className = "" }: { className?: string }) {
   return <span className={`narrow text-[20px] font-extrabold text-primary ${className}`}>TesorerIA</span>;
 }
 
+/**
+ * The arrow that goes back: the panels' and the public list's. An SVG, not the "←" character: a glyph sits where its
+ * font puts it (3 px below the button's centre in Encode Sans), while a drawing is centred exactly.
+ */
+export function BackArrow() {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 24 24"
+      className="size-5"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M19 12H5M12 19l-7-7 7-7" />
+    </svg>
+  );
+}
+
 /** A white card on the page's tint: no shadow (spec, 9.1). */
 export function Card({ className = "", ...props }: ComponentProps<"section">) {
   return <section className={`rounded-[14px] bg-surface p-4 ${className}`} {...props} />;
