@@ -185,6 +185,9 @@ describe("the dictionaries", () => {
     expect(es.contribute.onItsWay).toBe("Tu aporte está en camino. Cuando se confirme, lo ves en el fondo.");
     expect(es.contribute.nothingYet).toBe("Todavía no llegó nada. Cuando llegue, aparece acá; puede tardar unos minutos.");
     expect(es.contribute.amountLabel).toBe("Cuánto aportás");
+    // Beside the label, in the amount's box: what the account holds, short.
+    expect(html(es.contribute.youHold(money("6,18 USDT")))).toBe('Tenés <span class="money">6,18 USDT</span>');
+    expect(html(en.contribute.youHold(money("6.18 USDT")))).toBe('You have <span class="money">6.18 USDT</span>');
     expect(es.contribute.submit("10 USDT")).toBe("Aportar 10 USDT");
     expect(en.contribute.submit("ARS 10,000")).toBe("Contribute ARS 10,000");
     expect(html(es.contribute.capReachedNotice(money("$ 450.000")))).toBe('El fondo llegó a su tope de <span class="money">$ 450.000</span>: no entra más.');

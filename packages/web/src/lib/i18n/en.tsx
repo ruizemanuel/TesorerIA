@@ -402,6 +402,7 @@ export const en: Messages = {
     nothingYet: "Nothing has arrived yet. When it does, it'll show up here; it can take a few minutes.",
     capReachedNotice: (cap: ReactNode) => <>The fund reached its cap of {cap}: no more fits.</>,
     amountLabel: "How much to contribute",
+    youHold: (amount: ReactNode) => <>You have {amount}</>,
     submit: (amount: string) => `Contribute ${amount}`,
     accountHolds: (held: string) => `Your account holds ${held}.`,
     capReached: (cap: string) => `The fund reached its cap of ${cap}: no more fits.`,

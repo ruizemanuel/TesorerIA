@@ -75,6 +75,12 @@ test("three friends create a fund, contribute, get the agreed expense back, vote
   await give(await accountOf(beto), { usdt: 10_000_000n });
   await open(beto, `${fund}?p=aportar`);
   await expect(onScreen(beto, /Cubre los \$\s10\.000, al precio de ahora\./)).toBeVisible();
+  // It fits the phone: the amount, written large, takes only the room its currency leaves it (spec, 9.7).
+  const outside = await beto.getByRole("dialog", { name: "Aportar" }).evaluate((dialog) => {
+    const edge = dialog.getBoundingClientRect().right;
+    return [...dialog.querySelectorAll("*")].filter((element) => element.getBoundingClientRect().right > edge + 0.5).length;
+  });
+  expect(outside).toBe(0);
   await beto.getByLabel("Cuánto aportás").fill("10");
   await expect(onScreen(beto, /Son unos \$\s[\d.]+(,\d{1,2})? al precio de ahora\./)).toBeVisible();
   await beto.getByRole("button", { name: /Aportar 10\sUSDT/ }).click();

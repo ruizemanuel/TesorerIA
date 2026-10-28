@@ -27,7 +27,7 @@ import { USDT_UNIT, formatPesos, formatUsdt } from "../lib/format";
 import { DEFAULT_BALANCE_CAP, memberFundAbi } from "../lib/fund-abi";
 import { useLocale, useMessages } from "../lib/i18n/client";
 import { AddressBox } from "./address-box";
-import { AmountField } from "./amount-field";
+import { ContributeAmount } from "./contribute-amount";
 import { useRefresh } from "./refresh-provider";
 import { Button, ButtonLink } from "./ui";
 
@@ -194,46 +194,36 @@ export function ContributePanel({
 
         <AddressBox address={account} />
 
-        <div className="grid gap-3 rounded-[14px] bg-surface p-4">
+        {/* 8 px around the amount's own box (spec, 9.7); a sentence alone keeps 16 px, as the panel's other boxes. */}
+        <div className="grid gap-2 rounded-[14px] bg-surface p-2">
           {onItsWay ? (
-            !sentNow && <p className="font-semibold">{m.contribute.onItsWay}</p>
+            !sentNow && <p className="p-2 font-semibold">{m.contribute.onItsWay}</p>
           ) : held === null ? (
-            <p className="text-muted">{lookFailed ? m.account.readFailed : m.account.reading}</p>
+            <p className="p-2 text-muted">{lookFailed ? m.account.readFailed : m.account.reading}</p>
           ) : holding === 0n ? (
-            <p className="text-muted">{m.contribute.nothingYet}</p>
+            <p className="p-2 text-muted">{m.contribute.nothingYet}</p>
           ) : room === 0n || (tab === "usdt" && usdtDefault === 0n) ? (
-            <p className="font-semibold text-owe">{m.contribute.capReachedNotice(<span className="money">{cap}</span>)}</p>
+            <p className="p-2 font-semibold text-owe">{m.contribute.capReachedNotice(<span className="money">{cap}</span>)}</p>
           ) : (
             <>
-              <p>
-                {m.account.youHave(
+              <ContributeAmount
+                label={m.contribute.amountLabel}
+                held={m.contribute.youHold(
                   <span className="money font-semibold">{tab === "usdt" ? formatUsdt(held.usdt, locale) : formatPesos(held.wars, locale)}</span>,
                 )}
-              </p>
-              {tab === "usdt" ? (
-                <AmountField
-                  label={m.contribute.amountLabel}
-                  value={typedUsdt ?? usdtText(usdtDefault, locale)}
-                  problem={usdtReading.ok ? "" : usdtReading.error}
-                  note={usdtReading.ok && held.rate !== null ? usdtWorthText(usdtReading.amount, held.rate, target, m) : undefined}
-                  disabled={step !== "idle"}
-                  onChange={setTypedUsdt}
-                />
-              ) : (
-                <AmountField
-                  label={m.contribute.amountLabel}
-                  value={typed ?? pesosText(warsDefault, locale)}
-                  problem={warsReading.ok ? "" : warsReading.error}
-                  disabled={step !== "idle"}
-                  onChange={setTyped}
-                />
-              )}
+                token={tab}
+                value={tab === "usdt" ? (typedUsdt ?? usdtText(usdtDefault, locale)) : (typed ?? pesosText(warsDefault, locale))}
+                problem={reading.ok ? "" : reading.error}
+                note={tab === "usdt" && usdtReading.ok && held.rate !== null ? usdtWorthText(usdtReading.amount, held.rate, target, m) : undefined}
+                disabled={step !== "idle"}
+                onChange={tab === "usdt" ? setTypedUsdt : setTyped}
+              />
               <Button disabled={step !== "idle" || amount === 0n} onClick={contribute}>
                 {step === "signing" ? m.common.confirm : step === "sending" ? m.common.sending : m.contribute.submit(label)}
               </Button>
             </>
           )}
-          <p role="alert" className="text-sm text-owe">
+          <p role="alert" className="px-2 text-sm text-owe">
             {error}
           </p>
         </div>

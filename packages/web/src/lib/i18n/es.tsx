@@ -489,6 +489,8 @@ export const es = {
     /** The fund is at its cap, in the panel: `cap` stands out. */
     capReachedNotice: (cap: ReactNode) => <>El fondo llegó a su tope de {cap}: no entra más.</>,
     amountLabel: "Cuánto aportás",
+    /** Beside the label, in the amount's box (spec, 9.7): what the account holds, short; `amount` stands out. */
+    youHold: (amount: ReactNode) => <>Tenés {amount}</>,
     /** The button: `amount` is the one that will go in. */
     submit: (amount: string) => `Aportar ${amount}`,
     /** What is wrong with what was typed, as plain text under the field. */
