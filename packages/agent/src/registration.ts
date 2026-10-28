@@ -1,13 +1,16 @@
-import { type Hex, type Log, encodeFunctionData, formatUnits, isAddressEqual, parseAbi, parseEventLogs } from "viem";
+import { type Address, type Hex, type Log, encodeFunctionData, formatUnits, isAddressEqual, parseAbi, parseEventLogs } from "viem";
 import { AGENT_ADDRESS, CELO_CHAIN_ID, FUND_FACTORY, IDENTITY_REGISTRY } from "./chain";
 import { LIMITS } from "./limits";
 
 export const identityRegistryAbi = parseAbi([
   "function register(string agentURI) returns (uint256 agentId)",
+  "function setAgentURI(uint256 agentId, string newURI)",
   "function balanceOf(address owner) view returns (uint256)",
+  "function ownerOf(uint256 tokenId) view returns (address)",
   "function tokenURI(uint256 tokenId) view returns (string)",
   "function getAgentWallet(uint256 agentId) view returns (address)",
   "event Registered(uint256 indexed agentId, string agentURI, address indexed owner)",
+  "event URIUpdated(uint256 indexed agentId, string newURI, address indexed updatedBy)",
 ]);
 
 /**
@@ -77,4 +80,21 @@ export function agentIdFromLogs(logs: Log[]): bigint {
   );
   if (registered === undefined) throw new Error("The receipt has no Registered event from the Identity Registry");
   return registered.args.agentId;
+}
+
+/**
+ * `setAgentURI(agentId, AGENT_URI)` on the Identity Registry. With the same URI it changes nothing on chain, but its
+ * URIUpdated event tells indexers such as 8004scan to read the registration file again after a commit changed it.
+ */
+export function setAgentUriData(agentId: bigint): Hex {
+  return encodeFunctionData({ abi: identityRegistryAbi, functionName: "setAgentURI", args: [agentId, AGENT_URI] });
+}
+
+/** The URI update that a receipt logs, from the Identity Registry's `URIUpdated` event. */
+export function uriUpdateFromLogs(logs: Log[]): { agentId: bigint; newURI: string; updatedBy: Address } {
+  const updated = parseEventLogs({ abi: identityRegistryAbi, eventName: "URIUpdated", logs }).find((log) =>
+    isAddressEqual(log.address, IDENTITY_REGISTRY),
+  );
+  if (updated === undefined) throw new Error("The receipt has no URIUpdated event from the Identity Registry");
+  return updated.args;
 }

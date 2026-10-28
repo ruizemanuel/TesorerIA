@@ -10,9 +10,10 @@ import { createPublicClient, erc20Abi, formatUnits, http, isAddressEqual } from 
 import { celo } from "viem/chains";
 import { AGENT_ADDRESS, IDENTITY_REGISTRY, USDT } from "../src/chain";
 import { shortMessage } from "../src/errors";
-import { AGENT_URI, agentIdFromLogs, identityRegistryAbi, registerData, registrationFile } from "../src/registration";
+import { AGENT_URI, agentIdFromLogs, identityRegistryAbi, registerData } from "../src/registration";
 import { createAgentSigner } from "../src/signer";
 import { agentKey, rpcUrl } from "./env";
+import { publishedProblem } from "./published";
 
 async function main(): Promise<number> {
   const send = process.argv.includes("--send");
@@ -34,20 +35,9 @@ async function main(): Promise<number> {
   console.log(`agentURI: ${AGENT_URI}`);
 
   // The URI goes on chain for good: it must already serve exactly this repo's file.
-  const published = await fetch(AGENT_URI, { cache: "no-store" })
-    .then(async (response) =>
-      response.ok ? { text: await response.text() } : { problem: `The agentURI answered HTTP ${response.status}.` },
-    )
-    .catch((error: unknown) => ({ problem: `The agentURI is unreachable: ${shortMessage(error)}.` }));
-  if ("problem" in published) {
-    console.error(published.problem);
-    return 1;
-  }
-  if (published.text !== registrationFile()) {
-    console.error(
-      "The agentURI serves a file whose content differs from this repo's registration.json: push it to main, " +
-        "and give GitHub's cache up to 5 minutes.",
-    );
+  const problem = await publishedProblem();
+  if (problem !== undefined) {
+    console.error(problem);
     return 1;
   }
   console.log("The agentURI serves this repo's registration.json.");

@@ -10,6 +10,8 @@ import {
   identityRegistryAbi,
   registerData,
   registrationFile,
+  setAgentUriData,
+  uriUpdateFromLogs,
 } from "../src/registration";
 
 const REGISTRATION_JSON = new URL("../registration.json", import.meta.url);
@@ -26,6 +28,14 @@ function registeredLog(address: Hex, agentId: bigint): Log {
     transactionHash: pad("0x02", { size: 32 }),
     transactionIndex: 0,
     removed: false,
+  };
+}
+
+function uriUpdatedLog(address: Hex, agentId: bigint, newURI: string): Log {
+  return {
+    ...registeredLog(address, agentId),
+    topics: encodeEventTopics({ abi: identityRegistryAbi, eventName: "URIUpdated", args: { agentId, updatedBy: AGENT_ADDRESS } }) as [Hex, ...Hex[]],
+    data: encodeAbiParameters([{ type: "string" }], [newURI]),
   };
 }
 
@@ -67,5 +77,20 @@ describe("the ERC-8004 registration", () => {
     const impostor = "0x000000000000000000000000000000000000bEEF";
     expect(agentIdFromLogs([registeredLog(impostor, 1n), registeredLog(IDENTITY_REGISTRY, 9_887n)])).toBe(9_887n);
     expect(() => agentIdFromLogs([registeredLog(impostor, 1n)])).toThrow("no Registered event");
+  });
+
+  it("sets the agent's URI to AGENT_URI again, so indexers read the file again", () => {
+    expect(decodeFunctionData({ abi: identityRegistryAbi, data: setAgentUriData(9_887n) })).toEqual({
+      functionName: "setAgentURI",
+      args: [9_887n, AGENT_URI],
+    });
+  });
+
+  it("reads the URI update from the Identity Registry's URIUpdated event, and from nowhere else", () => {
+    const impostor = "0x000000000000000000000000000000000000bEEF";
+    expect(
+      uriUpdateFromLogs([uriUpdatedLog(impostor, 1n, "https://example.com"), uriUpdatedLog(IDENTITY_REGISTRY, 9_887n, AGENT_URI)]),
+    ).toEqual({ agentId: 9_887n, newURI: AGENT_URI, updatedBy: AGENT_ADDRESS });
+    expect(() => uriUpdateFromLogs([uriUpdatedLog(impostor, 9_887n, AGENT_URI)])).toThrow("no URIUpdated event");
   });
 });

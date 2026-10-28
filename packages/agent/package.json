@@ -14,6 +14,7 @@
     "deploy:factory": "tsx --env-file-if-exists=.env.local scripts/deploy-factory.ts",
     "agent:tick": "tsx --env-file-if-exists=.env.local scripts/tick.ts",
     "register:agent": "tsx --env-file-if-exists=.env.local scripts/register-agent.ts",
+    "agent-uri:set": "tsx --env-file-if-exists=.env.local scripts/set-agent-uri.ts",
     "registration:write": "tsx scripts/write-registration.ts"
   },
   "dependencies": {
