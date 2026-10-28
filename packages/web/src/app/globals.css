@@ -41,15 +41,21 @@ body {
   padding: 0 3px;
 }
 
-input,
-select,
-textarea {
-  font-size: 16px; /* under 16 px, iOS zooms into the field */
-}
+/*
+ * In the base layer, so a utility can still set them: unlayered CSS beats every layer, utilities too, and kept
+ * Aportar's 44 px amount at 16 px (spec, 9.7). After Tailwind's own base (preflight), they still win over it.
+ */
+@layer base {
+  input,
+  select,
+  textarea {
+    font-size: 16px; /* under 16 px, iOS zooms into the field */
+  }
 
-:focus-visible {
-  outline: 2px solid var(--color-primary);
-  outline-offset: 2px;
+  :focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 2px;
+  }
 }
 
 /* Tailwind 4 leaves buttons with the arrow: everything clickable shows the hand, and nothing disabled does. */
