@@ -1,0 +1,46 @@
+<!doctype html>
+<!--
+  The agent's ERC-8004 image (spec, 8.4): packages/agent/image.png is a screenshot of this page at 512 × 512, with a
+  transparent background, taken with Playwright once the font has loaded. It is the app's agent avatar: a circle in
+  `primary` with "IA" in white, in Encode Sans 800 like the mark on the link preview.
+-->
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Encode+Sans:wdth,wght@75..125,100..900&display=block" rel="stylesheet" />
+    <style>
+      html,
+      body {
+        margin: 0;
+        background: transparent;
+      }
+      body {
+        width: 512px;
+        height: 512px;
+      }
+      /* Its own layer, so Chrome draws the text in greys: subpixel colours would fringe it in the PNG. */
+      .mark {
+        will-change: transform;
+        width: 512px;
+        height: 512px;
+        border-radius: 50%;
+        background: #2638b8;
+        color: #ffffff;
+        display: grid;
+        place-items: center;
+        /* The glyph boxes sit the ink 7 px low and 5.5 px right: this centres it, measured on the PNG. */
+        box-sizing: border-box;
+        padding: 0 11px 14px 0;
+        font-family: "Encode Sans", sans-serif;
+        font-size: 210px;
+        line-height: 1;
+        font-weight: 800;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="mark">IA</div>
+  </body>
+</html>

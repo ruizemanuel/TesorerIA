@@ -17,6 +17,12 @@ export const identityRegistryAbi = parseAbi([
  */
 export const AGENT_URI = "https://raw.githubusercontent.com/ruizemanuel/TesorerIA/main/packages/agent/registration.json";
 
+/**
+ * The agent's avatar, a blue circle with "IA", served next to the registration file. A PNG, so any ERC-721 app can
+ * show it. Drawn from packages/agent/design/image.html.
+ */
+export const AGENT_IMAGE = "https://raw.githubusercontent.com/ruizemanuel/TesorerIA/main/packages/agent/image.png";
+
 /** The agent's ERC-8004 id on Celo, once registered. */
 export const AGENT_ID: bigint | null = 9887n;
 
@@ -43,6 +49,7 @@ export function agentRegistration() {
       `${amount(LIMITS.maxDailyConvertedUsdt, 6)} USDT a day, and ${LIMITS.maxDailyTransactions} transactions a ` +
       `day per fund. Its wallet, ${AGENT_ADDRESS}, pays gas in USDT and tags every transaction with ` +
       "celo_fbe4d00a2cb4.",
+    image: AGENT_IMAGE,
     services: [{ name: "web", endpoint: "https://tesoreria.finance" }],
     x402Support: false,
     active: true,

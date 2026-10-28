@@ -3,6 +3,7 @@ import { type Hex, type Log, decodeFunctionData, encodeAbiParameters, encodeEven
 import { describe, expect, it } from "vitest";
 import { AGENT_ADDRESS, FUND_FACTORY, IDENTITY_REGISTRY } from "../src/chain";
 import {
+  AGENT_IMAGE,
   AGENT_URI,
   agentIdFromLogs,
   agentRegistration,
@@ -12,6 +13,7 @@ import {
 } from "../src/registration";
 
 const REGISTRATION_JSON = new URL("../registration.json", import.meta.url);
+const IMAGE_PNG = new URL("../image.png", import.meta.url);
 
 function registeredLog(address: Hex, agentId: bigint): Log {
   return {
@@ -42,6 +44,15 @@ describe("the ERC-8004 registration", () => {
     expect(file.description).toContain("At the close of each week it writes the group a summary of who owes what and what happened");
     expect(file.services).toEqual([{ name: "web", endpoint: "https://tesoreria.finance" }]);
     expect(file.active).toBe(true);
+  });
+
+  it("shows the agent's avatar as its image, a square PNG served from this repo on GitHub next to the file", () => {
+    expect(agentRegistration().image).toBe(AGENT_IMAGE);
+    expect(AGENT_IMAGE).toBe("https://raw.githubusercontent.com/ruizemanuel/TesorerIA/main/packages/agent/image.png");
+    const png = readFileSync(IMAGE_PNG);
+    expect(png.subarray(0, 8)).toEqual(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+    // The IHDR chunk comes first: its width and height are at bytes 16 and 20.
+    expect([png.readUInt32BE(16), png.readUInt32BE(20)]).toEqual([512, 512]);
   });
 
   it("registers AGENT_URI, served from this repo on GitHub", () => {
