@@ -88,27 +88,22 @@ async function main(): Promise<number> {
 
   const hash = await signer.send({ to: IDENTITY_REGISTRY, data });
   console.log(`Sent: ${hash}`);
+  let receipt: Awaited<ReturnType<typeof client.waitForTransactionReceipt>>;
   try {
-    const receipt = await client.waitForTransactionReceipt({ hash });
-    console.log(`Status: ${receipt.status}, block ${receipt.blockNumber}, ${receipt.gasUsed} gas`);
-    if (receipt.status !== "success") return 1;
-    const update = uriUpdateFromLogs(receipt.logs);
-    // Read at the receipt's block: a node that is still behind it fails instead of answering with older state.
-    const uri = await client.readContract({
-      address: IDENTITY_REGISTRY,
-      abi: identityRegistryAbi,
-      functionName: "tokenURI",
-      args: [AGENT_ID],
-      blockNumber: receipt.blockNumber,
-    });
-    console.log(`URIUpdated: agent id ${update.agentId}, ${update.newURI}, by ${update.updatedBy}. tokenURI: ${uri}.`);
-    if (update.agentId !== AGENT_ID || update.newURI !== AGENT_URI || uri !== AGENT_URI) {
-      console.error(`The registry doesn't show what was just set: check ${hash} on a block explorer.`);
-      return 1;
-    }
+    receipt = await client.waitForTransactionReceipt({ hash });
   } catch (error) {
     console.error(`Failed: ${shortMessage(error)}`);
     console.error(`Do not run --send again until ${hash} is mined or dropped: check it on a block explorer.`);
+    return 1;
+  }
+  console.log(`Status: ${receipt.status}, block ${receipt.blockNumber}, ${receipt.gasUsed} gas`);
+  if (receipt.status !== "success") return 1;
+  // The registry's event is the proof. tokenURI reads the same before and after it, and reading it at the receipt's
+  // block fails on a forno node that doesn't have that block yet (-32019, 28/10).
+  const update = uriUpdateFromLogs(receipt.logs);
+  console.log(`URIUpdated: agent id ${update.agentId}, ${update.newURI}, by ${update.updatedBy}.`);
+  if (update.agentId !== AGENT_ID || update.newURI !== AGENT_URI) {
+    console.error(`The registry doesn't show what was just set: check ${hash} on a block explorer.`);
     return 1;
   }
   console.log(`Next: pnpm --filter @tesoreria/wallet verify ${hash}`);
