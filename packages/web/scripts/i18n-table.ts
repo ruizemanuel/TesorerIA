@@ -82,6 +82,9 @@ const ARGS: Record<string, (k: Kit) => Case[]> = {
   "expenses.amountTooBig": ({ pesos }) => [call(pesos(1_000_000_000_000))],
   "expenses.noteTooLong": () => [call(140)],
   "home.live": ({ bold, fund }) => [call(bold(fund))],
+  "home.rules.alone": ({ bold, pesos, expense }) => [call(expense, bold(pesos(60_000)))],
+  "home.rules.vote": ({ fund }) => [call(fund, 5, 8)],
+  "home.rules.money": ({ m, link }) => [call(link(m.home.rules.contractLink))],
   "home.judges": ({ m, link }) => [
     call(link(m.home.judgesLinks.celo), link(m.home.judgesLinks.contract), link(m.home.judgesLinks.agent), link(m.home.judgesLinks.code)),
   ],
@@ -165,6 +168,7 @@ const ARGS: Record<string, (k: Kit) => Case[]> = {
   "contribute.roomLeft": ({ pesos }) => [call(pesos(10_000), pesos(450_000))],
   "contribute.covers": ({ pesos }) => [call(pesos(10_000))],
   "contribute.worth": ({ pesos }) => [call(pesos(16_000))],
+  "contribute.youHold": ({ bold, usdt }) => [call(bold(usdt(6.18)))],
   "expense.agreed": ({ expense }) => [call(expense)],
   "expense.twin": ({ bold, pesos }) => [call(bold(pesos(45_000)))],
   "cashOut.passed": ({ bold, pesos }) => [call(bold(pesos(45_000)))],
