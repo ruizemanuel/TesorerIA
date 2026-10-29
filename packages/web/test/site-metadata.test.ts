@@ -1,57 +1,33 @@
 import { describe, expect, it } from "vitest";
 import { en } from "../src/lib/i18n/en";
 import { es } from "../src/lib/i18n/es";
-import { pageMetadata, siteMetadata } from "../src/lib/site-metadata";
+import { siteMetadata } from "../src/lib/site-metadata";
 
 describe("siteMetadata", () => {
   it("gives the link preview its absolute base, the name and the page's language", () => {
     const metadata = siteMetadata(es, "es", "https://tesoreria.finance");
     expect(String(metadata.metadataBase)).toBe("https://tesoreria.finance/");
     expect(metadata.description).toBe(es.meta.description);
-    expect(metadata.openGraph).toEqual({
-      type: "website",
-      siteName: "TesorerIA",
-      title: "TesorerIA",
-      description: es.meta.description,
-      locale: "es_AR",
-    });
-    expect(metadata.twitter).toEqual({ card: "summary_large_image", title: "TesorerIA", description: es.meta.description });
+    expect(metadata.twitter).toEqual({ card: "summary_large_image" });
   });
 
   it("is titled TesorerIA, and a page's own title gets the name after it", () => {
     expect(siteMetadata(es, "es", "https://tesoreria.finance").title).toEqual({ default: "TesorerIA", template: "%s · TesorerIA" });
   });
 
+  it("leaves Open Graph's title and description to each page's, which Next copies in with the name: a title of its own would stop it", () => {
+    expect(siteMetadata(es, "es", "https://tesoreria.finance").openGraph).toEqual({ type: "website", siteName: "TesorerIA", locale: "es_AR" });
+  });
+
   it("speaks English to an English request", () => {
     const metadata = siteMetadata(en, "en", "https://tesoreria.finance");
     expect(metadata.description).toBe(en.meta.description);
-    expect(metadata.openGraph).toMatchObject({ description: en.meta.description, locale: "en_US" });
+    expect(metadata.openGraph).toMatchObject({ locale: "en_US" });
   });
 });
 
-describe("pageMetadata: a page's own title in its link preview", () => {
-  it("leaves the name to the layout's template in the tab, and writes it out where the template doesn't reach: Open Graph and X", () => {
-    const metadata = pageMetadata(es, "es", { title: "Crear un fondo" });
-    expect(metadata.title).toBe("Crear un fondo");
-    expect(metadata.openGraph).toEqual({
-      type: "website",
-      siteName: "TesorerIA",
-      title: "Crear un fondo · TesorerIA",
-      description: es.meta.description,
-      locale: "es_AR",
-    });
-    expect(metadata.twitter).toEqual({ card: "summary_large_image", title: "Crear un fondo · TesorerIA", description: es.meta.description });
-  });
-
-  it("says the page's own description everywhere, when it has one", () => {
-    const description = en.meta.publicDescription("Fútbol de los jueves");
-    const metadata = pageMetadata(en, "en", { title: "Fútbol de los jueves", description });
-    expect(metadata.description).toBe(description);
-    expect(metadata.openGraph).toMatchObject({ title: "Fútbol de los jueves · TesorerIA", description, locale: "en_US" });
-    expect(metadata.twitter).toMatchObject({ title: "Fútbol de los jueves · TesorerIA", description });
-  });
-
-  it("says the public view and the invitation as approved, in each language", () => {
+describe("the pages' own titles and descriptions", () => {
+  it("say the public view and the invitation as approved, in each language", () => {
     expect(es.meta.publicDescription("Fútbol de los jueves")).toBe(
       "Fútbol de los jueves, en vivo: lo que hay en el fondo, quién pagó la cuota y lo que hizo el agente.",
     );

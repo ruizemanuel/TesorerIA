@@ -10,14 +10,13 @@ import { draftByInvite } from "../../../lib/funds";
 import { getLocale, getMessages } from "../../../lib/i18n/server";
 import { invitationFor } from "../../../lib/invitation";
 import { NO_JOIN, joinStateOf, openRequestsFromOthers } from "../../../lib/join-requests";
-import { pageMetadata } from "../../../lib/site-metadata";
 
 /** The link preview names the fund it invites to (spec, 9.6): it's what the group sees in the chat. */
 export async function generateMetadata({ params }: { params: Promise<{ code: string }> }): Promise<Metadata> {
   const draft = await draftByInvite(await getDb(), (await params).code);
   if (draft === null) return {};
-  const [m, locale] = await Promise.all([getMessages(), getLocale()]);
-  return pageMetadata(m, locale, { title: m.meta.invitationTitle(draft.name), description: m.meta.invitationDescription });
+  const m = await getMessages();
+  return { title: m.meta.invitationTitle(draft.name), description: m.meta.invitationDescription };
 }
 
 /** The invitation (spec, 9, screen 1), and on a live fund, asking to join it and where that stands (spec, 9.4). */

@@ -65,13 +65,15 @@ function screen(): FundScreen {
 }
 
 const params = <T>(value: T) => ({ params: Promise.resolve(value) });
-/** What a chat's link preview reads: the tab's title, and Open Graph's and X's. */
-const titles = (metadata: Metadata) => ({
-  title: metadata.title,
-  openGraph: (metadata.openGraph as { title?: string } | undefined)?.title,
-  twitter: (metadata.twitter as { title?: string } | undefined)?.title,
-  description: metadata.description,
-});
+/**
+ * A page's own title and description, and nothing of Open Graph or X: Next copies those two into them, with the name,
+ * only while the page leaves them alone. A page's openGraph would replace the site's whole, and its image with it.
+ */
+const ownOnly = (metadata: Metadata) => {
+  expect(metadata).not.toHaveProperty("openGraph");
+  expect(metadata).not.toHaveProperty("twitter");
+  return metadata;
+};
 
 beforeEach(async () => {
   state.db = await testDb();
@@ -83,16 +85,14 @@ describe("each page's title in the link preview", () => {
   it("names the fund an invitation is to, in the reader's language", async () => {
     const ana = await addUser(state.db!, "Ana");
     const fund = await addLiveFund(state.db!, { creatorId: ana.id, address: FUND, members: [ana.id] });
-    expect(titles(await invitation.generateMetadata(params({ code: fund.inviteCode })))).toEqual({
+    expect(ownOnly(await invitation.generateMetadata(params({ code: fund.inviteCode })))).toEqual({
       title: "Te invitaron a Fútbol de los jueves",
-      openGraph: "Te invitaron a Fútbol de los jueves · TesorerIA",
-      twitter: "Te invitaron a Fútbol de los jueves · TesorerIA",
       description: "Sumate al fondo del grupo en TesorerIA.",
     });
     state.acceptLanguage = "en-US,en;q=0.9";
-    expect(titles(await invitation.generateMetadata(params({ code: fund.inviteCode })))).toMatchObject({
+    expect(ownOnly(await invitation.generateMetadata(params({ code: fund.inviteCode })))).toEqual({
       title: "You're invited to Fútbol de los jueves",
-      openGraph: "You're invited to Fútbol de los jueves · TesorerIA",
+      description: "Join the group's fund on TesorerIA.",
     });
   });
 
@@ -102,10 +102,8 @@ describe("each page's title in the link preview", () => {
 
   it("names the fund on its public view and on its public movements, said live", async () => {
     for (const page of [publicView, publicMovements]) {
-      expect(titles(await page.generateMetadata(params({ address: FUND.toLowerCase() })))).toEqual({
+      expect(ownOnly(await page.generateMetadata(params({ address: FUND.toLowerCase() })))).toEqual({
         title: "Fútbol de los jueves",
-        openGraph: "Fútbol de los jueves · TesorerIA",
-        twitter: "Fútbol de los jueves · TesorerIA",
         description: "Fútbol de los jueves, en vivo: lo que hay en el fondo, quién pagó la cuota y lo que hizo el agente.",
       });
     }
@@ -120,9 +118,9 @@ describe("each page's title in the link preview", () => {
   });
 
   it("titles Crear and Entrar with their headings", async () => {
-    expect(titles(await create.generateMetadata())).toMatchObject({ title: "Crear un fondo", openGraph: "Crear un fondo · TesorerIA" });
-    expect(titles(await enter.generateMetadata())).toMatchObject({ title: "Entrá a tu fondo", twitter: "Entrá a tu fondo · TesorerIA" });
+    expect(ownOnly(await create.generateMetadata())).toEqual({ title: "Crear un fondo" });
+    expect(ownOnly(await enter.generateMetadata())).toEqual({ title: "Entrá a tu fondo" });
     state.acceptLanguage = "en";
-    expect(titles(await create.generateMetadata())).toMatchObject({ title: "Create a fund", openGraph: "Create a fund · TesorerIA" });
+    expect(ownOnly(await create.generateMetadata())).toEqual({ title: "Create a fund" });
   });
 });

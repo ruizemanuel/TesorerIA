@@ -5,12 +5,10 @@ import { CreateFundForm } from "../../components/create-fund-form";
 import { LanguageSwitch } from "../../components/language-switch";
 import { Card, Logo } from "../../components/ui";
 import { currentUser } from "../../lib/current-user";
-import { getLocale, getMessages } from "../../lib/i18n/server";
-import { pageMetadata } from "../../lib/site-metadata";
+import { getMessages } from "../../lib/i18n/server";
 
 export async function generateMetadata(): Promise<Metadata> {
-  const [m, locale] = await Promise.all([getMessages(), getLocale()]);
-  return pageMetadata(m, locale, { title: m.home.create });
+  return { title: (await getMessages()).home.create };
 }
 
 export default async function CreatePage() {
