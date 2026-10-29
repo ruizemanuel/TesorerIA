@@ -1,12 +1,30 @@
+import type { PGlite } from "@electric-sql/pglite";
+import { drizzle } from "drizzle-orm/pglite";
 import { type Address, getAddress } from "viem";
 import { generatePrivateKey, privateKeyToAddress } from "viem/accounts";
+import { TestRunner, onTestFinished } from "vitest";
 import { type Db, openDb } from "../../src/lib/db/client";
+import * as schema from "../../src/lib/db/schema";
 import { funds, memberships, users } from "../../src/lib/db/schema";
 
 export const WARS = 10n ** 18n;
 
-export function testDb(): Promise<Db> {
-  return openDb("memory");
+/**
+ * One migrated database per test file, which no test writes to. A new PGlite runs initdb, which takes seconds (most of
+ * a test's time, and over the hook's timeout on a busy machine); a clone of this one takes a fraction of that.
+ */
+let template: Promise<PGlite> | undefined;
+
+/**
+ * A database of its own, with every migration applied: a copy of the template. Each one holds about 250 MB until it is
+ * closed, so it closes when the test that opened it ends, whether it opened in the test or in a beforeEach; one opened
+ * in a beforeAll is the whole file's.
+ */
+export async function testDb(): Promise<Db> {
+  template ??= openDb("memory").then((db) => (db as unknown as { $client: PGlite }).$client);
+  const client = (await (await template).clone()) as PGlite;
+  if (TestRunner.getCurrentTest()) onTestFinished(() => client.close());
+  return drizzle({ client, schema }) as unknown as Db;
 }
 
 /** A throwaway address, as a member's Safe would be. */

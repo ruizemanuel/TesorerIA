@@ -12,7 +12,27 @@ import { acquireLock, releaseLock, withLock } from "../src/lib/db/lock";
 import { credentials, expenses, funds, users } from "../src/lib/db/schema";
 import { WARS, addLiveFund, addUser, randomAccount, testDb } from "./support/db";
 
+describe("the test databases", () => {
+  let openedByTheTestBefore: Db | undefined;
+
+  it("gives each test a database of its own: what one writes, the next never sees", async () => {
+    const first = await testDb();
+    await addUser(first, "Ema");
+    const second = await testDb();
+    expect(await second.select().from(users)).toEqual([]);
+    await addUser(second, "Otra");
+    expect((await first.select().from(users)).map((user) => user.name)).toEqual(["Ema"]);
+    openedByTheTestBefore = first;
+  });
+
+  // The two run in order: this one checks the database the one above opened.
+  it("closes a test's database when the test ends, since each one holds about 250 MB", () => {
+    expect((openedByTheTestBefore as unknown as { $client: PGlite }).$client.closed).toBe(true);
+  });
+});
+
 describe("the database", () => {
+
   it("keeps amounts of any size as bigint", async () => {
     const db = await testDb();
     const ema = await addUser(db, "Ema");
