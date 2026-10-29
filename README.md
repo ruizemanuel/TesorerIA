@@ -47,8 +47,9 @@ Once the dependencies are installed, the builds and tests below need no network,
     pnpm typecheck
 
 - **`forge build` downloads solc 0.8.37 the first time,** unless it's already installed.
-- **Without `--recurse-submodules`,** `forge build` fetches forge-std and OpenZeppelin itself, at the pinned commits. From a source archive, with no git, install them at the same tags from `contracts/`: `forge install --no-git foundry-rs/forge-std@v1.17.0 OpenZeppelin/openzeppelin-contracts@v5.7.0`. The Uniswap v3 files are in the repo ([why](contracts/lib/v3-core/README.md)).
+- **Without `--recurse-submodules`,** `forge build` fetches forge-std and OpenZeppelin itself, at the pinned commits. From a source archive, with no git, their folders come empty: from `contracts/`, remove them and install the same tags with `rmdir lib/forge-std lib/openzeppelin-contracts && forge install --no-git foundry-rs/forge-std@v1.17.0 OpenZeppelin/openzeppelin-contracts@v5.7.0`. The Uniswap v3 files are in the repo ([why](contracts/lib/v3-core/README.md)).
 - **Build the contracts before `pnpm test`:** one of the agent's tests compares its ABIs with the compiled contracts, and skips itself without them.
+- **On a machine with little memory, run `pnpm test --maxWorkers=2`:** each of the web's test workers can take up to about 1 GB, for its in-memory databases.
 
 These need the network, since they run against a fork of Celo mainnet (Foundry's `anvil` and `forno.celo.org`): the fork tests (`pnpm test:fork`, and `forge test --match-path "test/fork/*"` in `contracts/`), the end-to-end test (`pnpm --filter @tesoreria/web test:e2e`, after `pnpm --filter @tesoreria/web exec playwright install chromium`), and the app on a local fork (`pnpm --filter @tesoreria/web e2e:serve`, see [the web](#the-web)).
 
