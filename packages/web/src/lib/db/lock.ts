@@ -17,6 +17,15 @@ export async function acquireLock(db: Db, name: string, owner: string, ttlMs: nu
   return rows[0]?.owner === owner;
 }
 
+/** How many milliseconds until the lock `name` runs out, on the database's clock: 0 if nobody holds it. */
+export async function lockTimeLeft(db: Db, name: string): Promise<number> {
+  const [row] = await db
+    .select({ ms: sql<string>`greatest(0, extract(epoch from (${locks.expiresAt} - now())) * 1000)` })
+    .from(locks)
+    .where(eq(locks.name, name));
+  return row === undefined ? 0 : Math.ceil(Number(row.ms));
+}
+
 /** Releases the lock if `owner` still holds it; someone else's lock is left alone. */
 export async function releaseLock(db: Db, name: string, owner: string): Promise<void> {
   await db.delete(locks).where(and(eq(locks.name, name), eq(locks.owner, owner)));

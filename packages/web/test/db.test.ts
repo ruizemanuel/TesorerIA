@@ -8,7 +8,7 @@ import { drizzle } from "drizzle-orm/pglite";
 import { migrate } from "drizzle-orm/pglite/migrator";
 import { describe, expect, it, vi } from "vitest";
 import { type Db, inTransaction } from "../src/lib/db/client";
-import { acquireLock, releaseLock, withLock } from "../src/lib/db/lock";
+import { acquireLock, lockTimeLeft, releaseLock, withLock } from "../src/lib/db/lock";
 import { credentials, expenses, funds, users } from "../src/lib/db/schema";
 import { WARS, addLiveFund, addUser, randomAccount, testDb } from "./support/db";
 
@@ -173,6 +173,18 @@ describe("the lock", () => {
     // b's runs out a millisecond later on the database's clock, the one acquireLock compares with. A fixed 20 ms sleep
     // failed once in a VM under load (whose time sync can set the clock back), so this waits until it has run out.
     await vi.waitFor(async () => expect(await acquireLock(db, "agent", "c", 60_000)).toBe(true));
+  });
+
+  it("says how long until it runs out, on the database's clock, and 0 when nobody holds it", async () => {
+    const db = await testDb();
+    expect(await lockTimeLeft(db, "cooldown")).toBe(0);
+    await acquireLock(db, "cooldown", "a", 38_000);
+    const left = await lockTimeLeft(db, "cooldown");
+    expect(left).toBeGreaterThan(37_000);
+    expect(left).toBeLessThanOrEqual(38_000);
+    // Run out: a lock left in the table no longer counts.
+    await acquireLock(db, "gone", "a", 1);
+    await vi.waitFor(async () => expect(await lockTimeLeft(db, "gone")).toBe(0));
   });
 
   it("runs one function at a time, and frees the lock even when it throws", async () => {

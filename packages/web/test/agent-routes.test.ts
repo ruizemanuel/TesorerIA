@@ -164,6 +164,22 @@ describe("POST /api/agent/run", () => {
     expect(state.contexts).toBe(1);
   });
 
+  it("says in Retry-After how many seconds are left of the minute, for the browser to ask again then", async () => {
+    expect((await afterContribution()).status).toBe(202);
+    const again = await afterContribution();
+    expect(again.status).toBe(429);
+    expect(["59", "60"]).toContain(again.headers.get("retry-after"));
+  });
+
+  it("counts Retry-After from when the run that took the minute started, rounded up", async () => {
+    // Another member's run took it 22 s ago (the route's cooldown lock, by its name).
+    await acquireLock(db, "agent-run-cooldown", "another member's run", 38_000);
+    const response = await afterContribution();
+    expect(response.status).toBe(429);
+    expect(["37", "38"]).toContain(response.headers.get("retry-after"));
+    expect(state.contexts).toBe(0);
+  });
+
   it("answers 202 without running when another run holds the agent", async () => {
     await acquireLock(db, AGENT_LOCK, "someone else", 60_000);
     const response = await afterContribution();
