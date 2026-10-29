@@ -223,7 +223,7 @@ export const en: Messages = {
     ),
     rules: (fee: ReactNode, cap: ReactNode, expense: string) => (
       <>
-        Each person puts in {fee} per week. The agent pays back up to {cap} per week for {expense}. Everything else is voted on. No one can change this
+        Each person puts in {fee} per week. The agent pays back up to {cap} per week for “{expense}”. Everything else is voted on. No one can change this
         alone, not even the agent.
       </>
     ),
@@ -331,7 +331,7 @@ export const en: Messages = {
     title: "The rules",
     text: (cap: ReactNode, expense: string, left: ReactNode, votes: number, members: number) => (
       <>
-        The agent pays back up to {cap} per week for {expense}. This week's cap has {left} left. Everything else needs {votes} of {members} votes. No
+        The agent pays back up to {cap} per week for “{expense}”. This week's cap has {left} left. Everything else needs {votes} of {members} votes. No
         one can change this alone, not even the agent.
       </>
     ),
@@ -431,7 +431,7 @@ export const en: Messages = {
   },
   expense: {
     which: "Which expense is it?",
-    agreed: (expense: string) => `${expense} (the agreed expense)`,
+    agreed: (expense: string) => `“${expense}” (the agreed expense)`,
     other: "Other expense (voted on)",
     amountLabel: "How much you paid",
     amountPlaceholder: "45,000",
@@ -524,7 +524,7 @@ export const en: Messages = {
       fund: (name: string, balance: string) => `Fund: ${name}. Balance: ${balance}.`,
       closed: " The fund is closed.",
       rules: (fee: string, cap: string, expense: string, spent: string, left: string, votes: number, members: number) =>
-        `Rules: each person puts in ${fee} per week. The agent pays back up to ${cap} per week for ${expense}, the agreed expense: this week it has paid back ${spent} and ${left} is left. Everything else needs ${votes} of ${members} votes. No one can change this alone, not even the agent.`,
+        `Rules: each person puts in ${fee} per week. The agent pays back up to ${cap} per week for “${expense}”, the agreed expense: this week it has paid back ${spent} and ${left} is left. Everything else needs ${votes} of ${members} votes. No one can change this alone, not even the agent.`,
       speaking: (name: string) => `Who's asking: ${name}.`,
       owe: (amount: string) => `You owe ${amount}.`,
       upToDateAhead: (amount: string) => `You're up to date, ${amount} ahead.`,

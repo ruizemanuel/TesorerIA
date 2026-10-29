@@ -176,7 +176,7 @@ const ARS = (pesos: number) => formatPesos(BigInt(pesos) * WARS, "en");
 const ENGLISH_BRIEF = `<estado_del_fondo>
 It's Saturday, October 10, 2026 at 12:00, Argentina time. The fund is in week 3.
 Fund: Thursday football. Balance: ARS 80,000.
-Rules: each person puts in ARS 10,000 per week. The agent pays back up to ARS 60,000 per week for the pitch, the agreed expense: this week it has paid back ARS 45,000 and ARS 15,000 is left. Everything else needs 2 of 3 votes. No one can change this alone, not even the agent.
+Rules: each person puts in ARS 10,000 per week. The agent pays back up to ARS 60,000 per week for “the pitch”, the agreed expense: this week it has paid back ARS 45,000 and ARS 15,000 is left. Everything else needs 2 of 3 votes. No one can change this alone, not even the agent.
 Who's asking: Ana.
 Your situation: You're up to date. If the fund closed today, you'd get ARS 26,666.67.
 This week's list, in the order they joined:
@@ -225,7 +225,7 @@ describe("fundBrief in English: what the model reads when the page is in English
     expect(brief).toContain("It's Saturday, October 10, 2026 at 12:00, Argentina time. The fund is in week 3.");
     expect(brief).toContain(`Fund: Thursday football. Balance: ${ARS(80_000)}.`);
     expect(brief).toContain(
-      `Rules: each person puts in ${ARS(10_000)} per week. The agent pays back up to ${ARS(60_000)} per week for the pitch, the agreed expense: this week it has paid back ${ARS(45_000)} and ${ARS(15_000)} is left. Everything else needs 2 of 3 votes. No one can change this alone, not even the agent.`,
+      `Rules: each person puts in ${ARS(10_000)} per week. The agent pays back up to ${ARS(60_000)} per week for “the pitch”, the agreed expense: this week it has paid back ${ARS(45_000)} and ${ARS(15_000)} is left. Everything else needs 2 of 3 votes. No one can change this alone, not even the agent.`,
     );
     expect(brief).toContain("Who's asking: Ana.");
     expect(brief).toContain("Your situation: You're up to date. If the fund closed today, you'd get");

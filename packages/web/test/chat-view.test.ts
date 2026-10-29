@@ -44,7 +44,7 @@ describe("proposalPreview: what the card says before it's confirmed (spec, 9.2)"
 
   it("says it in English, with the amounts the English way", () => {
     expect(proposalPreview({ kind: "agreed", amount: "45,000", note: "Thursday" }, rules, en)).toEqual({
-      kind: "la cancha (the agreed expense)",
+      kind: "“la cancha” (the agreed expense)",
       amount: 45_000n * WARS,
       note: "Thursday",
       next: `If it fits in what's left of the weekly cap (ARS${NBSP}15,000), I'll pay you back right away. If not, it goes to a vote.`,

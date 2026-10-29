@@ -59,7 +59,7 @@ describe("the dictionaries", () => {
       `Cada uno pone ${pesos.fee} por semana. El agente devuelve hasta ${pesos.cap} por semana por la cancha. Todo lo demás se vota. Nadie puede cambiar esto solo, ni el agente.`,
     );
     expect(html(en.invitation.rules(dollars.fee, dollars.cap, "la cancha"))).toBe(
-      `Each person puts in ${dollars.fee} per week. The agent pays back up to ${dollars.cap} per week for la cancha. Everything else is voted on. No one can change this alone, not even the agent.`,
+      `Each person puts in ${dollars.fee} per week. The agent pays back up to ${dollars.cap} per week for “la cancha”. Everything else is voted on. No one can change this alone, not even the agent.`,
     );
     const judges = (m: Messages) => {
       const { celo, contract, agent, code } = m.home.judgesLinks;
@@ -158,7 +158,7 @@ describe("the dictionaries", () => {
       'El agente devuelve hasta <span class="money">$ 60.000</span> por semana por la cancha. Esta semana quedan <span class="money">$ 55.000</span>. Todo lo demás necesita 3 de 5 votos. Nadie puede cambiar esto solo, ni el agente.',
     );
     expect(html(en.rules.text(money("ARS 60,000"), "la cancha", money("ARS 55,000"), 3, 5))).toBe(
-      `The agent pays back up to <span class="money">ARS 60,000</span> per week for la cancha. This week's cap has <span class="money">ARS 55,000</span> left. Everything else needs 3 of 5 votes. No one can change this alone, not even the agent.`,
+      `The agent pays back up to <span class="money">ARS 60,000</span> per week for “la cancha”. This week's cap has <span class="money">ARS 55,000</span> left. Everything else needs 3 of 5 votes. No one can change this alone, not even the agent.`,
     );
     expect(html(es.fund.inYourAccount(money("$ 1.016,10")))).toBe('En tu cuenta tenés <span class="money">$ 1.016,10</span>.');
     expect(html(en.fund.inYourAccount(money("ARS 1,016.10")))).toBe('You have <span class="money">ARS 1,016.10</span> in your account.');
@@ -234,7 +234,7 @@ describe("the dictionaries", () => {
     // Cargar un gasto
     expect(es.expense.which).toBe("¿Qué gasto es?");
     expect(es.expense.agreed("la cancha")).toBe("la cancha (el gasto acordado)");
-    expect(en.expense.agreed("la cancha")).toBe("la cancha (the agreed expense)");
+    expect(en.expense.agreed("la cancha")).toBe("“la cancha” (the agreed expense)");
     expect([es.expense.other, en.expense.other]).toEqual(["Otro gasto (se vota)", "Other expense (voted on)"]);
     expect([es.expense.amountLabel, es.expense.noteLabel, es.expense.submit]).toEqual(["Cuánto pagaste", "Nota (opcional)", "Cargar el gasto"]);
     expect([en.expense.amountLabel, en.expense.noteLabel, en.expense.submit]).toEqual(["How much you paid", "Note (optional)", "Add the expense"]);
@@ -407,7 +407,7 @@ describe("the dictionaries", () => {
       "Reglas: cada uno pone $ 10.000 por semana. El agente devuelve hasta $ 60.000 por semana por la cancha, el gasto acordado: esta semana devolvió $ 45.000 y quedan $ 15.000. Todo lo demás necesita 2 de 3 votos. Nadie puede cambiar esto solo, ni el agente.",
     );
     expect(e.rules("ARS 10,000", "ARS 60,000", "the pitch", "ARS 45,000", "ARS 15,000", 2, 3)).toBe(
-      "Rules: each person puts in ARS 10,000 per week. The agent pays back up to ARS 60,000 per week for the pitch, the agreed expense: this week it has paid back ARS 45,000 and ARS 15,000 is left. Everything else needs 2 of 3 votes. No one can change this alone, not even the agent.",
+      "Rules: each person puts in ARS 10,000 per week. The agent pays back up to ARS 60,000 per week for “the pitch”, the agreed expense: this week it has paid back ARS 45,000 and ARS 15,000 is left. Everything else needs 2 of 3 votes. No one can change this alone, not even the agent.",
     );
     expect([s.speaking("Ana"), e.speaking("Ana")]).toEqual(["Te habla: Ana.", "Who's asking: Ana."]);
     expect([s.owe("$ 10.000"), s.upToDateAhead("$ 2.000"), s.upToDate]).toEqual(["Debés $ 10.000.", "Estás al día, con $ 2.000 adelantados.", "Estás al día."]);

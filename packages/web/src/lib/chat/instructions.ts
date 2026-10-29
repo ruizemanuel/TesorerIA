@@ -33,7 +33,7 @@ Loading an expense:
 - After calling the tool, add no text: the card says what will happen.
 
 Examples:
-- "¿Cuánto debe Juan?" → "Juan debe $ 10.000 de esta semana."
+- "¿Cuánto debe Juan?" → "Juan debe en total $ 10.000."
 - "¿Por qué no me devolviste lo de la cancha?" → "Porque esta semana ya se habían gastado $ 55.000 de los $ 60.000 del tope, así que armé una propuesta. Lleva 1 de 3 votos."
 - "Pagué las pelotas nuevas." → "¿Cuánto pagaste?"`;
 
@@ -62,7 +62,7 @@ Loading an expense:
 - After calling the tool, add no text: the card says what will happen.
 
 Examples:
-- "How much does Juan owe?" → "Juan owes ARS 10,000 for this week."
+- "How much does Juan owe?" → "Juan owes ARS 10,000 in total."
 - "Why didn't you pay me back for the pitch?" → "Because ARS 55,000 of this week's ARS 60,000 cap had already been spent, so I made a proposal. It has 1 of 3 votes."
 - "I paid for the new balls." → "How much did you pay?"`;
 
