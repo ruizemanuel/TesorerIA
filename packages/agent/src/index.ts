@@ -1,4 +1,4 @@
-export { Action, fundAbi, fundFactoryAbi } from "./abi";
+export { Action, fundAbi, fundErrorAbi, fundFactoryAbi } from "./abi";
 export * from "./chain";
 export { type ConversionDecision, type ConversionPlan, MIN_CONVERSION_USDT, type SkipCode, decideConversion, planConversion } from "./convert";
 export { type ChainReader, type FactoryArtifact, checkPool, factoryDeployData } from "./deploy";

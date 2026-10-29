@@ -33,6 +33,30 @@ export const fundAbi = parseAbi([
   "event RemainderDistributed(uint256 warsBalance, uint256 usdtBalance)",
 ]);
 
+/** Every error `Fund` declares, in its order, without its libraries' (contracts/src/Fund.sol): what a revert of it decodes to. */
+export const fundErrorAbi = parseAbi([
+  "error InvalidParams()",
+  "error NotMember()",
+  "error OnlyAgent()",
+  "error OnlyMemberOrAgent()",
+  "error FundIsClosed()",
+  "error ZeroAmount()",
+  "error BalanceCapExceeded()",
+  "error WeeklyCapExceeded()",
+  "error InsufficientBalance()",
+  "error RecipientNotMember()",
+  "error MinOutTooLow()",
+  "error InsufficientOutput()",
+  "error OnlyPool()",
+  "error ProposalNotFound()",
+  "error ProposalExpired()",
+  "error ProposalAlreadyExecuted()",
+  "error AlreadyVoted()",
+  "error NotEnoughVotes()",
+  "error SwapOverpayment()",
+  "error FundNotClosed()",
+]);
+
 /** `Fund.Action`, in the contract's order. The agent only ever proposes `Pay`. */
 export const Action = { Pay: 0 } as const;
 

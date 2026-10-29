@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import type { Abi, AbiParameter } from "viem";
 import { describe, expect, it } from "vitest";
-import { fundAbi, fundFactoryAbi } from "../src/abi";
+import { fundAbi, fundErrorAbi, fundFactoryAbi } from "../src/abi";
 
 /** What `forge build` writes in contracts/out; absent in a fresh clone until it runs. */
 function compiled(name: string): Abi | null {
@@ -38,5 +38,18 @@ describe.each([
   it.skipIf(source === null)("matches what the contract compiles to (run forge build in contracts/ first)", () => {
     const all = signatures(source as Abi);
     for (const signature of signatures(ours)) expect(all).toContain(signature);
+  });
+});
+
+describe("the agent's ABI of Fund's errors", () => {
+  const source = compiled("Fund");
+  it.skipIf(source === null)("has every error Fund declares, and the compiled ABI adds only its libraries' (run forge build in contracts/ first)", () => {
+    const names = (abi: Abi) => abi.flatMap((item) => (item.type === "error" ? [`${item.name}(${shape(item.inputs)})`] : []));
+    const ours = names(fundErrorAbi);
+    expect(ours).toHaveLength(20);
+    const theirs = names(source as Abi);
+    for (const error of ours) expect(theirs).toContain(error);
+    // OpenZeppelin's ReentrancyGuard and SafeERC20, and Uniswap's TickMath: not Fund's own.
+    expect(theirs.filter((error) => !ours.includes(error)).sort()).toEqual(["ReentrancyGuardReentrantCall()", "SafeERC20FailedOperation(address)", "T()"]);
   });
 });
