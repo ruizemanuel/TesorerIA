@@ -26,28 +26,39 @@ export function quickCeloClient(timeoutMs: number): ChainClient {
 /** Forno's answer to a request at a block the node that took it doesn't have yet: "block is out of range". */
 export const BLOCK_OUT_OF_RANGE = -32019;
 
+/** A request for a block by its number, not by a tag like "latest": a node that answers it with null doesn't have it yet. */
+function blockByNumber({ method, params }: { method: string; params?: unknown }): boolean {
+  return method === "eth_getBlockByNumber" && Array.isArray(params) && typeof params[0] === "string" && params[0].startsWith("0x");
+}
+
 /**
- * `transport`, but a request the node answers with BLOCK_OUT_OF_RANGE is asked again, up to `retries` times,
- * `delayMs` apart. Forno spreads requests over nodes, and a read at the block one of them just gave as the latest can
- * reach another that is a block behind (21/10: 4 reads in 40, each readable again within 400 ms). A fund's screen and
- * the agent's heartbeat read the whole fund at one block, so one such answer failed them all. viem asks again only
- * on a few codes of its own, and this isn't one of them.
+ * `transport`, but a request at a block the node doesn't have yet is asked again, up to `retries` times, `delayMs`
+ * apart. Forno spreads requests over nodes, and a read at the block one of them just gave as the latest can reach
+ * another that is a block behind (21/10: 4 reads in 40, each readable again within 400 ms). A fund's screen and the
+ * agent's heartbeat read the whole fund at one block, so one such answer failed them all. The node says so in two
+ * ways: a call answers BLOCK_OUT_OF_RANGE, and a block asked for by its number comes back null, which viem turns into
+ * "Block at number … could not be found" (29/10: the portada lost its fund to it). viem asks again only on a few codes
+ * of its own, and neither is one of them. A block that still isn't there after the retries comes back null as it did.
  */
 export function retryingBlockOutOfRange(transport: Transport, { retries = 3, delayMs = 500 }: { retries?: number; delayMs?: number } = {}): Transport {
   return (config) => {
     const inner = transport(config);
-    const request: typeof inner.request = async (args, options) => {
+    type Request = typeof inner.request;
+    const request = async (args: Parameters<Request>[0], options?: Parameters<Request>[1]): Promise<unknown> => {
       for (let attempt = 0; ; attempt++) {
         try {
-          return await inner.request(args, options);
+          const result = await inner.request(args, options);
+          const notThereYet = result === null && blockByNumber(args);
+          if (!notThereYet || attempt >= retries) return result;
         } catch (error) {
           const outOfRange = error instanceof BaseError && error.walk((e) => (e as { code?: unknown }).code === BLOCK_OUT_OF_RANGE) !== null;
           if (!outOfRange || attempt >= retries) throw error;
-          await new Promise((resolve) => setTimeout(resolve, delayMs));
         }
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
       }
     };
-    return { ...inner, request };
+    // It answers whatever `inner` answered, so it keeps inner's typing: kept in a variable, the answer is only unknown.
+    return { ...inner, request: request as Request };
   };
 }
 

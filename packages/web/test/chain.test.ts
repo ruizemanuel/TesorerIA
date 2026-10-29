@@ -145,4 +145,26 @@ describe("retryingBlockOutOfRange (21/10: forno's -32019)", () => {
     await expect(client.getBalance({ address: ACCOUNT, blockNumber: 80_687_423n })).rejects.toThrow(/invalid params/i);
     expect(fetchFn).toHaveBeenCalledTimes(1);
   });
+
+  // 29/10: forno answers a block it doesn't have yet with a null block, not -32019, and the portada lost its fund.
+  const noBlock = { result: null };
+  const aBlock = { result: { number: "0x4da2263", timestamp: "0x6a1b2c3d", hash: pad("0x01", { size: 32 }), transactions: [] } };
+
+  it("asks again for a block by its number that the node answers with null, and answers once one has it", async () => {
+    const { client, fetchFn } = clientAnswering([noBlock, noBlock, aBlock]);
+    expect((await client.getBlock({ blockNumber: 81_410_595n })).timestamp).toBe(0x6a1b2c3dn);
+    expect(fetchFn).toHaveBeenCalledTimes(3);
+  });
+
+  it("gives up after its retries on a block that still isn't there: viem says it couldn't find it", async () => {
+    const { client, fetchFn } = clientAnswering([noBlock, noBlock, noBlock, aBlock], 2);
+    await expect(client.getBlock({ blockNumber: 81_410_595n })).rejects.toThrow(/could not be found/);
+    expect(fetchFn).toHaveBeenCalledTimes(3);
+  });
+
+  it("never asks again for the latest block, whatever the node answers", async () => {
+    const { client, fetchFn } = clientAnswering([noBlock, aBlock]);
+    await expect(client.getBlock({ blockTag: "latest" })).rejects.toThrow(/could not be found/);
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+  });
 });
