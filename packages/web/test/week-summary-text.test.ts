@@ -77,8 +77,8 @@ The fund holds ARS 80,000.
 
 What happened:
 · Together you contributed ARS 60,000.
-· I paid Ema back ARS 60,000 for la cancha.
-· Paying Ale ARS 8,000 for las pelotas was approved.
+· I paid Ema back ARS 60,000 for “la cancha”.
+· Paying Ale ARS 8,000 for “las pelotas” was approved.
 
 To contribute: ${LINK}`),
     );

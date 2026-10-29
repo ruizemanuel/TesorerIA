@@ -328,13 +328,13 @@ describe("buildTimeline in English", () => {
       ],
     });
     expect(items.map((i) => [i.actor, i.text])).toEqual([
-      [{ kind: "agent" }, ars("I paid Ana back ARS 45,000 for la cancha. This week's cap has ARS 15,000 left.")],
+      [{ kind: "agent" }, ars("I paid Ana back ARS 45,000 for “la cancha”. This week's cap has ARS 15,000 left.")],
       [{ kind: "member", name: "Ana" }, ars("Ana contributed ARS 10,000.")],
-      [{ kind: "agent" }, ars("I changed the 10 USDT that came in into pesos: ARS 16,050.")],
+      [{ kind: "agent" }, ars("I converted the 10 USDT that came in to ARS 16,050.")],
       [{ kind: "member", name: "Beto" }, ars("Beto contributed 10 USDT.")],
     ]);
-    expect(items[0]!.text.startsWith(`I paid Ana back ARS${NBSP}45,000 for la cancha.`)).toBe(true);
-    expect(items[0]?.detail).toBe(ars("It was la cancha, which I pay back without a vote up to ARS 60,000 per week."));
+    expect(items[0]!.text.startsWith(`I paid Ana back ARS${NBSP}45,000 for “la cancha”.`)).toBe(true);
+    expect(items[0]?.detail).toBe(ars("It was “la cancha”, which I pay back without a vote up to ARS 60,000 per week."));
   });
 
   it("writes amounts the English way, with the point for decimals", () => {
@@ -345,7 +345,7 @@ describe("buildTimeline in English", () => {
       ],
     });
     expect(items.map((i) => i.text)).toEqual([
-      ars("I changed the 10.5 USDT that came in into pesos: ARS 16,050.37."),
+      ars("I converted the 10.5 USDT that came in to ARS 16,050.37."),
       ars("Beto contributed 10.5 USDT."),
     ]);
   });
@@ -353,7 +353,7 @@ describe("buildTimeline in English", () => {
   it("explains the conversion in plain words, without naming the exchange or the price feed (spec, 9)", () => {
     const [conversion] = english({ events: [event("Conversion", { usdtIn: 10n * USDT_UNIT, warsOut: 16_050n * WARS }, BLOCK - 500n)] });
     expect(conversion?.detail).toBe(
-      "I changed them into pesos and checked that the price wasn't more than 2 % away from the dollar's reference price, as my rules say.",
+      "I converted them and checked that the price was within 2 % of the dollar's reference price, as my rules say.",
     );
     expect(conversion?.detail).not.toMatch(/\b(uniswap|chainlink|oracle|pool|gas|hash|wallet|blockchain|token|exchange)\b/i);
   });
@@ -367,9 +367,9 @@ describe("buildTimeline in English", () => {
       ],
     });
     expect(items.map((i) => i.text)).toEqual([
-      ars("I paid Beto back ARS 50,000 for la cancha. This week's cap has ARS 30,000 left."),
-      ars("The weekly cap for la cancha is now ARS 80,000."),
-      ars("I paid Ana back ARS 20,000 for la cancha. That week's cap had ARS 40,000 left."),
+      ars("I paid Beto back ARS 50,000 for “la cancha”. This week's cap has ARS 30,000 left."),
+      ars("The weekly cap for “la cancha” is now ARS 80,000."),
+      ars("I paid Ana back ARS 20,000 for “la cancha”. That week's cap had ARS 40,000 left."),
     ]);
   });
 
@@ -381,11 +381,11 @@ describe("buildTimeline in English", () => {
         id: "conversion-hold",
         at,
         actor: { kind: "agent" },
-        text: ars("I haven't changed 5 USDT into pesos yet: the dollar's reference price isn't up to date. I'll try again in a few minutes."),
+        text: ars("I haven't converted 5 USDT to pesos yet: the dollar's reference price isn't up to date. I'll try again in a few minutes."),
       },
     ]);
-    expect(hold("daily-limit")[0]?.text).toContain(": I've already changed all I can change in a day for this fund.");
-    expect(hold("pool-depth")[0]?.text).toContain(": the market where I change them doesn't have enough pesos.");
+    expect(hold("daily-limit")[0]?.text).toContain(": I've already converted all I can in a day for this fund.");
+    expect(hold("pool-depth")[0]?.text).toContain(": the market where I convert them doesn't have enough pesos.");
     expect(hold("price-gap")[0]?.text).toContain(": the market price is more than 2 % away from the reference.");
     expect(hold("price-floor")[0]?.text).toContain(": the market pays less than my rules allow.");
     // Blocked, or a code this web doesn't know yet.
@@ -395,16 +395,16 @@ describe("buildTimeline in English", () => {
 
   it("says each kind of proposal, in first person when the agent makes it and in third when a member does", () => {
     expect(proposed(0, CARO, 30_000n * WARS, AGENT, "la pelota nueva").text).toBe(
-      ars("I proposed paying Caro ARS 30,000 for la pelota nueva. It has 1 of 2 votes."),
+      ars("I proposed paying Caro ARS 30,000 for “la pelota nueva”. It has 1 of 2 votes."),
     );
     expect(proposed(0, CARO, 30_000n * WARS, AGENT).text).toBe(ars("I proposed paying Caro ARS 30,000. It has 1 of 2 votes."));
     expect(proposed(1, zeroAddress, 0n, BETO).text).toBe("Beto proposed adding a new account to the fund. It has 1 of 2 votes.");
     expect(proposed(2, CARO, 0n, BETO).text).toBe("Beto proposed removing Caro from the fund. It has 1 of 2 votes.");
     expect(proposed(3, CARO, 0n, BETO).text).toBe("Beto proposed changing Caro's account. It has 1 of 2 votes.");
     expect(proposed(4, zeroAddress, 80_000n * WARS, BETO).text).toBe(
-      ars("Beto proposed changing the weekly cap for la cancha to ARS 80,000. It has 1 of 2 votes."),
+      ars("Beto proposed changing the weekly cap for “la cancha” to ARS 80,000. It has 1 of 2 votes."),
     );
-    expect(proposed(5, zeroAddress, 3n, BETO).text).toBe("Beto proposed requiring 3 votes for anything that isn't la cancha. It has 1 of 2 votes.");
+    expect(proposed(5, zeroAddress, 3n, BETO).text).toBe("Beto proposed requiring 3 votes for anything that isn't “la cancha”. It has 1 of 2 votes.");
     expect(proposed(6, zeroAddress, 0n, BETO).text).toBe("Beto proposed changing the agent. It has 1 of 2 votes.");
     expect(proposed(7, zeroAddress, 0n, BETO).text).toBe("Beto proposed closing the fund and splitting the balance. It has 1 of 2 votes.");
     expect(proposed(0, CARO, 30_000n * WARS, AGENT).detail).toBe("What I can't pay back on my own has to be voted on: 2 votes are needed.");
@@ -415,7 +415,7 @@ describe("buildTimeline in English", () => {
     const pay = proposal(0, CARO, 30_000n * WARS, AGENT, "la pelota nueva");
     const stand = (state: ProposalState, change: Partial<Parameters<typeof buildTimeline>[0]> = {}) =>
       english({ events: [pay], proposals: new Map([[0n, state]]), ...change })[0]!;
-    const head = "I proposed paying Caro ARS 30,000 for la pelota nueva.";
+    const head = "I proposed paying Caro ARS 30,000 for “la pelota nueva”.";
     const ready = { votes: 2, executed: false, deadline: CLOCK.timestamp + 86_400n, voted: true };
 
     expect(stand(open)).toMatchObject({
@@ -449,8 +449,8 @@ describe("buildTimeline in English", () => {
     expect(items.map((i) => [i.actor.kind, i.text])).toEqual([
       ["group", "The fund was closed and the balance was split according to what each person contributed."],
       ["group", "The fund's agent was changed."],
-      ["group", "Now 3 votes are needed for anything that isn't la cancha."],
-      ["group", ars("The weekly cap for la cancha is now ARS 80,000.")],
+      ["group", "Now 3 votes are needed for anything that isn't “la cancha”."],
+      ["group", ars("The weekly cap for “la cancha” is now ARS 80,000.")],
       ["group", "Caro left the fund and took their share."],
       ["group", "Ana switched accounts."],
       ["group", "A new account joined the fund."],
@@ -475,7 +475,7 @@ describe("buildTimeline in English", () => {
     const [paidBack] = english({
       events: [event("Reimbursement", { member: zeroAddress, amount: 45_000n * WARS, ref: pad("0x01", { size: 32 }), week: 2n }, BLOCK - 100n)],
     });
-    expect(paidBack?.text).toBe(ars("I paid someone back ARS 45,000 for la cancha. This week's cap has ARS 15,000 left."));
+    expect(paidBack?.text).toBe(ars("I paid someone back ARS 45,000 for “la cancha”. This week's cap has ARS 15,000 left."));
   });
 
   it("shows a member's name as they wrote it where it starts a sentence, and capitalizes only the stand-ins", () => {
@@ -519,7 +519,7 @@ describe("buildTimeline in English", () => {
         expense("rejected", "6", ""),
       ],
     });
-    const what = "the ARS 45,000 expense that Ana added (la cancha del jueves)";
+    const what = "the ARS 45,000 expense that Ana added (“la cancha del jueves”)";
     expect(items.map((i) => [i.text, i.pending ?? false])).toEqual([
       [ars(`I'm looking at ${what}.`), true],
       [ars(`I'm looking at ${what}.`), true],
