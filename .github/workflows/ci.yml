@@ -75,11 +75,9 @@ jobs:
       - name: Test the agent
         run: pnpm --filter @tesoreria/agent test
 
-      # The default timeouts (a 10 s hook, a 20 s test) are tuned for a developer machine. Most files open a PGlite
-      # database in a beforeAll hook, and when the four workers start at once on a shared runner that alone can take
-      # longer than 10 s, which fails the whole file ("Hook timed out in 10000ms"). Only the timeouts change.
+      # Its timeouts, set for a shared runner, are in packages/web/vitest.config.ts, so `pnpm test` runs the same anywhere.
       - name: Test the web
-        run: pnpm --filter @tesoreria/web test --hookTimeout=60000 --testTimeout=60000
+        run: pnpm --filter @tesoreria/web test
 
       # No environment variables: every route is rendered on request, and the settings (src/lib/env.ts) are only read
       # and validated there, never while building.
