@@ -170,8 +170,9 @@ describe("the lock", () => {
     expect(await acquireLock(db, "agent", "b", 60_000)).toBe(false);
     await releaseLock(db, "agent", "a");
     expect(await acquireLock(db, "agent", "b", 1)).toBe(true);
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(await acquireLock(db, "agent", "c", 60_000)).toBe(true); // b's ran out
+    // b's runs out a millisecond later on the database's clock, the one acquireLock compares with. A fixed 20 ms sleep
+    // failed once in a VM under load (whose time sync can set the clock back), so this waits until it has run out.
+    await vi.waitFor(async () => expect(await acquireLock(db, "agent", "c", 60_000)).toBe(true));
   });
 
   it("runs one function at a time, and frees the lock even when it throws", async () => {
