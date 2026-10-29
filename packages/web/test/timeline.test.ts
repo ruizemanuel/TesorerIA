@@ -5,7 +5,7 @@ import type { ExpenseStatus } from "../src/lib/db/schema";
 import { NBSP, formatUsdt } from "../src/lib/format";
 import { en } from "../src/lib/i18n/en";
 import { es } from "../src/lib/i18n/es";
-import { type ProposalState, buildTimeline } from "../src/lib/timeline";
+import { type ProposalState, type TimelineItem, buildTimeline, splitYourTurn } from "../src/lib/timeline";
 import { AGENT, ANA, BETO, BLOCK, CARO, CLOCK, NOW, START, USDT_UNIT, WARS, event } from "./support/fixtures";
 
 const NAMES = new Map<Address, string>([
@@ -710,5 +710,52 @@ describe("buildTimeline: asking to join a live fund (spec, 9.4)", () => {
     it("shows nothing on the public view, where requests never show, however the names match", () => {
       expect(room({ memberNames: [...MEMBERS, "Lucas"], joinRequests: [asked, named("Lucas", MORA)], viewerIsMember: false })).toEqual([]);
     });
+  });
+});
+
+describe("splitYourTurn (Te toca)", () => {
+  /** A movement `minutes` before NOW, with its action. */
+  const row = (id: string, minutes: number, action?: TimelineItem["action"]): TimelineItem => ({
+    id,
+    at: new Date(NOW.getTime() - minutes * 60_000),
+    actor: { kind: "member", name: "Ana" },
+    text: `${id}.`,
+    action,
+  });
+  const vote = (canVote: boolean, voted = false): TimelineItem["action"] => ({
+    kind: "vote",
+    proposalId: 1n,
+    votes: 1,
+    required: 2,
+    canVote,
+    voted,
+    completes: true,
+  });
+  const execute = (canExecute: boolean): TimelineItem["action"] => ({ kind: "execute", proposalId: 2n, canExecute });
+
+  it("takes out what waits for the viewer, oldest first, and leaves the rest newest first", () => {
+    const items = [
+      row("contribution", 1, { kind: "receipt", tx: pad("0x01", { size: 32 }) }),
+      row("to vote", 5, vote(true)),
+      row("conversion", 9),
+      row("to carry out", 60, execute(true)),
+    ];
+    const { yourTurn, rest } = splitYourTurn(items);
+    expect(yourTurn.map((item) => item.id)).toEqual(["to carry out", "to vote"]);
+    expect(rest.map((item) => item.id)).toEqual(["contribution", "conversion"]);
+  });
+
+  it("leaves where they are a vote already cast or on its way, and a proposal the viewer can't carry out", () => {
+    const items = [row("voted", 1, vote(false, true)), row("vote on its way", 2, vote(false)), row("can't carry out", 3, execute(false))];
+    const { yourTurn, rest } = splitYourTurn(items);
+    expect(yourTurn).toEqual([]);
+    expect(rest).toEqual(items);
+  });
+
+  it("has nothing for anyone once the fund is closed: its proposals can't be voted or carried out", () => {
+    const items = [row("to vote", 5, vote(true)), row("to carry out", 60, execute(true))];
+    const { yourTurn, rest } = splitYourTurn(items, { closed: true });
+    expect(yourTurn).toEqual([]);
+    expect(rest).toEqual(items);
   });
 });

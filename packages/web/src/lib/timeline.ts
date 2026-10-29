@@ -339,6 +339,27 @@ export function buildTimeline({
   return items.sort((x, y) => y.at.getTime() - x.at.getTime());
 }
 
+/** A proposal that waits for the viewer: one they can vote, or one with its votes that they can carry out. */
+function waitsForViewer({ action }: TimelineItem): boolean {
+  return (action?.kind === "vote" && action.canVote) || (action?.kind === "execute" && action.canExecute);
+}
+
+/**
+ * Te toca (spec, 9.8): what waits for the viewer, oldest first, since a proposal expires 7 days after it's made; and
+ * the rest of `items` (newest first, as buildTimeline gives them), for the inicio's latest without repeating it. A
+ * closed fund has nothing: its proposals can no longer be voted or carried out.
+ */
+export function splitYourTurn(
+  items: readonly TimelineItem[],
+  { closed = false }: { closed?: boolean } = {},
+): { yourTurn: TimelineItem[]; rest: TimelineItem[] } {
+  if (closed) return { yourTurn: [], rest: [...items] };
+  return {
+    yourTurn: items.filter(waitsForViewer).reverse(),
+    rest: items.filter((item) => !waitsForViewer(item)),
+  };
+}
+
 /** A sentence and, when there is one, the one that goes after it. */
 function joined(sentence: string, after: string): string {
   return after === "" ? sentence : `${sentence} ${after}`;

@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import type { CurrentUser } from "../lib/current-user";
 import { getLocale, getMessages } from "../lib/i18n/server";
 import type { FundScreen } from "../lib/read-fund";
+import { splitYourTurn } from "../lib/timeline";
 import { AgentButton, TabBar, TopBar } from "./bars";
 import { FundHeader } from "./fund-header";
 import { type KeyChangeAsk, KeyChangeCard } from "./key-change-card";
@@ -11,6 +12,7 @@ import { PublicNotice } from "./public-notice";
 import { RulesCard } from "./rules-card";
 import { Card, CardTitle } from "./ui";
 import { WeekList } from "./week-list";
+import { YourTurn } from "./your-turn";
 
 /** The phone's card under the week (spec, 9.2). */
 const PHONE_LATEST = 3;
@@ -44,9 +46,9 @@ export async function FundScreenView({
   const locale = await getLocale();
   const { view, timeline, publicView } = screen;
   const userName = publicView ? undefined : user?.name;
-  const movements = {
-    items: timeline,
-    href: movementsPath(view.address, publicView),
+  // What waits for the viewer goes up to Te toca (spec, 9.8), and the latest show the rest, without repeating it.
+  const { yourTurn, rest } = splitYourTurn(timeline, { closed: view.closed });
+  const list = {
     fund: view.address,
     fundName: view.name,
     now: new Date(),
@@ -56,6 +58,7 @@ export async function FundScreenView({
     m,
     locale,
   };
+  const movements = { ...list, items: rest, href: movementsPath(view.address, publicView) };
   return (
     <div className="min-h-dvh pb-24 lg:pb-0">
       <TopBar fundName={view.name} address={view.address} userName={userName} m={m} />
@@ -73,6 +76,7 @@ export async function FundScreenView({
           />
           <div className="mx-auto grid w-full max-w-[560px] gap-3 px-4 lg:max-w-none lg:gap-4 lg:px-0">
             {!publicView && keyChange !== undefined && <KeyChangeCard due={keyChange.due} resume={keyChange.resume} />}
+            <YourTurn items={yourTurn} {...list} />
             <WeekList view={view} justPaid={previousBalance !== undefined} m={m} locale={locale} />
             <Card className="lg:hidden">
               <CardTitle>{m.movements.latest}</CardTitle>

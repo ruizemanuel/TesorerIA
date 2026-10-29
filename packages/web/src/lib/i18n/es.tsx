@@ -429,6 +429,8 @@ export const es = {
     viewReceipt: "Ver comprobante",
     viewSummary: "Ver el resumen",
     voted: "Votaste",
+    /** The inicio's card of the proposals that wait for the viewer's vote or execution (spec, 9.8). */
+    yourTurn: "Te toca",
   },
   /** The comprobante: the only link to the chain. */
   receipt: {

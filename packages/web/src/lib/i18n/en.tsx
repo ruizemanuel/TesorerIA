@@ -353,6 +353,7 @@ export const en: Messages = {
     viewReceipt: "View receipt",
     viewSummary: "See the summary",
     voted: "You voted",
+    yourTurn: "Your turn",
   },
   receipt: {
     viewOnExplorer: "View on the Celo explorer",
