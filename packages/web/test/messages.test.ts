@@ -66,10 +66,10 @@ describe("the dictionaries", () => {
       return html(m.home.judges(link(celo), link(contract), link(agent), link(code)));
     };
     expect(judges(es)).toBe(
-      "Corre en <a>Celo mainnet</a>, con <a>el contrato verificado</a>, <a>el agente registrado en ERC-8004 (#9887)</a> y <a>el código abierto</a>.",
+      "Corre en <a>Celo mainnet</a>, con <a>la FundFactory verificada</a>, <a>el agente registrado en ERC-8004 (#9887)</a> y <a>el código abierto</a>.",
     );
     expect(judges(en)).toBe(
-      "Runs on <a>Celo mainnet</a>, with <a>the verified contract</a>, <a>the agent registered in ERC-8004 (#9887)</a> and <a>the open-source code</a>.",
+      "Runs on <a>Celo mainnet</a>, with <a>the verified FundFactory</a>, <a>the agent registered in ERC-8004 (#9887)</a> and <a>the open-source code</a>.",
     );
     expect(html(es.login.firstTime(link(es.login.createLink)))).toBe(
       "¿Es tu primera vez? Entrá con el link de invitación que te pasaron, o <a>creá un fondo</a>.",
@@ -77,6 +77,40 @@ describe("the dictionaries", () => {
     expect(html(en.login.firstTime(link(en.login.createLink)))).toBe("First time here? Open the invitation link you were sent, or <a>create a fund</a>.");
     expect(html(es.home.live(link("Fútbol")))).toBe("<a>Fútbol</a>, en vivo.");
     expect(html(en.home.live(link("Fútbol")))).toBe("<a>Fútbol</a>, live.");
+  });
+
+  it("say on the portada what the agent does on its own, what takes a vote, where the money is and what happens if you leave", () => {
+    // React escapes the apostrophe in markup ("fund&#x27;s"); the page shows it as a plain one.
+    const html = (node: ReactNode) => renderToStaticMarkup(node).replaceAll("&#x27;", "'");
+    const money = (text: string) => createElement("span", { className: "money" }, text);
+    const link = (text: string) => createElement("a", null, text);
+    expect(es.home.rules.title).toBe("Qué hace el agente solo y qué se vota");
+    expect(en.home.rules.title).toBe("What the agent does on its own, and what takes a vote");
+    expect(html(es.home.rules.alone("la cancha", money(`$${NBSP}60.000`)))).toBe(
+      `Solo, el agente pasa a pesos los USDT que entran y devuelve la cancha hasta <span class="money">$${NBSP}60.000</span> por semana, siempre a un miembro.`,
+    );
+    // In English, what the group wrote goes in quotes: it stays in Spanish.
+    expect(html(en.home.rules.alone("la cancha", money(`ARS${NBSP}60,000`)))).toBe(
+      `On its own, the agent converts the USDT that comes in to pesos, and pays back “la cancha” up to <span class="money">ARS${NBSP}60,000</span> a week, always to a member.`,
+    );
+    expect(es.home.rules.vote("Fútbol de los jueves", 5, 8)).toBe(
+      "Todo lo demás se vota: otro pago, sumar o sacar a alguien, cambiar el tope o el agente, cerrar el fondo. En Fútbol de los jueves hacen falta 5 de 8 votos.",
+    );
+    expect(en.home.rules.vote("Fútbol de los jueves", 5, 8)).toBe(
+      "Everything else takes a vote: any other payment, adding or removing someone, changing the cap or the agent, closing the fund. In Fútbol de los jueves, it takes 5 of 8 votes.",
+    );
+    expect(html(es.home.rules.money(link(es.home.rules.contractLink)))).toBe(
+      "La plata está en <a>el contrato del propio fondo</a>, no en una cuenta nuestra, y nadie puede cambiar estas reglas solo.",
+    );
+    expect(html(en.home.rules.money(link(en.home.rules.contractLink)))).toBe(
+      "The money sits in <a>the fund's own contract</a>, not in an account of ours, and no one can change these rules alone.",
+    );
+    expect(es.home.rules.leaving).toBe(
+      "Si te vas, el grupo vota tu salida y te llevás tu parte de lo que hay en el fondo, en proporción a lo que aportaste. Si se cierra, se reparte todo igual entre los que quedan.",
+    );
+    expect(en.home.rules.leaving).toBe(
+      "If you leave, the group votes you out and you take your share of what's in the fund, in proportion to what you put in. If it closes, it's all split the same way among those still in it.",
+    );
   });
 
   it("say where you stand with the amount set apart, in each language", () => {

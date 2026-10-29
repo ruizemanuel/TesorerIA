@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { connection } from "next/server";
 import { getAddress } from "viem";
+import { HomeRules } from "../components/home-rules";
 import { LanguageSwitch } from "../components/language-switch";
 import { ButtonLink, Card, Logo } from "../components/ui";
 import { WeekList } from "../components/week-list";
@@ -38,7 +39,7 @@ function judgesLink(href: string, label: string) {
   );
 }
 
-/** The portada (spec, 9.2): what it is, the real group's week live, and the links for the judges. */
+/** The portada (spec, 9.2): what it is, the real group's week and rules live, and the links for the judges. */
 export default async function Home() {
   await connection(); // it depends on who's asking and reads the chain, so it's never prerendered at build time
   const m = await getMessages();
@@ -103,6 +104,7 @@ export default async function Home() {
           ))}
         </ol>
       </Card>
+      {real && <HomeRules view={real.view} m={m} locale={locale} />}
       <p className="text-[13px] text-muted">
         {m.home.judges(
           judgesLink("https://celo.blockscout.com", m.home.judgesLinks.celo),

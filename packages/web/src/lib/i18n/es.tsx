@@ -118,6 +118,24 @@ export const es = {
       "Cada uno aporta su cuota, en pesos o en USDT.",
       "El agente devuelve lo acordado, lleva la cuenta de quién debe, y lo demás se vota.",
     ],
+    /**
+     * The real group's fund in numbers, read from the chain: `expense` is what the group wrote, `cap` stands out as an
+     * amount, and `contract` is the link to the fund's own contract, with `contractLink` as its text.
+     */
+    rules: {
+      title: "Qué hace el agente solo y qué se vota",
+      alone: (expense: string, cap: ReactNode) => (
+        <>
+          Solo, el agente pasa a pesos los USDT que entran y devuelve {expense} hasta {cap} por semana, siempre a un miembro.
+        </>
+      ),
+      vote: (fund: string, votes: number, members: number) =>
+        `Todo lo demás se vota: otro pago, sumar o sacar a alguien, cambiar el tope o el agente, cerrar el fondo. En ${fund} hacen falta ${votes} de ${members} votos.`,
+      money: (contract: ReactNode) => <>La plata está en {contract}, no en una cuenta nuestra, y nadie puede cambiar estas reglas solo.</>,
+      contractLink: "el contrato del propio fondo",
+      leaving:
+        "Si te vas, el grupo vota tu salida y te llevás tu parte de lo que hay en el fondo, en proporción a lo que aportaste. Si se cierra, se reparte todo igual entre los que quedan.",
+    },
     /** For the judges: each argument is a link, the text of which is in `judgesLinks`. */
     judges: (celo: ReactNode, contract: ReactNode, agent: ReactNode, code: ReactNode) => (
       <>
@@ -126,7 +144,7 @@ export const es = {
     ),
     judgesLinks: {
       celo: "Celo mainnet",
-      contract: "el contrato verificado",
+      contract: "la FundFactory verificada",
       agent: "el agente registrado en ERC-8004 (#9887)",
       code: "el código abierto",
     },

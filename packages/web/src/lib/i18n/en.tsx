@@ -104,6 +104,20 @@ export const en: Messages = {
       "Each one puts in their weekly dues, in pesos or in USDT.",
       "The agent pays back what was agreed, keeps track of who is behind, and everything else is voted on.",
     ],
+    rules: {
+      title: "What the agent does on its own, and what takes a vote",
+      alone: (expense: string, cap: ReactNode) => (
+        <>
+          On its own, the agent converts the USDT that comes in to pesos, and pays back “{expense}” up to {cap} a week, always to a member.
+        </>
+      ),
+      vote: (fund: string, votes: number, members: number) =>
+        `Everything else takes a vote: any other payment, adding or removing someone, changing the cap or the agent, closing the fund. In ${fund}, it takes ${votes} of ${members} votes.`,
+      money: (contract: ReactNode) => <>The money sits in {contract}, not in an account of ours, and no one can change these rules alone.</>,
+      contractLink: "the fund's own contract",
+      leaving:
+        "If you leave, the group votes you out and you take your share of what's in the fund, in proportion to what you put in. If it closes, it's all split the same way among those still in it.",
+    },
     judges: (celo: ReactNode, contract: ReactNode, agent: ReactNode, code: ReactNode) => (
       <>
         Runs on {celo}, with {contract}, {agent} and {code}.
@@ -111,7 +125,7 @@ export const en: Messages = {
     ),
     judgesLinks: {
       celo: "Celo mainnet",
-      contract: "the verified contract",
+      contract: "the verified FundFactory",
       agent: "the agent registered in ERC-8004 (#9887)",
       code: "the open-source code",
     },
