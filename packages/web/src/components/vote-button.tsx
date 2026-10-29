@@ -2,7 +2,7 @@
 
 import { useRef, useState } from "react";
 import type { Address } from "viem";
-import { post } from "../lib/client/api";
+import { askAgentToRun } from "../lib/client/agent-run";
 import { isOnItsWay, userMessage } from "../lib/client/errors";
 import { loadMe, sendCalls } from "../lib/client/wallet";
 import { useMessages } from "../lib/i18n/client";
@@ -37,7 +37,7 @@ export function VoteButton({ fund, proposalId, completes }: { fund: Address; pro
         },
         { fund, proposalId: BigInt(proposalId), completes },
       );
-      post("/api/agent/run").catch(() => {}); // the vote may have made something for the agent to do (spec, 8.3)
+      void askAgentToRun(); // the vote may have made something for the agent to do (spec, 8.3)
       setOutcome("voted");
       refresh();
     } catch (caught) {

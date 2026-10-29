@@ -4,7 +4,7 @@ import { USDT, WARS } from "@tesoreria/agent";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { type Address, erc20Abi } from "viem";
-import { post } from "../lib/client/api";
+import { askAgentToRun } from "../lib/client/agent-run";
 import { isOnItsWay, userMessage } from "../lib/client/errors";
 import { celoBrowserClient, loadMe, sendCalls } from "../lib/client/wallet";
 import {
@@ -136,7 +136,7 @@ export function ContributePanel({
       await sendCalls(me, contributeCalls({ fund, token: tab, amount }), { kind: "contribute", fund, amount, token: tab }, () =>
         setStep("sending"),
       );
-      post("/api/agent/run").catch(() => {}); // convert now rather than at the next heartbeat, in either token (spec, 8.3)
+      void askAgentToRun(); // convert now rather than at the next heartbeat, in either token (spec, 8.3)
       router.replace(`/f/${fund}?aporte=${balance}`, { scroll: false });
       refresh();
     } catch (caught) {
