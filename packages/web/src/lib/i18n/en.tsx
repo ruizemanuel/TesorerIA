@@ -198,7 +198,7 @@ export const en: Messages = {
   summary: {
     heading: (week: number, from: string, to: string) => `Week ${week} summary (${from} to ${to})`,
     balance: (amount: string) => `The fund holds ${amount}.`,
-    paid: (paid: number, members: number) => `${paid} of ${members} paid their dues. Still owing:`,
+    paid: (paid: number, members: number) => `${paid} of ${members} paid their dues. Still owing, in total:`,
     owes: (who: string, amount: string) => `${sentenceStart(who)}, ${amount}`,
     allPaid: "Everyone paid their dues.",
     happened: "What happened:",
@@ -320,7 +320,7 @@ export const en: Messages = {
   week: {
     title: "This week",
     dues: (amount: string) => `Weekly dues: ${amount}`,
-    owes: (amount: string) => `owes ${amount}`,
+    owes: (amount: string) => `owes ${amount} in total`,
     paid: "paid",
   },
   rules: {

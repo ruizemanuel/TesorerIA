@@ -340,7 +340,7 @@ test("three friends create a fund, contribute, get the agreed expense back, vote
   expect(written).toMatch(/\nEn el fondo hay \$\s[\d.]+(,\d{2})?\.\n/);
   // Ana, Beto and Caro paid week 1 (the contract's week 0): Ana and Caro $ 10.000 each, Beto 10 USDT. Dani joined in
   // it and didn't.
-  expect(written).toMatch(/\nPagaron la cuota 3 de 4\. Deben:\n· Dani, \$\s10\.000\n/);
+  expect(written).toMatch(/\nPagaron la cuota 3 de 4\. Deben, en total:\n· Dani, \$\s10\.000\n/);
   expect(written).toContain("\n· Se sumó Dani al fondo.\n");
   expect(written).toMatch(/\n· Aportaron \$\s[\d.]+(,\d{2})? entre todos\.\n/);
   expect(written).toMatch(/\n· Le devolví \$\s5\.000 a Ana por la cancha\.\n/);

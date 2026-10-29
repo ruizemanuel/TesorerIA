@@ -51,7 +51,7 @@ Resumen de la semana 1 (del 11/10 al 18/10)
 
 En el fondo hay $ 80.000.
 
-Pagaron la cuota 6 de 8. Deben:
+Pagaron la cuota 6 de 8. Deben, en total:
 · Juan, $ 10.000
 · Pedro, $ 20.000
 
@@ -71,7 +71,7 @@ Week 1 summary (Oct 11 to Oct 18)
 
 The fund holds ARS 80,000.
 
-6 of 8 paid their dues. Still owing:
+6 of 8 paid their dues. Still owing, in total:
 · Juan, ARS 10,000
 · Pedro, ARS 20,000
 
@@ -87,7 +87,7 @@ To contribute: ${LINK}`),
   it("says everyone paid instead of the list when nobody owes", () => {
     const allPaid = facts({ dues: facts().dues.map((d) => ({ ...d, owed: 0n })) });
     expect(text(allPaid)).toContain("\n\nTodos pagaron la cuota.\n\nLo que pasó:\n");
-    expect(text(allPaid)).not.toContain("Deben:");
+    expect(text(allPaid)).not.toContain("Deben, en total:");
     expect(text(allPaid, en)).toContain("\n\nEveryone paid their dues.\n\nWhat happened:\n");
   });
 

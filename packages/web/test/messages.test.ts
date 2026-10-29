@@ -164,8 +164,8 @@ describe("the dictionaries", () => {
     expect(html(en.fund.inYourAccount(money("ARS 1,016.10")))).toBe('You have <span class="money">ARS 1,016.10</span> in your account.');
     expect(es.week.dues("$ 10.000")).toBe("Cuota de $ 10.000");
     expect(en.week.dues("ARS 10,000")).toBe("Weekly dues: ARS 10,000");
-    expect(es.week.owes("$ 10.000")).toBe("debe $ 10.000");
-    expect(en.week.owes("ARS 10,000")).toBe("owes ARS 10,000");
+    expect(es.week.owes("$ 10.000")).toBe("debe en total $ 10.000");
+    expect(en.week.owes("ARS 10,000")).toBe("owes ARS 10,000 in total");
     expect([es.week.paid, en.week.paid]).toEqual(["pagó", "paid"]);
     expect(es.movements.empty).toBe("Todavía no hay movimientos. El primero puede ser tu aporte.");
     expect(es.receipt.viewOnExplorer).toBe("Ver en el explorador de Celo");

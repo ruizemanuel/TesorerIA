@@ -51,7 +51,7 @@ Te habla: Ana.
 Tu situación: Estás al día. Si el fondo se cerrara hoy, te tocarían $ 26.666,67.
 La lista de la semana, en el orden en que entraron:
 1. Ana (vos): pagó.
-2. Beto: debe $ 10.000.
+2. Beto: debe en total $ 10.000.
 3. Caro: pagó.
 Propuestas abiertas:
 - Hoy, 11:59. El agente: Propuse pagarle $ 3.000 a Caro por la pelota nueva. Lleva 1 de 2 votos. Ya la votaste.
@@ -70,7 +70,7 @@ Te habla: Ana.
 Tu situación: Estás al día. Si el fondo se cerrara hoy, te tocarían $ 26.666,67.
 La lista de la semana, en el orden en que entraron:
 1. Ana (vos): pagó.
-2. Beto: debe $ 10.000.
+2. Beto: debe en total $ 10.000.
 3. Caro: pagó.
 Propuestas abiertas: ninguna.
 Movimientos: todavía no hay.
@@ -103,7 +103,7 @@ describe("fundBrief: what the model reads of the fund (spec, 8.2)", () => {
     expect(brief).toContain("necesita 2 de 3 votos");
     expect(brief).toContain("El fondo va por su semana 3.");
     expect(brief).toContain("1. Ana (vos): pagó.");
-    expect(brief).toContain(`2. Beto: debe ${formatPesos(10_000n * WARS, "es")}.`);
+    expect(brief).toContain(`2. Beto: debe en total ${formatPesos(10_000n * WARS, "es")}.`);
     expect(brief).toContain("Estás al día.");
     expect(brief).toContain("Si el fondo se cerrara hoy, te tocarían");
   });
@@ -181,7 +181,7 @@ Who's asking: Ana.
 Your situation: You're up to date. If the fund closed today, you'd get ARS 26,666.67.
 This week's list, in the order they joined:
 1. Ana (you): paid.
-2. Beto: owes ARS 10,000.
+2. Beto: owes ARS 10,000 in total.
 3. Caro: paid.
 Open proposals:
 - Today, 11:59. The agent: I proposed paying Caro ARS 3,000 for the new ball. It has 1 of 2 votes. You already voted on it.
@@ -231,7 +231,7 @@ describe("fundBrief in English: what the model reads when the page is in English
     expect(brief).toContain("Your situation: You're up to date. If the fund closed today, you'd get");
     expect(brief).toContain("This week's list, in the order they joined:");
     expect(brief).toContain("1. Ana (you): paid.");
-    expect(brief).toContain(`2. Beto: owes ${ARS(10_000)}.`);
+    expect(brief).toContain(`2. Beto: owes ${ARS(10_000)} in total.`);
     expect(brief).toContain("Open proposals: none.");
     expect(brief).toContain("Activity: none yet.");
   });

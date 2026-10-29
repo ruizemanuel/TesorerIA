@@ -234,7 +234,8 @@ export const es = {
   summary: {
     heading: (week: number, from: string, to: string) => `Resumen de la semana ${week} (del ${from} al ${to})`,
     balance: (amount: string) => `En el fondo hay ${amount}.`,
-    paid: (paid: number, members: number) => `Pagaron la cuota ${paid} de ${members}. Deben:`,
+    /** What each one owes is the total of every week so far, less what they put in: not this week's fee. */
+    paid: (paid: number, members: number) => `Pagaron la cuota ${paid} de ${members}. Deben, en total:`,
     owes: (who: string, amount: string) => `${sentenceStart(who)}, ${amount}`,
     allPaid: "Todos pagaron la cuota.",
     happened: "Lo que pasó:",
@@ -387,7 +388,8 @@ export const es = {
   week: {
     title: "Esta semana",
     dues: (amount: string) => `Cuota de ${amount}`,
-    owes: (amount: string) => `debe ${amount}`,
+    /** The total of every week so far, less what they put in: next to the fee, it would read as this week's. */
+    owes: (amount: string) => `debe en total ${amount}`,
     /** The name of the check by someone who paid, for screen readers. */
     paid: "pagó",
   },
