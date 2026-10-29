@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { connection } from "next/server";
@@ -7,7 +8,12 @@ import { PublicNotice } from "../../../../../components/public-notice";
 import { TimelineList } from "../../../../../components/timeline-list";
 import { BackArrow, Card, CardTitle } from "../../../../../components/ui";
 import { getLocale, getMessages } from "../../../../../lib/i18n/server";
+import { publicFundMetadata } from "../../../../../lib/public-metadata";
 import { loadPublicFundScreen } from "../../../../../lib/read-fund";
+
+export async function generateMetadata({ params }: { params: Promise<{ address: string }> }): Promise<Metadata> {
+  return publicFundMetadata((await params).address);
+}
 
 /**
  * Every movement of the real group's fund, read-only, for anyone (spec, 9.6): where the public view's Ver todos goes.

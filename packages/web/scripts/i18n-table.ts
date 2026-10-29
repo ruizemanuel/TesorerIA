@@ -71,6 +71,8 @@ const FUND_URL = "https://tesoreria.example/f/0x9A74F670F3c59Ae4B8450fdD477b0461
 
 /** Realistic arguments for every function of the dictionaries, by its path. */
 const ARGS: Record<string, (k: Kit) => Case[]> = {
+  "meta.publicDescription": ({ fund }) => [call(fund)],
+  "meta.invitationTitle": ({ fund }) => [call(fund)],
   "common.member": () => [call(3)],
   "errors.amountTooBig": ({ pesos }) => [call(pesos(1_000_000_000_000))],
   "checks.feeTooBig": ({ pesos }) => [call(pesos(1_000_000_000_000))],

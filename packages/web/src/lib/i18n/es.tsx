@@ -16,8 +16,12 @@ const sentenceStart = (who: string) => (who === SOMEONE ? "Alguien" : who);
 export const es = {
   /** The dictionary's own language: what a function that has `m` passes to the formats (formatPesos(x, m.locale)). */
   locale: "es" as Locale,
+  /** The link preview (spec, 9.6): the site's description, and the pages that say their own. `fund` is the fund's name. */
   meta: {
     description: "La plata del grupo, sin tesorero.",
+    publicDescription: (fund: string) => `${fund}, en vivo: lo que hay en el fondo, quién pagó la cuota y lo que hizo el agente.`,
+    invitationTitle: (fund: string) => `Te invitaron a ${fund}`,
+    invitationDescription: "Sumate al fondo del grupo en TesorerIA.",
   },
   language: {
     label: "Idioma",

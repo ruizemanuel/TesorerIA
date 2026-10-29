@@ -18,6 +18,9 @@ export const en: Messages = {
   locale: "en",
   meta: {
     description: "The group's treasury, without a treasurer.",
+    publicDescription: (fund: string) => `${fund}, live: what's in the fund, who paid their dues and what the agent did.`,
+    invitationTitle: (fund: string) => `You're invited to ${fund}`,
+    invitationDescription: "Join the group's fund on TesorerIA.",
   },
   language: {
     label: "Language",

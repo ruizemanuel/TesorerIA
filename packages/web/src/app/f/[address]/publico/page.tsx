@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { connection } from "next/server";
 import { isAddress } from "viem";
@@ -6,7 +7,12 @@ import { PanelHost } from "../../../../components/panel-host";
 import { receiptPanels } from "../../../../components/receipt";
 import { summaryPanels } from "../../../../components/summary-panels";
 import { getLocale, getMessages } from "../../../../lib/i18n/server";
+import { publicFundMetadata } from "../../../../lib/public-metadata";
 import { loadPublicFundScreen } from "../../../../lib/read-fund";
+
+export async function generateMetadata({ params }: { params: Promise<{ address: string }> }): Promise<Metadata> {
+  return publicFundMetadata((await params).address);
+}
 
 /** The real group's fund, read-only, for anyone (spec, 9.2): no actions and no chat. Its comprobantes open in place. */
 export default async function PublicFundPage({ params }: { params: Promise<{ address: string }> }) {

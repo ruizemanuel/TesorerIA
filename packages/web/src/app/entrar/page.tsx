@@ -1,11 +1,18 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { LanguageSwitch } from "../../components/language-switch";
 import { LoginButton } from "../../components/login-button";
 import { Card } from "../../components/ui";
 import { currentUser } from "../../lib/current-user";
-import { getMessages } from "../../lib/i18n/server";
+import { getLocale, getMessages } from "../../lib/i18n/server";
 import { safeNext } from "../../lib/safe-next";
+import { pageMetadata } from "../../lib/site-metadata";
+
+export async function generateMetadata(): Promise<Metadata> {
+  const [m, locale] = await Promise.all([getMessages(), getLocale()]);
+  return pageMetadata(m, locale, { title: m.login.title });
+}
 
 export default async function EnterPage({ searchParams }: { searchParams: Promise<{ next?: string }> }) {
   const { next } = await searchParams;
