@@ -36,6 +36,22 @@ The first real group, as of October 15, 2026: one fund, eight members, and about
 - **Other wFIAT currencies.** The factory is fixed to wARS, USDT and their Uniswap pool, so wBRL or wMXN take a factory of their own, once a pool holds enough liquidity.
 - **MiniPay.** Opening the app inside MiniPay takes a single contract for every fund, since MiniPay only allows contracts it approved. That's the path to reach people where they already hold stablecoins.
 
+## How to run
+
+Once the dependencies are installed, the builds and tests below need no network, keys or accounts. You need Node.js 24, pnpm 12 (`corepack enable` installs the version `package.json` pins) and Foundry 1.8.5 (`foundryup --install 1.8.5`).
+
+    git clone --recurse-submodules https://github.com/ruizemanuel/TesorerIA && cd TesorerIA
+    pnpm install --frozen-lockfile
+    cd contracts && forge build && FOUNDRY_PROFILE=ci forge test && cd ..   # the contracts: unit, fuzz and invariant tests, with mocks
+    pnpm test                                                              # the wallet, the agent and the web, on an in-memory Postgres
+    pnpm typecheck
+
+- **`forge build` downloads solc 0.8.37 the first time,** unless it's already installed.
+- **Without `--recurse-submodules`,** `forge build` fetches forge-std and OpenZeppelin itself, at the pinned commits. From a source archive, with no git, install them at the same tags from `contracts/`: `forge install --no-git foundry-rs/forge-std@v1.17.0 OpenZeppelin/openzeppelin-contracts@v5.7.0`. The Uniswap v3 files are in the repo ([why](contracts/lib/v3-core/README.md)).
+- **Build the contracts before `pnpm test`:** one of the agent's tests compares its ABIs with the compiled contracts, and skips itself without them.
+
+These need the network, since they run against a fork of Celo mainnet (Foundry's `anvil` and `forno.celo.org`): the fork tests (`pnpm test:fork`, and `forge test --match-path "test/fork/*"` in `contracts/`), the end-to-end test (`pnpm --filter @tesoreria/web test:e2e`, after `pnpm --filter @tesoreria/web exec playwright install chromium`), and the app on a local fork (`pnpm --filter @tesoreria/web e2e:serve`, see [the web](#the-web)).
+
 ## The agent
 
 `packages/agent` is the agent's deterministic core: TypeScript and viem, no language model. It is the only part that signs, and every transaction it sends pays its gas in USDT (CIP-64) and carries the ERC-8021 attribution suffix.
