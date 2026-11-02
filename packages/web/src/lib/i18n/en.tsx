@@ -104,7 +104,7 @@ export const en: Messages = {
     howItWorks: "How it works",
     steps: [
       "You set up the fund and add your friends with a link.",
-      "Each one puts in their weekly dues, in pesos or in USDT.",
+      "Each one puts in their weekly dues, in pesos from Ripio or in USDT from any exchange.",
       "The agent pays back what was agreed, keeps track of who is behind, and everything else is voted on.",
     ],
     rules: {

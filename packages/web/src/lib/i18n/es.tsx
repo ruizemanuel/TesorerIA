@@ -119,7 +119,7 @@ export const es = {
     howItWorks: "Cómo funciona",
     steps: [
       "Armás el fondo y sumás a tus amigos con un link.",
-      "Cada uno aporta su cuota, en pesos o en USDT.",
+      "Cada uno aporta su cuota semanal, en pesos desde Ripio o en USDT desde cualquier exchange.",
       "El agente devuelve lo acordado, lleva la cuenta de quién debe, y lo demás se vota.",
     ],
     /**
@@ -138,7 +138,7 @@ export const es = {
       money: (contract: ReactNode) => <>La plata está en {contract}, no en una cuenta nuestra, y nadie puede cambiar estas reglas solo.</>,
       contractLink: "el contrato del propio fondo",
       leaving:
-        "Si te vas, el grupo vota tu salida y te llevás tu parte de lo que hay en el fondo, en proporción a lo que aportaste. Si se cierra, se reparte todo igual entre los que quedan.",
+        "Si te vas, el grupo vota tu salida y te llevás tu parte de lo que hay en el fondo, en proporción a lo que aportaste. Si se cierra, se reparte todo de la misma forma entre los que quedan.",
     },
     /** For the judges: each argument is a link, the text of which is in `judgesLinks`. */
     judges: (celo: ReactNode, contract: ReactNode, agent: ReactNode, code: ReactNode) => (
@@ -391,7 +391,7 @@ export const es = {
   /** The week's list (spec, 9.1): who paid and who owes. */
   week: {
     title: "Esta semana",
-    dues: (amount: string) => `Cuota de ${amount}`,
+    dues: (amount: string) => `Cuota semanal de ${amount}`,
     /** The total of every week so far, less what they put in: next to the fee, it would read as this week's. */
     owes: (amount: string) => `debe en total ${amount}`,
     /** The name of the check by someone who paid, for screen readers. */

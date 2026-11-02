@@ -105,12 +105,26 @@ describe("the dictionaries", () => {
     expect(html(en.home.rules.money(link(en.home.rules.contractLink)))).toBe(
       "The money sits in <a>the fund's own contract</a>, not in an account of ours, and no one can change these rules alone.",
     );
+    // "Igual" read as "in equal parts": closing splits in proportion to what each one put in, as leaving does.
     expect(es.home.rules.leaving).toBe(
-      "Si te vas, el grupo vota tu salida y te llevás tu parte de lo que hay en el fondo, en proporción a lo que aportaste. Si se cierra, se reparte todo igual entre los que quedan.",
+      "Si te vas, el grupo vota tu salida y te llevás tu parte de lo que hay en el fondo, en proporción a lo que aportaste. Si se cierra, se reparte todo de la misma forma entre los que quedan.",
     );
     expect(en.home.rules.leaving).toBe(
       "If you leave, the group votes you out and you take your share of what's in the fund, in proportion to what you put in. If it closes, it's all split the same way among those still in it.",
     );
+  });
+
+  it("say on the portada how it works, with where the pesos and the USDT come from", () => {
+    expect(es.home.steps).toEqual([
+      "Armás el fondo y sumás a tus amigos con un link.",
+      "Cada uno aporta su cuota semanal, en pesos desde Ripio o en USDT desde cualquier exchange.",
+      "El agente devuelve lo acordado, lleva la cuenta de quién debe, y lo demás se vota.",
+    ]);
+    expect(en.home.steps).toEqual([
+      "You set up the fund and add your friends with a link.",
+      "Each one puts in their weekly dues, in pesos from Ripio or in USDT from any exchange.",
+      "The agent pays back what was agreed, keeps track of who is behind, and everything else is voted on.",
+    ]);
   });
 
   it("say where you stand with the amount set apart, in each language", () => {
@@ -162,7 +176,7 @@ describe("the dictionaries", () => {
     );
     expect(html(es.fund.inYourAccount(money("$ 1.016,10")))).toBe('En tu cuenta tenés <span class="money">$ 1.016,10</span>.');
     expect(html(en.fund.inYourAccount(money("ARS 1,016.10")))).toBe('You have <span class="money">ARS 1,016.10</span> in your account.');
-    expect(es.week.dues("$ 10.000")).toBe("Cuota de $ 10.000");
+    expect(es.week.dues("$ 10.000")).toBe("Cuota semanal de $ 10.000");
     expect(en.week.dues("ARS 10,000")).toBe("Weekly dues: ARS 10,000");
     expect(es.week.owes("$ 10.000")).toBe("debe en total $ 10.000");
     expect(en.week.owes("ARS 10,000")).toBe("owes ARS 10,000 in total");
