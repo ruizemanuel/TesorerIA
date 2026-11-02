@@ -33,7 +33,7 @@ As of November 2, 2026: two funds of the same eight friends. The football fund h
 
 ## What's next
 
-- **More groups in Argentina.** The same fund works for any group that shares a recurring cost: a flat, a trip, a padel court. Growth is measured in groups, members, wARS moved, and the share of contributions paid directly in wARS (4 of 11 in the first week).
+- **More groups in Argentina.** The same fund works for any group that shares a recurring cost: a flat, a trip, a padel court. Growth is measured in groups, members, wARS moved, and the share of contributions paid directly in wARS (13 of 36 so far).
 - **Reminders by email.** The weekly summary already tells the group who owes what, for a member to share; an email would reach whoever doesn't open the app. It waits until groups ask for it, since it takes a domain of its own.
 - **Other wFIAT currencies.** The factory is fixed to wARS, USDT and their Uniswap pool, so wBRL or wMXN take a factory of their own, once a pool holds enough liquidity.
 - **MiniPay.** Opening the app inside MiniPay takes a single contract for every fund, since MiniPay only allows contracts it approved. That's the path to reach people where they already hold stablecoins.
