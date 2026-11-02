@@ -96,9 +96,77 @@ describe("/llms.txt: the site for an agent that reads it (llmstxt.org)", () => {
     expect(text).toContain("the last 86,400 blocks");
   });
 
+  it("says the agent's own limits live in its code, so the chain can't check them", async () => {
+    const text = await GET().text();
+    expect(text).toContain("They live in the agent's code, not in the contract");
+  });
+
+  it("points to every fund the factory deployed, not only the real group's", async () => {
+    const text = await GET().text();
+    expect(text).toContain("`funds(i)` for each `i` below `fundCount()`");
+  });
+
+  it("says where wARS and USDT come from, and where what the agent pays back goes", async () => {
+    const text = await GET().text();
+    expect(text).toContain("withdraw wARS on the Celo network");
+    expect(text).toContain("USDT on Celo from any exchange");
+    expect(text).toContain("sell them 1:1 for pesos");
+  });
+
+  it("says this site counts a fund's weeks from 1, where the contract counts from 0", async () => {
+    const text = await GET().text();
+    expect(text).toContain("its week N is the contract's week N − 1");
+  });
+
+  it("says a USDT contribution is credited at the pool's TWAP, and the fund absorbs what the conversion gets below it", async () => {
+    const text = await GET().text();
+    expect(text).toContain("30-minute TWAP");
+    expect(text).toContain("`creditedWars` in `Contribution`");
+    expect(text).toContain("`warsOut` in `Conversion`");
+    expect(text).toContain("more than 2 % below");
+  });
+
+  it("lists the functions the site and its agent call, with their parameters, who may call them and propose's actions", async () => {
+    const text = await GET().text();
+    const lines = text.split("\n");
+    for (const signature of [
+      "contributeWars(uint256 amount)",
+      "contributeUsdt(uint256 amount)",
+      "convert(uint256 usdtAmount, uint256 minWarsOut)",
+      "reimburseAgreedExpense(address member, uint256 amount, bytes32 ref)",
+      "propose(uint8 action, address a, address b, uint256 amount, string note)",
+      "vote(uint256 id)",
+      "execute(uint256 id)",
+      "weeklyCap()",
+      "spentInWeek(uint256)",
+      "getProposal(uint256 id)",
+    ]) {
+      expect(lines.filter((line) => line === `- \`${signature}\``), signature).toHaveLength(1);
+    }
+    expect(text).toContain("anyone can call `execute` once a proposal has the votes it needs");
+    expect(text).toContain("an ERC-20 `approve`");
+    expect(text).toContain("0 Pay, 1 AddMember, 2 RemoveMember, 3 ReplaceMember, 4 SetWeeklyCap, 5 SetVotesRequired, 6 SetAgent, 7 Close");
+  });
+
+  it("gives this site's addresses for a fund's public page, its movements, a week's summary and a receipt, and how it picks a language", async () => {
+    const text = await GET().text();
+    for (const path of [
+      "/f/<fund>/publico`",
+      "/f/<fund>/publico/movimientos`",
+      "/f/<fund>/publico?p=resumen&semana=<N>`",
+      "/f/<fund>/publico?p=comprobante&id=<transaction hash>:<log index>`",
+    ]) {
+      expect(text).toContain(`\`https://tesoreria.finance${path}`);
+    }
+    expect(text).toContain("the `lang` cookie (`es` or `en`)");
+    expect(text).toContain("Accept-Language");
+  });
+
   it("leaves the public fund out when the site has none", () => {
     const text = llmsTxt("https://tesoreria.finance", null);
-    expect(text).not.toContain("/publico");
+    // The site's URL patterns name `<fund>`, never a fund's address.
+    expect(text).not.toMatch(/\/f\/0x[0-9a-fA-F]{40}\/publico/);
+    expect(text).not.toContain("A real group's fund");
     expect(text).toContain("0xdF3B0d9edCA58Aac7c9Db4F2931f3559daf82020");
   });
 });
