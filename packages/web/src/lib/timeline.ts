@@ -3,7 +3,7 @@ import { type Address, type Hash, getAddress, isAddressEqual } from "viem";
 import { type BlockClock, blockTime, weekAt } from "./chain-time";
 import type { ExpenseStatus } from "./db/schema";
 import { ProposalAction } from "./fund-abi";
-import { formatPesos, formatUsdt } from "./format";
+import { formatPesos, formatUsdt, upToCentavo } from "./format";
 import type { Messages } from "./i18n/messages";
 import { sameName } from "./same-name";
 
@@ -188,7 +188,7 @@ export function buildTimeline({
           else if (hasVotes) {
             // The vote that completed the count couldn't execute it then (castVote): the fund may still be short.
             const short = action === ProposalAction.Pay && amount > warsBalance ? amount - warsBalance : 0n;
-            if (short > 0n) tail = t.proposal.short(formatPesos(short, m.locale));
+            if (short > 0n) tail = t.proposal.short(formatPesos(upToCentavo(short), m.locale));
             else {
               tail = t.proposal.needsCarryingOut;
               proposalAction = { kind: "execute", proposalId: id, canExecute: viewerIsMember && !executeOnItsWay };

@@ -42,6 +42,14 @@ export function formatPesos(units: bigint, locale: Locale): string {
   return negative ? `-${text}` : text;
 }
 
+/**
+ * wARS units up to the next whole centavo: what's missing said so it's enough. formatPesos rounds to the nearest, so a
+ * shortfall of a fraction of a centavo would read "$ 0".
+ */
+export function upToCentavo(units: bigint): bigint {
+  return ((units + CENT - 1n) / CENT) * CENT;
+}
+
 /** USDT from its 6-decimal units: "10 USDT", "10,5 USDT" ("10.5 USDT" in English). */
 export function formatUsdt(units: bigint, locale: Locale): string {
   const style = STYLE[locale];

@@ -132,6 +132,12 @@ describe("buildTimeline", () => {
     const short = at({ warsBalance: 20_000n * WARS });
     expect(short?.text).toBe($("Propuse pagarle $ 30.000 a Caro por la pelota nueva. Tiene los votos, pero al fondo le faltan $ 10.000 para pagarlo."));
     expect(short?.action).toBeUndefined();
+    // What's missing goes up to the next centavo: rounded to the nearest, three tenths of one read "$ 0" (the barbecue
+    // fund's proposal #2, 3/11), and half a centavo less than what's needed would read as enough.
+    expect(at({ warsBalance: 30_000n * WARS - 3_062_119_460_088_820n })?.text).toBe(
+      $("Propuse pagarle $ 30.000 a Caro por la pelota nueva. Tiene los votos, pero al fondo le faltan $ 0,01 para pagarlo."),
+    );
+    expect(at({ warsBalance: 20_000n * WARS - WARS / 1_000n })?.text).toContain($("le faltan $ 10.000,01 para pagarlo"));
 
     expect(at({}, { ...ready, deadline: CLOCK.timestamp - 1n })).toMatchObject({
       text: $("Propuse pagarle $ 30.000 a Caro por la pelota nueva. Venció sin ejecutarse."),
