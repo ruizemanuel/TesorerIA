@@ -102,6 +102,43 @@ describe("decideExpense", () => {
     expect(decide(BALLS, {}, [proposed(AGENT, BLOCK - 3_600n - 300n, 50, ours)])).toMatchObject({ kind: "proposed" });
   });
 
+  describe("an expense short of what the fund holds by less than half a centavo, what a screen in centavos can't show", () => {
+    // The barbecue fund on 3/11: its screen said $ 50.013,31, a member entered that, and the fund held 50.013,3069…
+    const HELD = 50_013_306_937_880_539_911_180n;
+    const ALL: Expense = { ...PITCH, kind: "other", amount: 50_013_310_000_000_000_000_000n, note: "carne+bebida" };
+    const WIDE = { weeklyCap: 1_000_000n * WARS_UNIT, warsBalance: HELD };
+
+    it("proposes what the fund holds, so the proposal can be paid", () => {
+      expect(decide(ALL, WIDE)).toMatchObject({ kind: "propose-payment", amount: HELD });
+    });
+
+    it("pays the agreed expense back with what the fund holds, instead of waiting", () => {
+      const pitch = { ...PITCH, amount: 45_000n * WARS_UNIT };
+      const held = pitch.amount - 3_062_119_460_088_820n;
+      expect(decide(pitch, { warsBalance: held })).toEqual({ kind: "reimburse", member: MEMBER, amount: held, ref: PITCH.ref });
+    });
+
+    it("leaves the amount as it was entered when the fund is short by half a centavo or more, or holds nothing", () => {
+      const halfCentavo = WARS_UNIT / 200n;
+      expect(decide(ALL, { ...WIDE, warsBalance: ALL.amount - halfCentavo })).toMatchObject({ kind: "propose-payment", amount: ALL.amount });
+      expect(decide(PITCH, { warsBalance: PITCH.amount - halfCentavo })).toMatchObject({ kind: "wait" });
+      expect(decide({ ...ALL, amount: 1n }, { ...WIDE, warsBalance: 0n })).toMatchObject({ kind: "propose-payment", amount: 1n });
+    });
+
+    it("takes its proposal of what the fund held as this expense's, even once the fund holds more", () => {
+      const earlier = proposed(AGENT, BLOCK - 600n, 42, { a: MEMBER, amount: HELD, note: "carne+bebida" });
+      const richer = { ...WIDE, warsBalance: 60_000n * WARS_UNIT };
+      expect(decide(ALL, richer, [earlier])).toEqual({
+        kind: "proposed",
+        transactionHash: earlier.transactionHash,
+        reason: `Already proposed, in transaction ${earlier.transactionHash}`,
+      });
+      // Half a centavo below the amount entered is another expense's: amounts are entered in centavos.
+      const another = proposed(AGENT, BLOCK - 600n, 43, { a: MEMBER, amount: ALL.amount - WARS_UNIT / 200n, note: "carne+bebida" });
+      expect(decide(ALL, richer, [another])).toMatchObject({ kind: "propose-payment", amount: ALL.amount });
+    });
+  });
+
   it("keeps the proposal's note to 140 characters", () => {
     const decision = decide({ ...PITCH, kind: "other", note: `  ${"á".repeat(200)}  ` });
     expect(decision).toMatchObject({ kind: "propose-payment", note: "á".repeat(140) });

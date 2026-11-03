@@ -35,6 +35,20 @@ function clip(note: string): string {
 }
 
 /**
+ * Less than half a centavo of wARS: what a screen in centavos can't show. The fund's balance is shown rounded, so an
+ * expense of what the screen said the fund holds can be up to this much more than it does.
+ */
+const WARS_SPECK = 5n * 10n ** 15n;
+
+/**
+ * What to pay for an expense of `amount`: what the fund holds instead, when it holds something and is short by less
+ * than WARS_SPECK. Paying the amount as entered would fail on chain for a difference nobody can see.
+ */
+function payable(amount: bigint, held: bigint): bigint {
+  return held > 0n && amount > held && amount - held < WARS_SPECK ? held : amount;
+}
+
+/**
  * How many blocks before an expense was entered a proposal of the agent's may still be this expense's: Celo makes
  * a block a second, and this is five minutes for the server's clock and the chain's to disagree.
  */
@@ -45,7 +59,9 @@ const ENTRY_MARGIN_BLOCKS = 300n;
  * after the node took it, retried. The contract keeps no ref for proposals (unlike reimbursements), so it's told by
  * what it pays: Pay, to the same member, the same amount, with the same note, proposed by the agent, from about the
  * block the expense was entered in (`now` and the snapshot's block place it, at a block a second). An identical
- * expense entered later is another one, and gets its own proposal.
+ * expense entered later is another one, and gets its own proposal. "The same amount" takes in what the fund held
+ * then (`payable`), up to WARS_SPECK less: the fund may hold more by the retry. Amounts are entered in centavos, so
+ * another expense's is at least a centavo away.
  */
 function earlierProposal(
   events: readonly FundEvent[],
@@ -59,7 +75,8 @@ function earlierProposal(
       e.args.action === Action.Pay &&
       isAddressEqual(e.args.proposer, fund.agent) &&
       isAddressEqual(e.args.a, member) &&
-      e.args.amount === amount &&
+      e.args.amount <= amount &&
+      amount - e.args.amount < WARS_SPECK &&
       e.args.note === note,
   );
 }
@@ -87,8 +104,9 @@ export function decideExpense({
   if (fund.closed) return { kind: "reject", reason: "The fund is closed" };
   const member = fund.members.find((m) => isAddressEqual(m, expense.member));
   if (member === undefined) return { kind: "reject", reason: "Only members get money back" };
-  const { amount, ref } = expense;
-  if (amount <= 0n) return { kind: "reject", reason: "The amount must be more than zero" };
+  const { ref } = expense;
+  if (expense.amount <= 0n) return { kind: "reject", reason: "The amount must be more than zero" };
+  const amount = payable(expense.amount, fund.warsBalance);
   const earlier = events.find(
     (e) => e.eventName === "Reimbursement" && e.args.ref.toLowerCase() === ref.toLowerCase(),
   );
@@ -98,7 +116,7 @@ export function decideExpense({
 
   const propose = (reason: string): ExpenseDecision => {
     const note = clip(expense.note);
-    const proposed = earlierProposal(events, { fund, member, amount, note, enteredAt: expense.enteredAt, now });
+    const proposed = earlierProposal(events, { fund, member, amount: expense.amount, note, enteredAt: expense.enteredAt, now });
     if (proposed !== undefined) {
       const { transactionHash } = proposed;
       return { kind: "proposed", transactionHash, reason: `Already proposed, in transaction ${transactionHash}` };
