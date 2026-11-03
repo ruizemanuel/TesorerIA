@@ -109,6 +109,8 @@ describe("/llms.txt: the site for an agent that reads it (llmstxt.org)", () => {
   it("says where wARS and USDT come from, and where what the agent pays back goes", async () => {
     const text = await GET().text();
     expect(text).toContain("withdraw wARS on the Celo network");
+    // Ripio is where most get them, not the only way: wARS is a token like any other on Celo.
+    expect(text).toContain("or from any Celo wallet that holds wARS");
     expect(text).toContain("USDT on Celo from any exchange");
     expect(text).toContain("sell them 1:1 for pesos");
   });

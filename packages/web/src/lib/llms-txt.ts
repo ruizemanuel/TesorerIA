@@ -86,7 +86,7 @@ ${
 
 ### Where the money comes from
 
-Each member has an account on this site: a Safe smart account on Celo, which their passkey controls. They bring pesos from Ripio: in Ripio's app they withdraw wARS on the Celo network to that account, or they load them with Ripio from the fund's screen. Or they send USDT on Celo from any exchange. The wARS the agent pays a member back, they can pass to their own Ripio account and sell them 1:1 for pesos there.
+Each member has an account on this site: a Safe smart account on Celo, which their passkey controls. They bring pesos as wARS from Ripio, or from any Celo wallet that holds wARS. From Ripio, in its app they withdraw wARS on the Celo network to that account, or they load them from the fund's screen. Or they send USDT on Celo from any exchange. The wARS the agent pays a member back, they can pass to their own Ripio account and sell them 1:1 for pesos there.
 
 ### USDT contributions
 
