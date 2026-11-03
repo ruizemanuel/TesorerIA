@@ -31,6 +31,7 @@ export function snapshot(change: Partial<FundSnapshot> = {}): FundSnapshot {
     members: MEMBERS,
     contributed: [30_000n * WARS, 30_000n * WARS, 30_000n * WARS],
     totalContributed: 90_000n * WARS,
+    proposalCount: 0n,
     votesRequired: 2,
     weeklyCap: 60_000n * WARS,
     startTime: START,

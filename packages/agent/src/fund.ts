@@ -15,6 +15,8 @@ export type FundSnapshot = {
   /** What each member has contributed, in wARS, in the order of `members`. */
   contributed: readonly bigint[];
   totalContributed: bigint;
+  /** How many proposals were ever made: the history must have as many ProposalCreated. */
+  proposalCount: bigint;
   votesRequired: number;
   weeklyCap: bigint;
   startTime: bigint;
@@ -52,8 +54,9 @@ export async function readFund(client: CeloReader, fund: Address, blockNumber?: 
         { address: USDT, abi: erc20Abi, functionName: "balanceOf", args: [fund] },
       ],
     });
-  const [spentThisWeek, contributed] = await Promise.all([
+  const [spentThisWeek, proposalCount, contributed] = await Promise.all([
     client.readContract({ address: fund, abi: fundAbi, functionName: "spentInWeek", args: [week], blockNumber: block }),
+    client.readContract({ address: fund, abi: fundAbi, functionName: "proposalCount", blockNumber: block }),
     client.multicall({
       ...at,
       contracts: members.map((member) => ({ address: fund, abi: fundAbi, functionName: "contributed", args: [member] }) as const),
@@ -67,6 +70,7 @@ export async function readFund(client: CeloReader, fund: Address, blockNumber?: 
     members,
     contributed,
     totalContributed,
+    proposalCount,
     votesRequired,
     weeklyCap,
     startTime,

@@ -12,6 +12,7 @@ export const fundAbi = parseAbi([
   "function spentInWeek(uint256) view returns (uint256)",
   "function contributed(address) view returns (uint256)",
   "function totalContributed() view returns (uint256)",
+  "function proposalCount() view returns (uint256)",
   "function quoteUsdtInWars(uint256 usdtAmount) view returns (uint256)",
   "function convert(uint256 usdtAmount, uint256 minWarsOut) returns (uint256 received)",
   "function reimburseAgreedExpense(address member, uint256 amount, bytes32 ref)",

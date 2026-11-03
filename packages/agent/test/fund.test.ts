@@ -38,6 +38,19 @@ describe("readFund", () => {
     for (const [call] of multicall.mock.calls) expect(call).toMatchObject({ blockNumber: 42n });
     expect(readContract).toHaveBeenCalledWith(expect.objectContaining({ blockNumber: 42n }));
   });
+
+  it("reads how many proposals the fund has, at the same block, so a history can be checked against it", async () => {
+    const multicall = vi.fn(async ({ contracts }: { contracts: unknown[] }) =>
+      contracts.length === 10 ? [MEMBER, false, [MEMBER], 2, 1n, 0n, 0n, 0n, 0n, 0n] : [0n],
+    );
+    const readContract = vi.fn(async ({ functionName }: { functionName: string }) => (functionName === "proposalCount" ? 3n : 0n));
+    const client = { getBlockNumber: async () => 100n, multicall, readContract } as unknown as CeloReader;
+
+    const snapshot = await readFund(client, FUND, 42n);
+
+    expect(snapshot.proposalCount).toBe(3n);
+    expect(readContract).toHaveBeenCalledWith(expect.objectContaining({ functionName: "proposalCount", blockNumber: 42n }));
+  });
 });
 
 /** The real fund was created in a block near this one, at its startTime: 2026-10-12 00:19:48 UTC. */
