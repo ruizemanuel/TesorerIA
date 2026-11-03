@@ -1,12 +1,12 @@
-import type { WeekSummaryFacts } from "@tesoreria/agent";
+import { type LogReader, type RawLog, WARS as WARS_TOKEN, type WeekSummaryFacts, fundAbi } from "@tesoreria/agent";
 import { eq } from "drizzle-orm";
-import { type Address, getAddress } from "viem";
+import { type Address, type Hash, type Hex, encodeAbiParameters, encodeEventTopics, getAddress, pad, parseAbiParameters } from "viem";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Db } from "../src/lib/db/client";
 import { funds, weekSummaries } from "../src/lib/db/schema";
-import { type WeekSummaryDeps, readFacts, storeFacts, writeWeekSummaries } from "../src/lib/week-summaries";
+import { type WeekSummaryDeps, chainWeekSummaryDeps, readFacts, storeFacts, writeWeekSummaries } from "../src/lib/week-summaries";
 import { addLiveFund, addUser, randomAccount, testDb } from "./support/db";
-import { AGENT, ANA, BETO, BLOCK, CARO, WARS } from "./support/fixtures";
+import { AGENT, ANA, BETO, BLOCK, CARO, FUND, WARS } from "./support/fixtures";
 
 const OTHER_AGENT = getAddress("0x00000000000000000000000000000000000a6e18");
 const START = 1_791_764_388n;
@@ -164,5 +164,44 @@ describe("storeFacts and readFacts", () => {
     expect(json.balance).toBe("80000000000000000000000");
     expect(json.dues[1]).toEqual({ member: BETO, owed: "10000000000000000000000" });
     expect(readFacts(json)).toEqual(facts(2n));
+  });
+});
+
+describe("chainWeekSummaryDeps: the photo of a week, from the chain", () => {
+  /** The fund was created at block CREATED, at its startTime, and the chain makes a block a second. */
+  const CREATED = 1_000_000n;
+  const timeOf = (block: bigint) => START + (block - CREATED);
+  const LATEST = CREATED + 700_000n;
+  /** Beto's contribution, in week 0, as the node gives its log. */
+  const paidByBeto: RawLog = {
+    address: FUND,
+    topics: encodeEventTopics({ abi: fundAbi, eventName: "Contribution", args: { member: BETO, token: WARS_TOKEN } }) as Hex[],
+    data: encodeAbiParameters(parseAbiParameters("uint256, uint256"), [10_000n * WARS, 10_000n * WARS]),
+    blockNumber: CREATED + 500_000n,
+    transactionHash: pad("0xbe70", { size: 32 }) as Hash,
+    logIndex: 0,
+  };
+  /** The chain as week 0 closed: Beto put in 10,000 wARS, and that's all. */
+  const client = {
+    getBlockNumber: async () => LATEST,
+    getBlock: async ({ blockNumber }: { blockNumber: bigint }) => ({ number: blockNumber, timestamp: timeOf(blockNumber) }),
+    multicall: async ({ contracts }: { contracts: { args?: readonly unknown[] }[] }) =>
+      contracts.length === 10
+        ? [AGENT, false, [ANA, BETO, CARO], 2, 60_000n * WARS, START, 0n, 10_000n * WARS, 10_000n * WARS, 0n]
+        : contracts.map((call) => (call.args?.[0] === BETO ? 10_000n * WARS : 0n)),
+    readContract: async ({ functionName }: { functionName: string }) => (functionName === "balanceInWars" ? 10_000n * WARS : 0n),
+  } as unknown as Parameters<typeof chainWeekSummaryDeps>[0];
+  const fund = { id: "fund", address: FUND, createdBlock: CREATED, weeklyFee: 10_000n * WARS };
+
+  it("counts a contribution Blockscout's history misses, read from the node, so the photo adds up", async () => {
+    // 3/11: Blockscout's logs by address were a day behind while its block number was current.
+    const blockscout: LogReader = async () => [];
+    const node: LogReader = async ({ fromBlock, toBlock }) =>
+      paidByBeto.blockNumber >= fromBlock && paidByBeto.blockNumber <= toBlock ? [paidByBeto] : [];
+
+    const photo = await chainWeekSummaryDeps(client, blockscout, AGENT, node).facts(fund, 0n, START);
+
+    expect(photo.contributed).toBe(10_000n * WARS);
+    expect(photo.block).toBe(CREATED + 604_799n);
   });
 });

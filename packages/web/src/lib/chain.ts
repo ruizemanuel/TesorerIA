@@ -88,13 +88,19 @@ export function withNodeFallback(primary: LogReader, node: LogReader, maxBlocks 
   };
 }
 
+/** The node alone, RPC_LOG_RANGE blocks per request: what fills a hole in the history Blockscout gave (completeHistory). */
+export function nodeLogReader(): LogReader {
+  return rpcLogReader(celoClient());
+}
+
 /**
  * A fund's history: Blockscout plus the node on mainnet, through the PRO API when there's a key (see
  * BLOCKSCOUT_PRO_API), and from the node alone when Blockscout fails on a short one; on the fork, the node alone
- * (Blockscout doesn't know it).
+ * (Blockscout doesn't know it). Blockscout may also answer without failing and still miss logs: completeHistory
+ * checks what it gave against the contract.
  */
 export function logReader(): LogReader {
-  const rpc = rpcLogReader(celoClient());
+  const rpc = nodeLogReader();
   if (env().CHAIN_MODE === "fork") return rpc;
   const apiKey = env().BLOCKSCOUT_API_KEY;
   return withNodeFallback(blockscoutLogReader({ apiUrl: apiKey === undefined ? BLOCKSCOUT_API : BLOCKSCOUT_PRO_API, rpc, apiKey }), rpc);

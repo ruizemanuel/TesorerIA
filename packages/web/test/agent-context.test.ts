@@ -9,7 +9,8 @@ import { addLiveFund, addUser, testDb } from "./support/db";
 import { ANA, BLOCK, FUND, WARS, event, snapshot } from "./support/fixtures";
 
 // The real view reads the chain; this one stands in for it and keeps what agentContext asked it for.
-const view = vi.hoisted(() => ({ options: [] as { fromBlock?: bigint }[], spent: 0n, events: [] as FundEvent[] }));
+// `events` is the history as Blockscout gives it, and `node` as the node does, for a hole (completeHistory).
+const view = vi.hoisted(() => ({ options: [] as { fromBlock?: bigint }[], spent: 0n, events: [] as FundEvent[], node: [] as FundEvent[] }));
 vi.mock("@tesoreria/agent", async (importOriginal) => {
   const original = await importOriginal<typeof import("@tesoreria/agent")>();
   const unused = async () => {
@@ -17,12 +18,15 @@ vi.mock("@tesoreria/agent", async (importOriginal) => {
   };
   return {
     ...original,
+    readFundEvents: async (_reader: unknown, _fund: unknown, fromBlock: bigint, toBlock: bigint) =>
+      view.node.filter((e) => e.blockNumber >= fromBlock && e.blockNumber <= toBlock),
     createChainView: (options: { fromBlock?: bigint }): ChainView => {
       view.options.push(options);
       return {
         gasBalance: async () => 0n,
         funds: async () => [FUND, LATER, FOREIGN],
-        fund: async (address) => snapshot({ address, spentThisWeek: view.spent }),
+        // Nobody contributed: these histories have no Contribution, and they add up only to a fund where none was made.
+        fund: async (address) => snapshot({ address, spentThisWeek: view.spent, contributed: [0n, 0n, 0n], totalContributed: 0n }),
         events: async () => view.events,
         references: unused,
         quote: unused,
@@ -38,6 +42,7 @@ vi.mock("../src/lib/chain", async (importOriginal) => {
   const original = await importOriginal<typeof import("../src/lib/chain")>();
   return {
     ...original,
+    nodeLogReader: () => async () => [],
     celoClient: () => ({
       ...original.celoClient(),
       getTransactionCount: async ({ address, blockTag }: { address: string; blockTag: "latest" | "pending" }) => {
@@ -93,11 +98,23 @@ describe("agentContext", () => {
     const ctx = await (await load())(db);
     view.spent = 45_000n * WARS; // the contract counts a reimbursement this week
     view.events = [];
+    view.node = [];
     await ctx.chain.fund(FUND);
     await expect(ctx.chain.events(FUND, BLOCK)).rejects.toThrow(/spentInWeek/);
 
     view.events = [event("Reimbursement", { member: ANA, amount: 45_000n * WARS, ref: `0x${"ab".repeat(32)}`, week: 2n }, BLOCK - 10n)];
     expect(await ctx.chain.events(FUND, BLOCK)).toEqual(view.events);
+  });
+
+  it("fills a hole in the history from the node before deciding on it", async () => {
+    // 3/11: Blockscout's logs by address were a day behind while its block number was current.
+    const ctx = await (await load())(db);
+    view.spent = 45_000n * WARS;
+    const reimbursement = event("Reimbursement", { member: ANA, amount: 45_000n * WARS, ref: `0x${"ab".repeat(32)}`, week: 2n }, BLOCK - 10n);
+    view.events = [];
+    view.node = [reimbursement];
+    await ctx.chain.fund(FUND);
+    expect(await ctx.chain.events(FUND, BLOCK)).toEqual([reimbursement]);
   });
 
   it("sends only while the kill switch is on, and it is off unless set", async () => {

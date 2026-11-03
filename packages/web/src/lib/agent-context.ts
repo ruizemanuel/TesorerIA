@@ -6,15 +6,16 @@ import {
   type FundSnapshot,
   createAgentSigner,
   createChainView,
+  readFundEvents,
 } from "@tesoreria/agent";
 import { forkSigner } from "@tesoreria/agent/fork";
 import { eq } from "drizzle-orm";
 import { type Hash, type Hex, http } from "viem";
-import { baseClient, celoClient, logReader } from "./chain";
+import { baseClient, celoClient, logReader, nodeLogReader } from "./chain";
 import type { Db } from "./db/client";
 import { funds } from "./db/schema";
 import { env } from "./env";
-import { checkHistory } from "./read-fund";
+import { completeHistory } from "./history";
 
 /** The agent's wallet: CIP-64 with the tag on mainnet; CELO gas on the fork, which can't decode CIP-64. */
 export function agentSigner(): AgentSigner {
@@ -30,8 +31,9 @@ export function agentSigner(): AgentSigner {
  *   a fund naming our agent, and that must never cost its gas.
  * - Histories are read from the oldest of those funds' blocks, not the factory's: no fund it runs has an older
  *   event, and on the fork every block scanned is a request through the node.
- * - A history whose reimbursements don't add up to the contract's spentInWeek has a hole (checkHistory): the
- *   agent never decides on it, since a missing Reimbursement would let it pay the same ref twice.
+ * - A history that doesn't add up to the contract (spentInWeek, each member's contributions, the proposal count) has
+ *   a hole: the node fills it (completeHistory), or the agent never decides on it, since a missing Reimbursement
+ *   would let it pay the same ref twice.
  * - It sends only while AGENT_SEND is "on" (the kill switch); otherwise it decides everything and sends nothing.
  */
 export async function agentContext(db: Db, onSent?: AgentContext["onSent"]): Promise<AgentContext> {
@@ -42,6 +44,7 @@ export async function agentContext(db: Db, onSent?: AgentContext["onSent"]): Pro
   const blocks = ours.map((f) => f.createdBlock ?? FUND_FACTORY_BLOCK);
   const fromBlock = blocks.reduce((oldest, block) => (block < oldest ? block : oldest), blocks[0] ?? FUND_FACTORY_BLOCK);
   const view = createChainView({ celo: celoClient(), base: baseClient(), logs: logReader(), agent: signer.address, fromBlock });
+  const node = nodeLogReader();
   const snapshots = new Map<string, FundSnapshot>();
   const chain: ChainView = {
     ...view,
@@ -54,8 +57,9 @@ export async function agentContext(db: Db, onSent?: AgentContext["onSent"]): Pro
     events: async (address, toBlock) => {
       const events = await view.events(address, toBlock);
       const snapshot = snapshots.get(address.toLowerCase());
-      if (snapshot !== undefined && snapshot.block === toBlock) checkHistory(snapshot, events); // throws: "blocked"
-      return events;
+      if (snapshot === undefined || snapshot.block !== toBlock) return events;
+      // Throws when even the node doesn't fill the hole: "blocked".
+      return completeHistory({ snapshot, events, fromBlock, node: (from, to) => readFundEvents(node, address, from, to) });
     },
   };
   return { chain, signer, now: () => BigInt(Math.floor(Date.now() / 1000)), send: env().AGENT_SEND === "on", onSent };

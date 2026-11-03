@@ -1,7 +1,7 @@
 import { FUND_FACTORY_BLOCK, type FundEvent, type FundSnapshot, MIN_CONVERSION_USDT, joinWeeks, readFund, readFundEvents } from "@tesoreria/agent";
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { type Address, getAddress, zeroAddress } from "viem";
-import { celoClient, logReader } from "./chain";
+import { celoClient, logReader, nodeLogReader } from "./chain";
 import { blockTime, weekAt } from "./chain-time";
 import type { CurrentUser } from "./current-user";
 import { type Db, getDb } from "./db/client";
@@ -9,7 +9,7 @@ import { decisions, expenses, funds, memberships, users, weekSummaries } from ".
 import { env } from "./env";
 import { MAX_MEMBERS, memberFundAbi } from "./fund-abi";
 import { type FundView, buildFundView } from "./fund-view";
-import { checkHistory } from "./history";
+import { completeHistory } from "./history";
 import type { Locale } from "./i18n/locales";
 import { messagesFor } from "./i18n/messages";
 import { JOIN_REQUEST_DAYS, admitMembers, joinRequestOf, requestsIn } from "./join-requests";
@@ -41,7 +41,7 @@ export type FundScreen = {
 };
 
 // The history check lives in history.ts (week-summaries.ts needs it too); these names stay importable from here.
-export { HistoryGapError, checkHistory } from "./history";
+export { HistoryGapError, checkHistory, completeHistory } from "./history";
 
 /** A fund's members in the database: their names and accounts. */
 function peopleOf(db: Db, fundId: string) {
@@ -88,13 +88,17 @@ export async function loadFundScreen(
     viewerIsMember = viewer !== null && people.some((p) => p.userId === viewer.id);
   }
   if (!publicView && !viewerIsMember) return null;
+  // A history that doesn't add up to the snapshot gets its hole filled from the node, or nothing is shown from it.
+  const fromBlock = fund.createdBlock ?? FUND_FACTORY_BLOCK;
+  const node = nodeLogReader();
   const [balance, block, events] = await Promise.all([
     client.readContract({ address: snapshot.address, abi: memberFundAbi, functionName: "balanceInWars", blockNumber: snapshot.block }),
     client.getBlock({ blockNumber: snapshot.block }),
-    readFundEvents(logReader(), snapshot.address, fund.createdBlock ?? FUND_FACTORY_BLOCK, snapshot.block),
+    readFundEvents(logReader(), snapshot.address, fromBlock, snapshot.block).then((read) =>
+      completeHistory({ snapshot, events: read, fromBlock, node: (from, to) => readFundEvents(node, snapshot.address, from, to) }),
+    ),
   ]);
   const clock = { block: snapshot.block, timestamp: block.timestamp };
-  checkHistory(snapshot, events);
 
   // Names by account. A public view without the group's OK shows "Miembro N", in the contract's order.
   const names = new Map<Address, string>();

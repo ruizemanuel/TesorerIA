@@ -12,13 +12,13 @@ import {
 import { and, eq } from "drizzle-orm";
 import { type Address, type PublicClient, getAddress, isAddressEqual } from "viem";
 import { agentAddress } from "./agent-address";
-import { celoClient, logReader } from "./chain";
+import { celoClient, logReader, nodeLogReader } from "./chain";
 import { blockTime, weekAt } from "./chain-time";
 import type { Db } from "./db/client";
 import { type StoredWeekSummary, funds, weekSummaries } from "./db/schema";
 import { formatDay, formatPesos } from "./format";
 import { memberFundAbi } from "./fund-abi";
-import { checkHistory } from "./history";
+import { completeHistory } from "./history";
 import type { Messages } from "./i18n/messages";
 
 /** WeekSummaryFacts as the database keeps them (jsonb): every bigint as its decimal string. */
@@ -70,9 +70,14 @@ type SummaryClient = Pick<PublicClient, "getBlock" | "getBlockNumber" | "multica
 
 /**
  * The chain's side of the summaries: Celo through CELO_RPC_URL, the history as the screens read it (Blockscout plus
- * the node; the node alone on the fork), and the agent every new fund names.
+ * the node, and the node alone for a hole: completeHistory; the node alone on the fork), and the agent every new fund names.
  */
-export function chainWeekSummaryDeps(client: SummaryClient = celoClient(), logs: LogReader = logReader(), agent: Address = agentAddress()): WeekSummaryDeps {
+export function chainWeekSummaryDeps(
+  client: SummaryClient = celoClient(),
+  logs: LogReader = logReader(),
+  agent: Address = agentAddress(),
+  node: LogReader = nodeLogReader(),
+): WeekSummaryDeps {
   return {
     agent,
     status: async (fund) => {
@@ -94,10 +99,12 @@ export function chainWeekSummaryDeps(client: SummaryClient = celoClient(), logs:
       const [balance, block, events] = await Promise.all([
         client.readContract({ address: fund.address, abi: memberFundAbi, functionName: "balanceInWars", blockNumber: last }),
         client.getBlock({ blockNumber: last }),
-        readFundEvents(logs, fund.address, fund.createdBlock, last),
+        // A hole in the history would leave a contribution or a reimbursement out of the summary (3/11): the node
+        // fills it, or nothing is written from it.
+        readFundEvents(logs, fund.address, fund.createdBlock, last).then((read) =>
+          completeHistory({ snapshot, events: read, fromBlock: fund.createdBlock, node: (from, to) => readFundEvents(node, fund.address, from, to) }),
+        ),
       ]);
-      // A hole in the history would leave a reimbursement out of the summary: nothing is written from it.
-      checkHistory(snapshot, events);
       const clock = { block: last, timestamp: block.timestamp };
       // The same weekOf as the screen (read-fund.ts), so the summary's dues are the week's list as it closed.
       const weekOf = (event: (typeof events)[number]) => weekAt(blockTime(event.blockNumber, clock), snapshot.startTime);

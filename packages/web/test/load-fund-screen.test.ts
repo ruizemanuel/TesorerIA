@@ -1,6 +1,6 @@
-import { WARS as WARS_TOKEN, type WeekSummaryFacts } from "@tesoreria/agent";
+import { type FundEvent, type FundSnapshot, WARS as WARS_TOKEN, type WeekSummaryFacts } from "@tesoreria/agent";
 import { and, eq, sql } from "drizzle-orm";
-import { type Address, type Hash, getAddress, pad, zeroAddress } from "viem";
+import { type Address, type Hash, getAddress, isAddressEqual, pad, zeroAddress } from "viem";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CurrentUser } from "../src/lib/current-user";
 import type { Db } from "../src/lib/db/client";
@@ -17,12 +17,15 @@ import { BLOCK, CLOCK, USDT_UNIT, WARS, event, snapshot } from "./support/fixtur
 // database stand in: the database is a real (in-memory) one, the chain answers what each test sets.
 const state = vi.hoisted(() => ({ db: null as unknown }));
 const agent = vi.hoisted(() => ({ readFund: vi.fn(), readFundEvents: vi.fn() }));
+/** Blockscout's reader and the node's, told apart by readFundEvents. */
+const readers = vi.hoisted(() => ({ blockscout: async () => [], node: async () => [] }));
 vi.mock("../src/lib/db/client", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../src/lib/db/client")>()),
   getDb: async () => state.db,
 }));
 vi.mock("../src/lib/chain", () => ({
-  logReader: () => async () => [],
+  logReader: () => readers.blockscout,
+  nodeLogReader: () => readers.node,
   celoClient: () => ({
     getBlock: async () => ({ timestamp: CLOCK.timestamp }),
     readContract: async ({ functionName }: { functionName: string }) => {
@@ -65,8 +68,30 @@ async function liveFund(change: Partial<typeof funds.$inferInsert> = {}, onChain
   const address = randomAccount();
   const fund = await addLiveFund(db, { creatorId: ana.id, address, members: [ana.id, beto.id, caro.id] });
   if (Object.keys(change).length > 0) await db.update(funds).set(change).where(eq(funds.id, fund.id));
-  agent.readFund.mockResolvedValue(snapshot({ address, members: onChain.map((person) => getAddress(person.account)) }));
+  chainFund({ address, members: onChain.map((person) => getAddress(person.account)) });
   return address;
+}
+
+/** The history the chain answers with, from Blockscout and from the node alike (setHistory). */
+let history: FundEvent[] = [];
+function setHistory(events: FundEvent[]) {
+  history = events;
+  agent.readFundEvents.mockResolvedValue(events);
+}
+
+/**
+ * The chain's fund: snapshot(change), with what each member contributed and how many proposals it has as the history
+ * the test set says, so it adds up (checkHistory) unless the test makes it not.
+ */
+function chainFund(change: Partial<FundSnapshot>) {
+  agent.readFund.mockImplementation(async () => {
+    const fund = snapshot(change);
+    const contributed = fund.members.map((member) =>
+      history.reduce((sum, e) => (e.eventName === "Contribution" && isAddressEqual(e.args.member, member) ? sum + e.args.creditedWars : sum), 0n),
+    );
+    const proposalCount = BigInt(history.filter((e) => e.eventName === "ProposalCreated").length);
+    return { ...fund, contributed, totalContributed: contributed.reduce((sum, c) => sum + c, 0n), proposalCount, ...change };
+  });
 }
 
 const paidByBeto = () =>
@@ -85,7 +110,8 @@ beforeAll(async () => {
 });
 beforeEach(() => {
   agent.readFund.mockReset();
-  agent.readFundEvents.mockReset().mockResolvedValue([]);
+  agent.readFundEvents.mockReset();
+  setHistory([]);
 });
 
 describe("loadFundScreen: who sees a fund", () => {
@@ -147,15 +173,26 @@ describe("loadFundScreen: who sees a fund", () => {
 
   it("says it could not read the fund, instead of showing it, when the history misses a reimbursement", async () => {
     const address = await liveFund();
-    agent.readFund.mockResolvedValue(snapshot({ address, members: [ana, beto, caro].map((p) => getAddress(p.account)), spentThisWeek: 45_000n * WARS }));
+    chainFund({ address, members: [ana, beto, caro].map((p) => getAddress(p.account)), spentThisWeek: 45_000n * WARS });
     await expect(loadFundScreen(address, asViewer(ana))).rejects.toThrow(HistoryGapError);
+  });
+
+  it("shows a contribution Blockscout's history misses, read from the node, once the history adds up with it", async () => {
+    // 3/11: Blockscout's logs by address were a day behind while its block number was current.
+    const address = await liveFund();
+    setHistory([paidByBeto()]);
+    agent.readFundEvents.mockImplementation(async (reader: unknown, _fund: Address, fromBlock: bigint, toBlock: bigint) =>
+      reader === readers.node ? history.filter((e) => e.blockNumber >= fromBlock && e.blockNumber <= toBlock) : [],
+    );
+    const screen = await loadFundScreen(address, asViewer(ana));
+    expect(texts(screen!)).toEqual([`Beto aportó ${formatPesos(10_000n * WARS, "es")}.`]);
   });
 });
 
 describe("loadFundScreen: the public view", () => {
   it("shows Miembro N, in the contract's order, until the whole group agrees to show names", async () => {
     const address = await liveFund({ publicView: true, publicNames: false }, [caro, ana, beto]);
-    agent.readFundEvents.mockResolvedValue([paidByBeto()]);
+    setHistory([paidByBeto()]);
     const screen = (await loadFundScreen(address, null, { publicView: true }))!;
     expect(screen).toMatchObject({ publicView: true });
     expect(screen.view.rows.map((row) => row.name)).toEqual(["Miembro 1", "Miembro 2", "Miembro 3"]);
@@ -180,7 +217,7 @@ describe("loadFundScreen: the public view", () => {
 
   it("keeps the public screen apart per language, each read once within 45 seconds", async () => {
     const address = await liveFund({ publicView: true, publicNames: false });
-    agent.readFundEvents.mockResolvedValue([paidByBeto()]);
+    setHistory([paidByBeto()]);
     const spanish = (await loadPublicFundScreen(address, "es"))!;
     const english = (await loadPublicFundScreen(address, "en"))!;
     expect(spanish.view.rows[0]!.name).toBe("Miembro 1");
@@ -197,7 +234,7 @@ describe("loadFundScreen: the public view", () => {
 
   it("writes a member's own screen in the language asked, the names and the amounts too", async () => {
     const address = await liveFund();
-    agent.readFundEvents.mockResolvedValue([paidByBeto()]);
+    setHistory([paidByBeto()]);
     const screen = (await loadFundScreen(address, asViewer(ana), { locale: "en" }))!;
     expect(texts(screen)).toEqual([`Beto contributed ${formatPesos(10_000n * WARS, "en")}.`]);
     expect(screen.view.rows.map((row) => row.name)).toEqual(["Ana", "Beto", "Caro"]);
@@ -212,7 +249,7 @@ describe("loadFundScreen: the public view", () => {
 
   it("shows the names once the group says so, and still no one in particular is 'you'", async () => {
     const address = await liveFund({ publicView: true, publicNames: true });
-    agent.readFundEvents.mockResolvedValue([paidByBeto()]);
+    setHistory([paidByBeto()]);
     // Even handed a member, a public screen is no one's own.
     const screen = (await loadFundScreen(address, asViewer(ana), { publicView: true }))!;
     expect(screen.view.rows.map((row) => [row.name, row.isMe])).toEqual([
@@ -349,7 +386,7 @@ describe("loadFundScreen: read-your-writes", () => {
 
 it("says once why the agent hasn't converted the USDT waiting, from its latest decision on the fund (F8)", async () => {
   const address = await liveFund();
-  agent.readFund.mockResolvedValue(snapshot({ address, members: [ana, beto, caro].map((p) => getAddress(p.account)), usdtBalance: 5n * USDT_UNIT }));
+  chainFund({ address, members: [ana, beto, caro].map((p) => getAddress(p.account)), usdtBalance: 5n * USDT_UNIT });
   const decide = (kind: string, code: string | null, minutesAgo: number, status: string | null = null) =>
     db.insert(decisions).values({ fund: address, kind, code, reason: "for the log", status, createdAt: new Date(Date.now() - minutesAgo * 60_000) });
   const holds = async () => texts((await loadFundScreen(address, asViewer(ana)))!).filter((text) => text.startsWith("Todavía no pasé a pesos"));
@@ -364,13 +401,13 @@ it("says once why the agent hasn't converted the USDT waiting, from its latest d
   expect(await holds()).toEqual([]);
 
   await decide("skip", "price-reference", 0);
-  agent.readFund.mockResolvedValue(snapshot({ address, members: [ana, beto, caro].map((p) => getAddress(p.account)), usdtBalance: 4n * USDT_UNIT }));
+  chainFund({ address, members: [ana, beto, caro].map((p) => getAddress(p.account)), usdtBalance: 4n * USDT_UNIT });
   expect(await holds()).toEqual([]); // under 5 USDT the agent leaves it, and has nothing to explain
 });
 
 it("gives no reason from a decision over half an hour old: it may be about other USDT, and the agent decides again soon", async () => {
   const address = await liveFund();
-  agent.readFund.mockResolvedValue(snapshot({ address, members: [ana, beto, caro].map((p) => getAddress(p.account)), usdtBalance: 6_230_000n }));
+  chainFund({ address, members: [ana, beto, caro].map((p) => getAddress(p.account)), usdtBalance: 6_230_000n });
   const blocked = (minutesAgo: number) =>
     db.insert(decisions).values({ fund: address, kind: "blocked", reason: "Could not run the fund: RPC Request failed.", createdAt: new Date(Date.now() - minutesAgo * 60_000) });
   const holds = async () => texts((await loadFundScreen(address, asViewer(ana)))!).filter((text) => text.startsWith("Todavía no pasé a pesos"));
@@ -386,7 +423,7 @@ it("gives no reason from a decision over half an hour old: it may be about other
 
 it("explains the USDT waiting only with the agent's conversion decisions on this fund", async () => {
   const address = await liveFund();
-  agent.readFund.mockResolvedValue(snapshot({ address, members: [ana, beto, caro].map((p) => getAddress(p.account)), usdtBalance: 5n * USDT_UNIT }));
+  chainFund({ address, members: [ana, beto, caro].map((p) => getAddress(p.account)), usdtBalance: 5n * USDT_UNIT });
   const holds = async () => texts((await loadFundScreen(address, asViewer(ana)))!).filter((text) => text.startsWith("Todavía no pasé a pesos"));
 
   await db.insert(decisions).values({ fund: randomAccount(), kind: "skip", code: "price-gap", reason: "another fund's" });
@@ -475,10 +512,10 @@ describe("loadFundScreen: the invitation link, for Tu cuenta (spec, 9.4 B)", () 
 
     const ten = [ana, beto, caro].map((person) => getAddress(person.account));
     while (ten.length < 10) ten.push(randomAccount());
-    agent.readFund.mockResolvedValue(snapshot({ address, members: ten }));
+    chainFund({ address, members: ten });
     expect((await loadFundScreen(address, asViewer(ana)))?.invite).toBeNull();
 
-    agent.readFund.mockResolvedValue(snapshot({ address, members: [ana, beto, caro].map((person) => getAddress(person.account)), closed: true }));
+    chainFund({ address, members: [ana, beto, caro].map((person) => getAddress(person.account)), closed: true });
     expect((await loadFundScreen(address, asViewer(ana)))?.invite).toBeNull();
   });
 });
@@ -518,7 +555,7 @@ describe("loadFundScreen: someone who asked to join (spec, 9.4)", () => {
 
     const ten = [ana, beto, caro].map((person) => getAddress(person.account));
     while (ten.length < 10) ten.push(randomAccount());
-    agent.readFund.mockResolvedValue(snapshot({ address, members: ten }));
+    chainFund({ address, members: ten });
     expect(asked(await loadFundScreen(address, asViewer(ana)))?.action).toMatchObject({ canPropose: false });
   });
 
@@ -547,7 +584,7 @@ describe("loadFundScreen: someone who asked to join (spec, 9.4)", () => {
     for (const days of [JOIN_REQUEST_REACH_DAYS - 1, JOIN_REQUEST_REACH_DAYS + 1]) {
       const lucas = await addUser(db, "Lucas");
       await db.insert(joinRequests).values({ fundId, userId: lucas.id, createdAt: sql`now() - ${days} * interval '1 day'` });
-      agent.readFundEvents.mockResolvedValue([
+      setHistory([
         event("ProposalCreated", { id: 4n, action: 1, a: getAddress(lucas.account), b: zeroAddress, amount: 0n, proposer: getAddress(ana.account), note: "" }, BLOCK - 100n),
       ]);
       const screen = await loadFundScreen(address, asViewer(ana));
@@ -583,7 +620,7 @@ describe("loadFundScreen: someone who asked to join (spec, 9.4)", () => {
     // A fund with its 10 members can't take another: no button, so no line.
     const ten = [ana, beto, caro].map((person) => getAddress(person.account));
     while (ten.length < 10) ten.push(randomAccount());
-    agent.readFund.mockResolvedValue(snapshot({ address, members: ten }));
+    chainFund({ address, members: ten });
     expect(proposing(await loadFundScreen(address, asViewer(ana)), "Betó pidió sumarse al fondo.")).toEqual({
       kind: "propose-member",
       account: getAddress(beto2.account),
