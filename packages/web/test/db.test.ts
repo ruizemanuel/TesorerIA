@@ -124,7 +124,7 @@ describe("the migration that gives each passkey its site and state", () => {
     // A database as it was before this migration, with passkeys in it; then the real folder on top, as a deploy does.
     const migrations = path.join(process.cwd(), "drizzle");
     const journal = JSON.parse(readFileSync(path.join(migrations, "meta", "_journal.json"), "utf8")) as { entries: { tag: string }[] };
-    const earlier = journal.entries.filter((entry) => entry.tag !== "0008_passkey_sites");
+    const earlier = journal.entries.slice(0, journal.entries.findIndex((entry) => entry.tag === "0008_passkey_sites"));
     const before = mkdtempSync(path.join(tmpdir(), "migrations-before-"));
     mkdirSync(path.join(before, "meta"));
     writeFileSync(path.join(before, "meta", "_journal.json"), JSON.stringify({ ...journal, entries: earlier }));

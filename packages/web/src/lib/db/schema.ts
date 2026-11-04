@@ -3,6 +3,7 @@ import {
   bigint,
   boolean,
   customType,
+  index,
   integer,
   jsonb,
   pgTable,
@@ -277,3 +278,30 @@ export const weekSummaries = pgTable(
   },
   (t) => [primaryKey({ columns: [t.fundId, t.week] })],
 );
+
+/**
+ * Each fund's logs, kept so that its history comes from here and only the newest blocks from the node (spec, 8.1):
+ * on 3/11 Blockscout's logs fell a day behind, and on 4/11 its getLogs stopped answering. The latest UNKEPT_BLOCKS of
+ * each read are never kept (fund-logs.ts), so a reorg can't leave a log here that the chain dropped.
+ */
+export const fundLogs = pgTable(
+  "fund_logs",
+  {
+    /** The fund's address, lowercase. */
+    fund: text("fund").notNull(),
+    block: units("block").notNull(),
+    transactionHash: text("transaction_hash").notNull(),
+    logIndex: integer("log_index").notNull(),
+    topics: jsonb("topics").$type<`0x${string}`[]>().notNull(),
+    data: text("data").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.transactionHash, t.logIndex] }), index("fund_logs_fund_block").on(t.fund, t.block)],
+);
+
+/** The blocks of each fund kept in fund_logs, both included: every log the fund emitted in them is there. */
+export const fundLogRanges = pgTable("fund_log_ranges", {
+  /** The fund's address, lowercase. */
+  fund: text("fund").primaryKey(),
+  fromBlock: units("from_block").notNull(),
+  toBlock: units("to_block").notNull(),
+});

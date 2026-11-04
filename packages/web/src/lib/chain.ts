@@ -1,8 +1,10 @@
-import { BLOCKSCOUT_API, BLOCKSCOUT_PRO_API, type LogReader, RPC_LOG_RANGE, blockscoutLogReader, rpcLogReader } from "@tesoreria/agent";
+import { type LogReader, RPC_LOG_RANGE, rpcLogReader } from "@tesoreria/agent";
 import { BaseError, type Chain, type Hash, type PublicClient, type Transport, createPublicClient, getAbiItem, http } from "viem";
 import { entryPoint07Abi, entryPoint07Address } from "viem/account-abstraction";
 import { base, celo } from "viem/chains";
+import { getDb } from "./db/client";
 import { env } from "./env";
+import { keptLogReader } from "./fund-logs";
 
 // With the chain fixed (not `Chain | undefined`), which is what the wallet package asks of its client.
 type ChainClient = PublicClient<Transport, Chain>;
@@ -68,42 +70,20 @@ export function baseClient(): ChainClient {
   return shared.tesoreriaBase;
 }
 
-/** About a day of Celo's one-second blocks: at most 20 of the node's 5,000-block requests. */
-export const NODE_FALLBACK_BLOCKS = 20n * RPC_LOG_RANGE;
-
-/**
- * `primary`, but a history of at most `maxBlocks` that it fails to read comes from `node` instead: a young fund's page
- * and heartbeat don't stop when Blockscout does (the real fund's page did, on 11/10, on its 429s). A longer history
- * still needs `primary`, and its failure still throws.
- */
-export function withNodeFallback(primary: LogReader, node: LogReader, maxBlocks = NODE_FALLBACK_BLOCKS): LogReader {
-  return async (query) => {
-    try {
-      return await primary(query);
-    } catch (error) {
-      if (query.toBlock - query.fromBlock + 1n > maxBlocks) throw error;
-      console.warn(`Blockscout failed (${error instanceof Error ? error.message : String(error)}): reading the history from the node`);
-      return node(query);
-    }
-  };
-}
-
-/** The node alone, RPC_LOG_RANGE blocks per request: what fills a hole in the history Blockscout gave (completeHistory). */
+/** The node alone, RPC_LOG_RANGE blocks per request: what fills a hole in a history that misses logs (completeHistory). */
 export function nodeLogReader(): LogReader {
   return rpcLogReader(celoClient());
 }
 
 /**
- * A fund's history: Blockscout plus the node on mainnet, through the PRO API when there's a key (see
- * BLOCKSCOUT_PRO_API), and from the node alone when Blockscout fails on a short one; on the fork, the node alone
- * (Blockscout doesn't know it). Blockscout may also answer without failing and still miss logs: completeHistory
- * checks what it gave against the contract.
+ * A fund's history: on mainnet, what the database keeps of it plus the node for the blocks it doesn't (keptLogReader);
+ * on the fork, the node alone (its blocks are made up, so they're never kept). Blockscout isn't used: on 3/11 its logs
+ * fell a day behind, and on 4/11 its getLogs stopped answering. completeHistory checks a history against the contract.
  */
 export function logReader(): LogReader {
   const rpc = nodeLogReader();
   if (env().CHAIN_MODE === "fork") return rpc;
-  const apiKey = env().BLOCKSCOUT_API_KEY;
-  return withNodeFallback(blockscoutLogReader({ apiUrl: apiKey === undefined ? BLOCKSCOUT_API : BLOCKSCOUT_PRO_API, rpc, apiKey }), rpc);
+  return keptLogReader({ db: getDb, node: rpc });
 }
 
 export type LandedOperation = { userOpHash: Hash; transactionHash: Hash; success: boolean };

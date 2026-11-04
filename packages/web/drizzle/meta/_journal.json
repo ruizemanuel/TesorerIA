@@ -64,6 +64,13 @@
       "when": 1792846296008,
       "tag": "0008_passkey_sites",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1793799342442,
+      "tag": "0009_fund_logs",
+      "breakpoints": true
     }
   ]
 }
