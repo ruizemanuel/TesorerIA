@@ -59,7 +59,24 @@ test("three friends create a fund, contribute, get the agreed expense back, vote
   await expect(yourFunds.getByRole("link", { name: "Crear otro fondo" })).toHaveAttribute("href", "/crear");
   const inviteSomeone = ana.getByRole("dialog", { name: "Tu cuenta" }).getByRole("region", { name: "Invitar a alguien" });
   await expect(inviteSomeone.getByText(invite, { exact: true })).toBeVisible();
-  await ana.getByRole("button", { name: "Salir" }).click();
+  // Salir can't be tapped twice: it stays disabled, saying so, while the logout is on its way. One that fails (held,
+  // then answered with a 500 here) gives the button back with the reason, and the next tap logs her out.
+  const accountPanel = ana.getByRole("dialog", { name: "Tu cuenta" });
+  let answerLogout!: () => void;
+  const logoutHeld = new Promise<void>((resolve) => (answerLogout = resolve));
+  await ana.route(
+    "**/api/auth/logout",
+    async (route) => {
+      await logoutHeld;
+      await route.fulfill({ status: 500 });
+    },
+    { times: 1 },
+  );
+  await accountPanel.getByRole("button", { name: "Salir" }).click();
+  await expect(accountPanel.getByRole("button", { name: "Saliendo…" })).toBeDisabled();
+  answerLogout();
+  await expect(accountPanel.getByText("No se pudo completar. Probá de nuevo en un rato.")).toBeVisible();
+  await accountPanel.getByRole("button", { name: "Salir" }).click();
   await expect(ana).toHaveURL(/localhost:3000\/$/);
   await ana.goto(fund);
   await expect(ana).toHaveURL(/\/entrar\?next=/);

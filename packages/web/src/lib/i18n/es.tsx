@@ -168,6 +168,7 @@ export const es = {
     createLink: "creá un fondo",
     button: "Entrar con mi passkey",
     logOut: "Salir",
+    loggingOut: "Saliendo…",
   },
   /**
    * Swapping the passkey of the old site for one of tesoreria.finance (spec, 9.5): the card of the inicio, and the same

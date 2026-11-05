@@ -145,6 +145,7 @@ export const en: Messages = {
     createLink: "create a fund",
     button: "Log in with my passkey",
     logOut: "Log out",
+    loggingOut: "Logging out…",
   },
   keyChange: {
     title: "Update your passkey",
