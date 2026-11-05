@@ -21,15 +21,15 @@ export function contributeCalls({ fund, token, amount }: { fund: Address; token:
 }
 
 /** Pesos as Ripio's form reads them: "10000", or "10000.5" with cents. */
-function plainPesos(units: bigint): string {
+export function plainPesos(units: bigint): string {
   const cents = units / 10n ** 16n;
   const rest = cents % 100n;
   return `${cents / 100n}${rest === 0n ? "" : `.${rest.toString().padStart(2, "0").replace(/0$/, "")}`}`;
 }
 
 /**
- * Ripio's ramp for wARS on Celo, paid into the member's own account, with the amount to load when there is one;
- * "Continue manually" fills the form (spec, 10).
+ * Ripio's ramp for wARS on Celo, paid into the member's own account, with the amount to load when there is one. Since
+ * 5/11 it goes straight to Ripio's widget; on 7/10 it stopped at "Continue manually", which filled the form (spec, 10).
  */
 export function rampUrl(account: Address, amount?: bigint): string {
   const amountParam = amount !== undefined && amount > 0n ? `&amount=${plainPesos(amount)}` : "";

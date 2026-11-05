@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { type Address, getAddress } from "viem";
 import { ACCOUNT_CHANGED } from "../lib/account-reader";
-import { browserStorage, cashOutCalls, cashOutProblem, readCashOutAmount, rememberRipioAddress, rememberedRipioAddress } from "../lib/cash-out";
+import { browserStorage, cashOutCalls, cashOutProblem, offRampUrl, readCashOutAmount, rememberRipioAddress, rememberedRipioAddress } from "../lib/cash-out";
 import { useAccountBalances } from "../lib/client/account";
 import { isOnItsWay, userMessage } from "../lib/client/errors";
 import { loadMe, sendCalls } from "../lib/client/wallet";
@@ -13,17 +13,18 @@ import { useLocale, useMessages } from "../lib/i18n/client";
 import { NetworkWarning } from "./address-box";
 import { AmountField } from "./amount-field";
 import { useRefresh } from "./refresh-provider";
-import { Button, FIELD } from "./ui";
+import { Button, ButtonLink, FIELD } from "./ui";
 
 const LOOK_EVERY_MS = 10_000;
 const ADDRESS = "narrow break-all rounded-[14px] bg-surface p-3 text-center text-[15px] font-semibold [font-variant-numeric:lining-nums_tabular-nums]";
 
 /**
- * Pasar a pesos (spec, 9, pantalla 8, and 9.2): the member's wARS, sent from their own account to their Ripio
- * deposit address on Celo, where Ripio's app sells them 1:1 for pesos. The address is remembered by this browser
- * only, after a pass that went well. The amount is all the account holds until the member types another; after a
- * pass, nothing is offered until a read made after it (useAccountBalances says when, and waits for the pass's
- * block), so the old balance is never offered again.
+ * Pasar a pesos (spec, 9, pantalla 8, and 9.2): the member's wARS, sent from their own account to a Ripio address on
+ * Celo. "Vender con Ripio" (offRampUrl) gives one that sells them 1:1 and pays the member's bank; the app's deposit
+ * address works too, and the sale is done there. The address is remembered by this browser only, after a pass that
+ * went well. The amount is all the account holds until the member types another; after a pass, nothing is offered
+ * until a read made after it (useAccountBalances says when, and waits for the pass's block), so the old balance is
+ * never offered again.
  */
 export function CashOutPanel({ fund, account, cashOutOnItsWay }: { fund: Address; account: Address; cashOutOnItsWay: boolean }) {
   const m = useMessages();
@@ -95,6 +96,11 @@ export function CashOutPanel({ fund, account, cashOutOnItsWay }: { fund: Address
 
       {saved === undefined ? null : asking ? (
         <div className="grid gap-3">
+          <p>{m.cashOut.sellIntro}</p>
+          {/* Secondary, as Aportar's "Cargar pesos con Ripio": the pass below stays the panel's one primary (spec, 9.1). */}
+          <ButtonLink href={offRampUrl(amount ?? undefined)} target="_blank" rel="noreferrer" variant="secondary">
+            {m.cashOut.sellWithRipio}
+          </ButtonLink>
           <p>{m.cashOut.depositInstructions}</p>
           <NetworkWarning />
           <label className="grid gap-1">

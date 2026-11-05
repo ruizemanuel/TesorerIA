@@ -284,14 +284,26 @@ describe("the dictionaries", () => {
       "When the agent pays you back for an expense, you'll see it here.",
     ]);
     // Pasar a pesos
+    // After a pass, for either address: Ripio's sale pays the bank by itself; the app's deposit waits for a sale there.
     expect(html(es.cashOut.passed(money("$ 2.000")))).toBe(
-      'Pasaste <span class="money">$ 2.000</span> a Ripio. En un minuto lo ves en la app: ahí lo vendés 1:1 a pesos y lo pasás a tu banco.',
+      'Pasaste <span class="money">$ 2.000</span> a Ripio. Si la dirección es de Vender con Ripio, los pesos llegan solos a tu banco y Ripio te avisa por mail. Si es de la app, vendelos ahí 1:1.',
     );
     expect(html(en.cashOut.passed(money("ARS 2,000")))).toBe(
-      'You cashed out <span class="money">ARS 2,000</span> to Ripio. In a minute you\'ll see it in the app: there you sell it 1:1 for pesos and move it to your bank.',
+      'You cashed out <span class="money">ARS 2,000</span> to Ripio. If the address is from Sell with Ripio, the pesos reach your bank on their own and Ripio emails you. If it\'s from the app, sell them there 1:1.',
     );
-    expect(es.cashOut.depositInstructions).toBe("En la app de Ripio tocá Depositar, elegí wARS y la red Celo, y copiá la dirección.");
-    expect(en.cashOut.depositInstructions).toBe("In the Ripio app, tap Depositar (Deposit), pick wARS and the Celo network, and copy the address.");
+    // Where the address comes from: Ripio's sale first (5/11), the app's deposit as the other way.
+    expect([es.cashOut.sellIntro, es.cashOut.sellWithRipio]).toEqual([
+      "Con Vender con Ripio cargás tu CBU, CVU o alias, y Ripio te da una dirección en la red Celo. Pegala acá y mandá: los pesos llegan a tu banco.",
+      "Vender con Ripio",
+    ]);
+    expect([en.cashOut.sellIntro, en.cashOut.sellWithRipio]).toEqual([
+      "With Sell with Ripio you enter your CBU, CVU or alias, and Ripio gives you an address on the Celo network. Paste it here and send: the pesos reach your bank.",
+      "Sell with Ripio",
+    ]);
+    expect(es.cashOut.depositInstructions).toBe("O desde la app de Ripio: tocá Depositar, elegí wARS y la red Celo, y copiá la dirección. Ahí los vendés 1:1.");
+    expect(en.cashOut.depositInstructions).toBe(
+      "Or from the Ripio app: tap Depositar (Deposit), pick wARS and the Celo network, and copy the address. You sell them there 1:1.",
+    );
     expect([es.cashOut.addressLabel, es.cashOut.savedAddress, es.cashOut.change]).toEqual(["Tu dirección de Ripio", "A tu cuenta de Ripio", "Cambiar"]);
     expect([en.cashOut.addressLabel, en.cashOut.savedAddress, en.cashOut.change]).toEqual(["Your Ripio address", "To your Ripio account", "Change"]);
     expect([es.cashOut.onItsWay, es.cashOut.nothingToPass, es.cashOut.amountLabel]).toEqual([

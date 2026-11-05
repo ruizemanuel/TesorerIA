@@ -456,9 +456,14 @@ export const en: Messages = {
   },
   cashOut: {
     passed: (amount: ReactNode) => (
-      <>You cashed out {amount} to Ripio. In a minute you'll see it in the app: there you sell it 1:1 for pesos and move it to your bank.</>
+      <>
+        You cashed out {amount} to Ripio. If the address is from Sell with Ripio, the pesos reach your bank on their own and Ripio emails you.
+        If it's from the app, sell them there 1:1.
+      </>
     ),
-    depositInstructions: "In the Ripio app, tap Depositar (Deposit), pick wARS and the Celo network, and copy the address.",
+    sellIntro: "With Sell with Ripio you enter your CBU, CVU or alias, and Ripio gives you an address on the Celo network. Paste it here and send: the pesos reach your bank.",
+    sellWithRipio: "Sell with Ripio",
+    depositInstructions: "Or from the Ripio app: tap Depositar (Deposit), pick wARS and the Celo network, and copy the address. You sell them there 1:1.",
     addressLabel: "Your Ripio address",
     savedAddress: "To your Ripio account",
     change: "Change",

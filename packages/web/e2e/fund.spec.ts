@@ -274,6 +274,11 @@ test("three friends create a fund, contribute, get the agreed expense back, vote
   await expect(account.getByText(/\$\s5\.000/)).toBeVisible();
   await account.getByRole("link", { name: "Pasar a pesos con Ripio" }).click();
   const pesos = ana.getByRole("dialog", { name: "Pasar a pesos" });
+  // Ripio's own sale, for what she holds: it ends in the Celo address she pastes here (the app's deposit one works too).
+  await expect(pesos.getByRole("link", { name: "Vender con Ripio" })).toHaveAttribute(
+    "href",
+    "https://ramp.ripio.com/offramp?country=AR&chain=42220&token=WARS&amount=5000",
+  );
   await pesos.getByLabel("Tu dirección de Ripio").fill(`  ${ripio} `);
   await pesos.getByLabel("Cuánto pasás").fill("2.000");
   await pesos.getByRole("button", { name: /Pasar \$\s2\.000 a Ripio/ }).click();

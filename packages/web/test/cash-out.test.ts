@@ -1,7 +1,7 @@
 import { USDT, WARS } from "@tesoreria/agent";
 import { decodeFunctionData, erc20Abi, getAddress } from "viem";
 import { describe, expect, it } from "vitest";
-import { cashOutCalls, cashOutProblem, readCashOutAmount, rememberRipioAddress, rememberedRipioAddress } from "../src/lib/cash-out";
+import { cashOutCalls, cashOutProblem, offRampUrl, readCashOutAmount, rememberRipioAddress, rememberedRipioAddress } from "../src/lib/cash-out";
 import { NBSP, WARS_UNIT, formatPesos } from "../src/lib/format";
 import { en } from "../src/lib/i18n/en";
 import { es } from "../src/lib/i18n/es";
@@ -21,6 +21,18 @@ describe("cashOutCalls", () => {
     expect(call!.to).toBe(WARS);
     expect(call!.value).toBeUndefined();
     expect(decodeFunctionData({ abi: erc20Abi, data: call!.data! })).toEqual({ functionName: "transfer", args: [RIPIO, 45_000n * WARS_UNIT] });
+  });
+});
+
+describe("offRampUrl", () => {
+  it("opens Ripio's sale of wARS on Celo for pesos, which ends in the Celo address to send them to (5/11)", () => {
+    expect(offRampUrl()).toBe("https://ramp.ripio.com/offramp?country=AR&chain=42220&token=WARS");
+    expect(offRampUrl(0n)).toBe("https://ramp.ripio.com/offramp?country=AR&chain=42220&token=WARS");
+  });
+
+  it("carries the amount, in pesos as Ripio's form reads them", () => {
+    expect(offRampUrl(10_000n * WARS_UNIT)).toBe("https://ramp.ripio.com/offramp?country=AR&chain=42220&token=WARS&amount=10000");
+    expect(offRampUrl(2n * WARS_UNIT + 25n * 10n ** 16n)).toBe("https://ramp.ripio.com/offramp?country=AR&chain=42220&token=WARS&amount=2.25");
   });
 });
 

@@ -561,8 +561,17 @@ export const es = {
   /** Pasar a pesos (spec, 9, pantalla 8, and 9.2): the member's wARS, to their Ripio address. */
   cashOut: {
     /** After a pass that went well: `amount` stands out. */
-    passed: (amount: ReactNode) => <>Pasaste {amount} a Ripio. En un minuto lo ves en la app: ahí lo vendés 1:1 a pesos y lo pasás a tu banco.</>,
-    depositInstructions: "En la app de Ripio tocá Depositar, elegí wARS y la red Celo, y copiá la dirección.",
+    passed: (amount: ReactNode) => (
+      <>
+        Pasaste {amount} a Ripio. Si la dirección es de Vender con Ripio, los pesos llegan solos a tu banco y Ripio te avisa por mail. Si es de
+        la app, vendelos ahí 1:1.
+      </>
+    ),
+    /** Over "Vender con Ripio": Ripio's own sale (offRampUrl), the first way to get the address. */
+    sellIntro: "Con Vender con Ripio cargás tu CBU, CVU o alias, y Ripio te da una dirección en la red Celo. Pegala acá y mandá: los pesos llegan a tu banco.",
+    sellWithRipio: "Vender con Ripio",
+    /** The other way: the app's deposit address. */
+    depositInstructions: "O desde la app de Ripio: tocá Depositar, elegí wARS y la red Celo, y copiá la dirección. Ahí los vendés 1:1.",
     addressLabel: "Tu dirección de Ripio",
     /** Over the address this browser remembers. */
     savedAddress: "A tu cuenta de Ripio",

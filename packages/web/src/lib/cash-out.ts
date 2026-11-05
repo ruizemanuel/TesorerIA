@@ -1,12 +1,24 @@
 import { USDT, WARS } from "@tesoreria/agent";
 import type { Call } from "@tesoreria/wallet";
 import { type Address, encodeFunctionData, erc20Abi, getAddress, isAddress, isAddressEqual, zeroAddress } from "viem";
+import { plainPesos } from "./contribute";
 import { WARS_SPECK, formatPesos, parsePesos } from "./format";
 import type { Messages } from "./i18n/messages";
 
 /**
- * Pasar a pesos (spec, 9.2): the member's own wARS, sent to their Ripio deposit address, where Ripio's app sells them
- * 1:1 for pesos. One call, the only way the paymaster sponsors it (spec, 6).
+ * Vender con Ripio (spec, 9, pantalla 8): Ripio's off-ramp for wARS on Celo, with the amount to sell when there is
+ * one. After the CBU, CVU or alias, it gives a Celo address, one per network, that sells what reaches it 1:1 and sends
+ * the pesos to the member's bank: the address this panel sends to, as it does to the app's deposit one.
+ */
+export function offRampUrl(amount?: bigint): string {
+  const amountParam = amount !== undefined && amount > 0n ? `&amount=${plainPesos(amount)}` : "";
+  return `https://ramp.ripio.com/offramp?country=AR&chain=42220&token=WARS${amountParam}`;
+}
+
+/**
+ * Pasar a pesos (spec, 9.2): the member's own wARS, sent to a Ripio address on Celo: Vender con Ripio's, which sells
+ * them and pays the bank, or the app's deposit one, where they're sold 1:1. One call, the only way the paymaster
+ * sponsors it (spec, 6).
  */
 export function cashOutCalls({ to, amount }: { to: Address; amount: bigint }): Call[] {
   return [{ to: WARS, data: encodeFunctionData({ abi: erc20Abi, functionName: "transfer", args: [to, amount] }) }];
