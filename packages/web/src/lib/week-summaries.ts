@@ -69,8 +69,8 @@ export type WeekSummaryDeps = {
 type SummaryClient = Pick<PublicClient, "getBlock" | "getBlockNumber" | "multicall" | "readContract">;
 
 /**
- * The chain's side of the summaries: Celo through CELO_RPC_URL, the history as the screens read it (Blockscout plus
- * the node, and the node alone for a hole: completeHistory; the node alone on the fork), and the agent every new fund names.
+ * The chain's side of the summaries: Celo through CELO_RPC_URL, the history as the screens read it (what the database
+ * keeps plus the node: logReader; the node alone for a hole: completeHistory), and the agent every new fund names.
  */
 export function chainWeekSummaryDeps(
   client: SummaryClient = celoClient(),
