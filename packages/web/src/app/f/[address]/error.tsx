@@ -10,9 +10,9 @@ const tries: number[] = [];
 
 /**
  * What went wrong and what to do (spec, 9.2): the chain or its history couldn't be read just now. That is often a
- * matter of seconds (a node behind, Blockscout busy), so the page asks the server for itself again a few times,
- * each time later (nextRetryDelay), and then leaves it to the person. `retry` asks the server again; `reset` would
- * only redraw the error it already has.
+ * matter of seconds (a node behind or busy, the database slow to answer), so the page asks the server for itself
+ * again a few times, each time later (nextRetryDelay), and then leaves it to the person. `retry` asks the server
+ * again; `reset` would only redraw the error it already has.
  */
 export default function FundError({ retry }: { retry: () => void }) {
   const m = useMessages();
