@@ -300,6 +300,13 @@ describe("the dictionaries", () => {
       "With Sell with Ripio you enter your CBU, CVU or alias, and Ripio gives you an address on the Celo network. Paste it here and send: the pesos reach your bank.",
       "Sell with Ripio",
     ]);
+    // Over a remembered address (6/11), which may be the app's: Ripio's sale stays in sight.
+    expect(es.cashOut.sellIntroSaved).toBe(
+      "Con Vender con Ripio los pesos llegan directo a tu banco: Ripio te da una dirección en la red Celo. Tocá Cambiar y pegala acá.",
+    );
+    expect(en.cashOut.sellIntroSaved).toBe(
+      "With Sell with Ripio the pesos go straight to your bank: Ripio gives you an address on the Celo network. Tap Change and paste it here.",
+    );
     expect(es.cashOut.depositInstructions).toBe("O desde la app de Ripio: tocá Depositar, elegí wARS y la red Celo, y copiá la dirección. Ahí los vendés 1:1.");
     expect(en.cashOut.depositInstructions).toBe(
       "Or from the Ripio app: tap Depositar (Deposit), pick wARS and the Celo network, and copy the address. You sell them there 1:1.",

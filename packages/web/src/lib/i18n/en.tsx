@@ -462,6 +462,7 @@ export const en: Messages = {
       </>
     ),
     sellIntro: "With Sell with Ripio you enter your CBU, CVU or alias, and Ripio gives you an address on the Celo network. Paste it here and send: the pesos reach your bank.",
+    sellIntroSaved: "With Sell with Ripio the pesos go straight to your bank: Ripio gives you an address on the Celo network. Tap Change and paste it here.",
     sellWithRipio: "Sell with Ripio",
     depositInstructions: "Or from the Ripio app: tap Depositar (Deposit), pick wARS and the Celo network, and copy the address. You sell them there 1:1.",
     addressLabel: "Your Ripio address",

@@ -569,6 +569,8 @@ export const es = {
     ),
     /** Over "Vender con Ripio": Ripio's own sale (offRampUrl), the first way to get the address. */
     sellIntro: "Con Vender con Ripio cargás tu CBU, CVU o alias, y Ripio te da una dirección en la red Celo. Pegala acá y mandá: los pesos llegan a tu banco.",
+    /** The same, over an address this browser remembers, which may be the app's. */
+    sellIntroSaved: "Con Vender con Ripio los pesos llegan directo a tu banco: Ripio te da una dirección en la red Celo. Tocá Cambiar y pegala acá.",
     sellWithRipio: "Vender con Ripio",
     /** The other way: the app's deposit address. */
     depositInstructions: "O desde la app de Ripio: tocá Depositar, elegí wARS y la red Celo, y copiá la dirección. Ahí los vendés 1:1.",

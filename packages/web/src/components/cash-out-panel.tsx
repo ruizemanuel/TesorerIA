@@ -94,13 +94,19 @@ export function CashOutPanel({ fund, account, cashOutOnItsWay }: { fund: Address
         </p>
       )}
 
-      {saved === undefined ? null : asking ? (
+      {/* Ripio's own sale, with or without a remembered address (6/11): the remembered one may be the app's. Secondary,
+          as Aportar's "Cargar pesos con Ripio": the pass below stays the panel's one primary (spec, 9.1). */}
+      {saved !== undefined && (
         <div className="grid gap-3">
-          <p>{m.cashOut.sellIntro}</p>
-          {/* Secondary, as Aportar's "Cargar pesos con Ripio": the pass below stays the panel's one primary (spec, 9.1). */}
+          <p>{asking ? m.cashOut.sellIntro : m.cashOut.sellIntroSaved}</p>
           <ButtonLink href={offRampUrl(amount ?? undefined)} target="_blank" rel="noreferrer" variant="secondary">
             {m.cashOut.sellWithRipio}
           </ButtonLink>
+        </div>
+      )}
+
+      {saved === undefined ? null : asking ? (
+        <div className="grid gap-3">
           <p>{m.cashOut.depositInstructions}</p>
           <NetworkWarning />
           <label className="grid gap-1">

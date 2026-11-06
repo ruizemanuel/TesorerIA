@@ -295,6 +295,11 @@ test("three friends create a fund, contribute, get the agreed expense back, vote
   await ana.getByRole("link", { name: "Pasar a pesos", exact: true }).click();
   await expect(pesos.getByText("A tu cuenta de Ripio")).toBeVisible();
   await expect(pesos.getByText(ripio)).toBeVisible();
+  // With an address remembered, Ripio's own sale is still offered (6/11): the remembered one may be the app's.
+  await expect(pesos.getByRole("link", { name: "Vender con Ripio" })).toHaveAttribute(
+    "href",
+    "https://ramp.ripio.com/offramp?country=AR&chain=42220&token=WARS&amount=3000",
+  );
   await pesos.getByRole("button", { name: /Pasar \$\s3\.000 a Ripio/ }).click();
   await expect(pesos.getByText(/Pasaste \$\s3\.000 a Ripio/)).toBeVisible();
   expect(await warsOf(ripio)).toBe(5_000n * 10n ** 18n);
