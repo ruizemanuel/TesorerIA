@@ -32,6 +32,18 @@ As of November 2, 2026: two funds of the same eight friends. The football fund h
 - **A summary of each week, checked against the chain.** When a week closes, the agent writes the group who paid, what came in and what was paid out. The four so far match the chain to the cent: for example, [the football fund's third week](https://tesoreria.finance/f/0x9A74F670F3c59Ae4B8450fdD477b0461b89D2dfD/publico?p=resumen&semana=3).
 - **Every one of these transactions carries the attribution tag `celo_fbe4d00a2cb4`:** the agent's at the end of their calldata, and the members' inside each UserOperation.
 
+## How TesorerIA meets the Stable Agents: LatAm criteria
+
+| Criterion | How TesorerIA meets it | Where to check |
+|---|---|---|
+| 1. Live on Celo mainnet with a real wFIAT and real transactions | Two funds of the same eight friends, live since October: 36 contributions for ARS 320,169 in and ARS 290,000 paid out, as of November 2. Every weekly summary matches the chain to the cent. On November 6, a member sold ARS 10,000 through Ripio's off-ramp and was paid in their bank. | [On mainnet today](#on-mainnet-today), and the funds on Blockscout from [On Celo mainnet](#on-celo-mainnet) |
+| 2. wFIAT at the core, and the Celo stack | The funds hold, pay and settle in wARS: USDT contributions are changed to wARS as they come in, and Ripio's ramps sit inside the app, "Load pesos with Ripio" to come in and "Sell with Ripio" to go out to a bank. The agent has an ERC-8004 identity (agent 9887). Every transaction carries the attribution tag `celo_fbe4d00a2cb4`, the members' inside each UserOperation. Members never need CELO: their operations are sponsored. | [The web](#the-web), [On Celo mainnet](#on-celo-mainnet) |
+| 3. The agent acts on its own, with clear logic and limits | It converts USDT to wARS after checking the price against Chainlink, pays back the agreed expense up to the weekly cap, turns anything else into a proposal, tracks who is behind and writes each week's summary. The contract only lets it pay members, never above the cap, and it can't change the rules. Its own limits sit on top: per reimbursement, per day, per conversion, and a number of transactions a day. The part that signs is deterministic code with tests; the AI only talks. | [The agent](#the-agent) |
+| 4. Someone new to crypto completes the flow, in their own currency | A passkey (fingerprint, face or PIN) controls their own Safe account: no seed phrase, no extension, no gas. Every amount is in pesos, in Rioplatense Spanish or English. Pesos come in from Ripio, and what a member is paid back goes out to their bank with "Sell with Ripio". | [The web](#the-web), [the first sale to a bank](https://celo.blockscout.com/tx/0x8bfd6baf96004a6f9e41688e95b393e9ca6b10fa8e21d80561ead55d02d9b47d) |
+| 5. Impact in LatAm | For groups that share a recurring cost in pesos: a football pitch, a barbecue, a flat, a trip. A real group of eight friends uses it every week, each member signing their own operations, and everyone was paid up at every weekly close. | [On mainnet today](#on-mainnet-today), [What's next](#whats-next) |
+
+Dashboards that read only the agent's wallet undercount TesorerIA: the money moves between the members and the fund's contract, never through the agent, and the members sign their own tagged UserOperations.
+
 ## What's next
 
 - **More groups in Argentina.** The same fund works for any group that shares a recurring cost: a flat, a trip, a padel court. Growth is measured in groups, members, wARS moved, and the share of contributions paid directly in wARS (13 of 36 so far).
