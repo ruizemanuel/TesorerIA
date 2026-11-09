@@ -50,6 +50,7 @@ Dashboards that read only the agent's wallet undercount TesorerIA: the money mov
 - **Reminders by email.** The weekly summary already tells the group who owes what, for a member to share; an email would reach whoever doesn't open the app. It waits until groups ask for it, since it takes a domain of its own.
 - **Other wFIAT currencies.** The factory is fixed to wARS, USDT and their Uniswap pool, so wBRL or wMXN take a factory of their own, once a pool holds enough liquidity.
 - **MiniPay.** Opening the app inside MiniPay takes a single contract for every fund, since MiniPay only allows contracts it approved. That's the path to reach people where they already hold stablecoins.
+- **Giving back a contribution.** The contract has no way to return one: it goes out as a payment, like the pitch, and still counts as contributed. So when the football fund gave a member back ARS 10,000 of a contribution, the app counts them a week further ahead on their dues than they are, and that money would still weigh in their share if they left or the fund closed. The app will mark that kind of payment and take it off what the member put in, and the next `FundFactory` will add an action that does the same on chain.
 
 ## How to run
 
