@@ -46,7 +46,12 @@ Dashboards that read only the agent's wallet undercount TesorerIA: the money mov
 
 ## What's next
 
-- **More groups in Argentina.** The same fund works for any group that shares a recurring cost: a flat, a trip, a padel court. Growth is measured in groups, members, wARS moved, and the share of contributions paid directly in wARS (23 of 55 so far).
+**The goal: 5 groups by December 31, 2026, and 20 by March 31, 2027,** measured in groups, members, wARS moved, and the share of contributions paid directly in wARS (23 of 55 so far).
+
+**What a group costs, and who pays.** Over the football fund's first three weeks, a group of eight cost about US$0.10 a week on chain (ARS 165), 0.2% of the ARS 80,000 it puts in, or about US$5 a year. The members' contributions and votes are sponsored, about 14 operations a week at 0.069 CELO each; the agent's own transactions, about 7 a week, it pays from its wallet in USDT. Hosting and the chat's model calls are not included. The team covers the first 5 groups, about US$26 a year. From the next `FundFactory` on, each new fund pays its own way: the contract keeps 0.25% of each contribution for gas, ARS 25 of an ARS 10,000 due, which covers the ARS 165 a week a group of eight costs.
+
+- **The sponsor's limits.** The paymaster policy allows 600 operations in total and 30 per account, and neither resets. The members of the two funds have used 93, and the busiest account 18 in the funds alone. Both move to limits that reset every month before the December goal.
+- **More groups in Argentina.** The same fund works for any group that shares a recurring cost: a flat, a trip, a padel court.
 - **Reminders by email.** The weekly summary already tells the group who owes what, for a member to share; an email would reach whoever doesn't open the app. It waits until groups ask for it, since it takes a domain of its own.
 - **Other wFIAT currencies.** The factory is fixed to wARS, USDT and their Uniswap pool, so wBRL or wMXN take a factory of their own, once a pool holds enough liquidity.
 - **MiniPay.** Opening the app inside MiniPay takes a single contract for every fund, since MiniPay only allows contracts it approved. That's the path to reach people where they already hold stablecoins.
