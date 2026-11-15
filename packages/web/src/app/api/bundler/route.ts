@@ -18,6 +18,7 @@ import { KEY_CHANGE_LOCK_TTL_MS, keyChangeKeyFor, keyChangeLock } from "../../..
 import { recordOperation, recordRefused } from "../../../lib/operations";
 import { hexSchema } from "../../../lib/schemas";
 import { getSession } from "../../../lib/session";
+import { sponsorCapIn } from "../../../lib/sponsor-cap";
 
 const shared = globalThis as { tesoreriaForkBundler?: ReturnType<typeof createForkBundler> };
 
@@ -93,10 +94,26 @@ async function forward(request: BundlerRequest, answered?: (answer: Answer) => P
   } catch {
     return rpcError(request.id, 502, "The bundler didn't answer"); // nothing of the failed request (its URL carries the key) goes back
   }
+  logSponsorCap(answer);
   await answered?.(answer);
   const checked = checkBundlerAnswer(request.method, answer.text);
   if (!checked.ok) return rpcError(request.id, checked.status, checked.error);
   return new Response(answer.text, { status: answer.status, headers: { "content-type": "application/json" } });
+}
+
+/**
+ * Logs Pimlico refusing to sponsor because its policy is over a cap (`sponsorCapIn`): trying again won't help until the
+ * cap is raised or resets, so the team has to see it. Nothing of the person goes in, only the cap.
+ */
+function logSponsorCap({ text }: Answer) {
+  let message: unknown;
+  try {
+    message = (JSON.parse(text) as { error?: { message?: unknown } }).error?.message;
+  } catch {
+    return; // not JSON, or not an object: no refusal to read
+  }
+  const cap = typeof message === "string" ? sponsorCapIn(message) : null;
+  if (cap !== null) console.warn(`/api/bundler: Pimlico refused to sponsor an operation, its policy is over a cap: ${cap}`);
 }
 
 /**

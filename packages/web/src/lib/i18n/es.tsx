@@ -36,7 +36,7 @@ export const es = {
   },
   /**
    * What the API answers when a request fails (spec, 9.3): the browser shows each as the route wrote it. It also holds the
-   * browser's own errors, which `ErrorKey` names (`onItsWay`, `cancelled`, `generic`, `noPasskey`, `wrongPasskey`, `notCompleted`).
+   * browser's own errors, which `ErrorKey` names (`onItsWay`, `cancelled`, `generic`, `noPasskey`, `wrongPasskey`, `notCompleted`, `accountSponsorCap`, `sponsorCap`).
    */
   errors: {
     logIn: "Entrá con tu passkey.",
@@ -49,6 +49,9 @@ export const es = {
     noPasskey: "No se pudo entrar. Si no te aparece tu passkey, probá desde el teléfono donde creaste tu cuenta.",
     wrongPasskey: "Tu passkey no coincide con tu cuenta. Entrá de nuevo.",
     notCompleted: "La operación no se pudo completar. No se movió plata.",
+    /** The paymaster refused for its cap per account, or for one of the whole policy: trying again doesn't help. */
+    accountSponsorCap: "Tu cuenta llegó al tope de operaciones que paga TesorerIA este mes. No se movió plata. Escribinos y lo destrabamos.",
+    sponsorCap: "TesorerIA llegó al tope de operaciones que paga este mes. No se movió plata. Escribinos y lo destrabamos.",
     amountFormat: "Escribilo como 10.000 o 10.000,50.",
     /** What the browser says of an amount typed above the most the app takes; `max` is that most. */
     amountTooBig: (max: string) => `No puede pasar de ${max}.`,

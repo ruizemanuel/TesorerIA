@@ -1,7 +1,17 @@
 import type { Messages } from "../i18n/messages";
+import { isAccountCap, sponsorCapIn } from "../sponsor-cap";
 
 /** The errors the browser makes on its own: their words are in the dictionary (`m.errors`), not in the code. */
-export type ErrorKey = "onItsWay" | "cancelled" | "generic" | "noPasskey" | "failed" | "wrongPasskey" | "notCompleted";
+export type ErrorKey =
+  | "onItsWay"
+  | "cancelled"
+  | "generic"
+  | "noPasskey"
+  | "failed"
+  | "wrongPasskey"
+  | "notCompleted"
+  | "accountSponsorCap"
+  | "sponsorCap";
 
 /**
  * An error written for the person using the app. A route's comes with its words already in the page's language; one
@@ -69,10 +79,32 @@ export function wasWrongPasskey(error: unknown): boolean {
   return isNamed(error, "UserOperationSignatureError");
 }
 
-/** What to show a person for anything a client call threw, in the page's language. Of viem's errors, only the bundler refusing the signature (AA24) is told apart. */
+/**
+ * The cap of the paymaster's policy that `error`, or one of the errors it wraps (to a few levels), says was reached
+ * (`sponsorCapIn`). viem keeps Pimlico's message as its errors' `details`, whatever the HTTP status it came with.
+ */
+function sponsorCapOf(error: unknown): string | null {
+  for (let depth = 0; depth < 5 && typeof error === "object" && error !== null; depth++) {
+    const { details, message, cause } = error as { details?: unknown; message?: unknown; cause?: unknown };
+    for (const text of [details, message]) {
+      const cap = typeof text === "string" ? sponsorCapIn(text) : null;
+      if (cap !== null) return cap;
+    }
+    error = cause;
+  }
+  return null;
+}
+
+/**
+ * What to show a person for anything a client call threw, in the page's language. Of viem's errors, only the bundler
+ * refusing the signature (AA24) and the paymaster refusing for a cap of its policy, which trying again doesn't fix,
+ * are told apart.
+ */
 export function userMessage(error: unknown, m: Messages): string {
   if (error instanceof UserFacingError) return error.key === undefined ? error.message : m.errors[error.key];
   if (wasWrongPasskey(error)) return m.errors.wrongPasskey;
+  const cap = sponsorCapOf(error);
+  if (cap !== null) return isAccountCap(cap) ? m.errors.accountSponsorCap : m.errors.sponsorCap;
   return wasCancelled(error) ? m.errors.cancelled : m.errors.generic;
 }
 

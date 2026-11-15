@@ -10,6 +10,7 @@ import {
   decodeFunctionData,
   encodeAbiParameters,
   getAddress,
+  http,
   isAddress,
   numberToHex,
   pad,
@@ -18,10 +19,11 @@ import {
 } from "viem";
 import { toWebAuthnAccount } from "viem/account-abstraction";
 import { celo } from "viem/chains";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { authorizeBundlerRequest, userOperationHash } from "../src/lib/bundler-proxy";
 import { contributeCalls } from "../src/lib/contribute";
 import type { Db } from "../src/lib/db/client";
+import { userMessage } from "../src/lib/client/errors";
 import { createDraft, deployCall, joinFund } from "../src/lib/funds";
 import { es } from "../src/lib/i18n/es";
 import { voteCalls } from "../src/lib/vote";
@@ -58,6 +60,39 @@ const node = custom({
 
 type Forwarded = { method: string; params: unknown[] };
 
+/** What Pimlico answers to `method` when it sponsors the operation. */
+function sponsoring(method: string, params: unknown) {
+  const creating = JSON.stringify(params).toLowerCase().includes(FUND_FACTORY.slice(2).toLowerCase());
+  switch (method) {
+    case "eth_chainId":
+      return numberToHex(celo.id);
+    case "pimlico_getUserOperationGasPrice":
+      return { slow: fee, standard: fee, fast: fee };
+    case "pm_getPaymasterStubData":
+      return {
+        paymaster: PAYMASTER,
+        paymasterData: "0x",
+        paymasterVerificationGasLimit: numberToHex(40_000n),
+        paymasterPostOpGasLimit: numberToHex(30_000n),
+      };
+    case "eth_estimateUserOperationGas":
+      return {
+        callGasLimit: numberToHex(creating ? 5_000_000n : 300_000n), // createFund deploys a whole Fund
+        verificationGasLimit: numberToHex(700_000n),
+        preVerificationGas: numberToHex(80_000n),
+        paymasterVerificationGasLimit: numberToHex(40_000n),
+        paymasterPostOpGasLimit: numberToHex(30_000n),
+      };
+    case "pm_getPaymasterData":
+      return { paymaster: PAYMASTER, paymasterData: "0x" };
+    case "eth_sendUserOperation":
+      return OP;
+    case "eth_getUserOperationReceipt":
+      return { userOpHash: OP, success: true, receipt: { transactionHash: pad("0x02", { size: 32 }), blockNumber: numberToHex(79_700_001n) } };
+  }
+  throw new Error(`unexpected bundler RPC: ${method}`);
+}
+
 /**
  * /api/bundler without the HTTP, for `user`: each request is checked as the route checks it, kept in `forwarded`
  * once it passes, and answered as Pimlico would.
@@ -68,35 +103,7 @@ function gate(db: Db, user: Parameters<typeof authorizeBundlerRequest>[1], forwa
       const check = await authorizeBundlerRequest(db, user, { jsonrpc: "2.0", id: 1, method, params }, POLICY, async () => FAST, () => AGENT_ADDRESS, 10);
       if (!check.ok) throw new Error(`${method}: ${check.status} ${check.error}`);
       forwarded.push({ method, params: check.request.params });
-      const creating = JSON.stringify(params).toLowerCase().includes(FUND_FACTORY.slice(2).toLowerCase());
-      switch (method) {
-        case "eth_chainId":
-          return numberToHex(celo.id);
-        case "pimlico_getUserOperationGasPrice":
-          return { slow: fee, standard: fee, fast: fee };
-        case "pm_getPaymasterStubData":
-          return {
-            paymaster: PAYMASTER,
-            paymasterData: "0x",
-            paymasterVerificationGasLimit: numberToHex(40_000n),
-            paymasterPostOpGasLimit: numberToHex(30_000n),
-          };
-        case "eth_estimateUserOperationGas":
-          return {
-            callGasLimit: numberToHex(creating ? 5_000_000n : 300_000n), // createFund deploys a whole Fund
-            verificationGasLimit: numberToHex(700_000n),
-            preVerificationGas: numberToHex(80_000n),
-            paymasterVerificationGasLimit: numberToHex(40_000n),
-            paymasterPostOpGasLimit: numberToHex(30_000n),
-          };
-        case "pm_getPaymasterData":
-          return { paymaster: PAYMASTER, paymasterData: "0x" };
-        case "eth_sendUserOperation":
-          return OP;
-        case "eth_getUserOperationReceipt":
-          return { userOpHash: OP, success: true, receipt: { transactionHash: pad("0x02", { size: 32 }), blockNumber: numberToHex(79_700_001n) } };
-      }
-      throw new Error(`unexpected bundler RPC: ${method}`);
+      return sponsoring(method, params);
     },
   });
 }
@@ -197,4 +204,46 @@ describe("the requests viem really sends for a sponsored operation", () => {
     );
     expect(withOperation(forwarded)).toEqual([]);
   });
+});
+
+describe("a vote the paymaster's policy refuses for its cap per account", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  // What Pimlico answered to every pm_getPaymasterData of the account on 14/11/2026 (its request logs), which
+  // /api/bundler passes on as it came. The HTTP status isn't in the logs, so both a 200 and a 400 are tried.
+  for (const status of [200, 400]) {
+    it(`tells the person, without asking for the passkey or sending anything (HTTP ${status})`, async () => {
+      const client = createPublicClient({ chain: celo, transport: node });
+      const passkey = toWebAuthnAccount({ ...createFakePasskey(), rpId: "localhost" });
+      let signatures = 0;
+      const owner: typeof passkey = {
+        ...passkey,
+        async sign(parameters) {
+          signatures++;
+          return passkey.sign(parameters);
+        },
+      };
+      const account = await createMemberAccount({ client, owner });
+      const asked: string[] = [];
+      vi.stubGlobal("fetch", async (_url: string, init: RequestInit) => {
+        const { id, method, params } = JSON.parse(init.body as string) as { id: number; method: string; params: unknown };
+        asked.push(method);
+        if (method === "pm_getPaymasterData") {
+          return Response.json({ id, error: { code: -32602, message: "sponsorshipPolicy perUserMaximumOpCount reached" }, jsonrpc: "2.0" }, { status });
+        }
+        return Response.json({ jsonrpc: "2.0", id, result: sponsoring(method, params) });
+      });
+      // As the page makes it (memberBundlerClient): Pimlico's client, over HTTP to /api/bundler.
+      const bundler = createPimlicoBundlerClient({ client, transport: http("https://tesoreria.test/api/bundler"), sponsorshipPolicyId: "set by the server" });
+
+      const caught = await bundler
+        .sendUserOperation({ account, calls: voteCalls({ fund: randomAccount(), proposalId: 0n, completes: false }) })
+        .catch((error: unknown) => error);
+
+      expect(userMessage(caught, es)).toBe("Tu cuenta llegó al tope de operaciones que paga TesorerIA este mes. No se movió plata. Escribinos y lo destrabamos.");
+      expect(asked).toContain("pm_getPaymasterData");
+      expect(asked).not.toContain("eth_sendUserOperation");
+      expect(signatures).toBe(0);
+    });
+  }
 });

@@ -42,6 +42,8 @@ export const en: Messages = {
     noPasskey: "You couldn't log in. If your passkey doesn't show up, try from the phone where you created your account.",
     wrongPasskey: "Your passkey doesn't match your account. Log in again.",
     notCompleted: "The operation couldn't be completed. No money moved.",
+    accountSponsorCap: "Your account reached the monthly limit of operations TesorerIA pays for. No money moved. Write to us and we'll unblock it.",
+    sponsorCap: "TesorerIA reached the monthly limit of operations it pays for. No money moved. Write to us and we'll unblock it.",
     amountFormat: "Write it like 10,000 or 10,000.50.",
     amountTooBig: (max: string) => `It can't be more than ${max}.`,
     notInAFund: "You aren't in any fund.",

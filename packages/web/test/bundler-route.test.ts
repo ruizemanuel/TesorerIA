@@ -222,6 +222,25 @@ describe("POST /api/bundler", () => {
       expect(JSON.parse(pimlico.mock.calls[1]![1].body as string).params[3]).toEqual({ sponsorshipPolicyId: POLICY });
     });
 
+    it("logs the cap Pimlico's policy refused for, with nothing of the person, and passes the refusal on as it came", async () => {
+      const refusing = (message: string) =>
+        pimlico.mockImplementation(async (_url, init) =>
+          (JSON.parse(init.body as string) as { method: string }).method === "pimlico_getUserOperationGasPrice"
+            ? priceAnswer()
+            : Response.json({ id: 5, error: { code: -32602, message }, jsonrpc: "2.0" }),
+        );
+      const logged = vi.spyOn(console, "warn").mockImplementation(() => {});
+      refusing("sponsorshipPolicy perUserMaximumOpCount reached"); // as on 14/11/2026
+      const response = await sign(sponsored());
+      expect(await response.json()).toEqual({ id: 5, error: { code: -32602, message: "sponsorshipPolicy perUserMaximumOpCount reached" }, jsonrpc: "2.0" });
+      expect(logged.mock.calls).toEqual([["/api/bundler: Pimlico refused to sponsor an operation, its policy is over a cap: perUserMaximumOpCount"]]);
+      // Any other refusal isn't one of those.
+      refusing("sponsorshipPolicy sp_server_policy is not active");
+      await sign(sponsored());
+      expect(logged).toHaveBeenCalledTimes(1);
+      logged.mockRestore();
+    });
+
     it("answers 400 to an operation that overpays or asks for too much gas, and signs nothing", async () => {
       for (const change of [{ maxFeePerGas: numberToHex(2n * FAST + 1n) }, { callGasLimit: numberToHex(10_000_000n) }, { callGasLimit: "lots" }]) {
         const response = await sign(sponsored(change));

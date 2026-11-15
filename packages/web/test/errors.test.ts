@@ -1,4 +1,5 @@
 import { WebAuthnP256 } from "ox";
+import { HttpRequestError, InvalidParamsRpcError, RpcRequestError } from "viem";
 import { UserOperationExecutionError, UserOperationSignatureError } from "viem/account-abstraction";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { post } from "../src/lib/client/api";
@@ -79,6 +80,48 @@ describe("userMessage", () => {
     const refused = new UserOperationExecutionError(new UserOperationSignatureError({}), {} as never);
     expect(userMessage(refused, es)).toBe("Tu passkey no coincide con tu cuenta. Entrá de nuevo.");
     expect(userMessage(refused, en)).toBe(en.errors.wrongPasskey);
+  });
+
+  describe("when the paymaster's policy is over one of its caps", () => {
+    // What viem throws for a JSON-RPC error answered with a 200 (as Pimlico's refusal reaches the page through
+    // /api/bundler), and for one answered with another status.
+    const refused = (message: string, status = 200) => {
+      const error = { code: -32602, message };
+      const url = "https://tesoreria.test/api/bundler";
+      return status === 200
+        ? new InvalidParamsRpcError(new RpcRequestError({ body: { method: "pm_getPaymasterData" }, error, url }))
+        : new HttpRequestError({ body: { method: "pm_getPaymasterData" }, details: JSON.stringify(error), status, url });
+    };
+    const ACCOUNT = "Tu cuenta llegó al tope de operaciones que paga TesorerIA este mes. No se movió plata. Escribinos y lo destrabamos.";
+    const EVERYONE = "TesorerIA llegó al tope de operaciones que paga este mes. No se movió plata. Escribinos y lo destrabamos.";
+
+    it("tells the person it's their account's cap, as Pimlico said on 14/11/2026, whatever the status", () => {
+      for (const status of [200, 400]) {
+        const caught = refused("sponsorshipPolicy perUserMaximumOpCount reached", status);
+        expect(userMessage(caught, es), `${status}`).toBe(ACCOUNT);
+        expect(userMessage(caught, en), `${status}`).toBe(
+          "Your account reached the monthly limit of operations TesorerIA pays for. No money moved. Write to us and we'll unblock it.",
+        );
+      }
+      // Only perUserMaximumOpCount has been seen: any other cap whose name says it's per account reads the same.
+      expect(userMessage(refused("sponsorshipPolicy perUserMaximumSpending reached"), es)).toBe(ACCOUNT);
+    });
+
+    it("tells the person it's TesorerIA's cap, for any cap that isn't per account", () => {
+      // Names on the pattern of the one seen; Pimlico's own for these caps are not documented.
+      for (const cap of ["globalMaximumOpCount", "globalMaximumSpending"]) {
+        expect(userMessage(refused(`sponsorshipPolicy ${cap} reached`), es), cap).toBe(EVERYONE);
+        expect(userMessage(refused(`sponsorshipPolicy ${cap} reached`, 400), en), cap).toBe(
+          "TesorerIA reached the monthly limit of operations it pays for. No money moved. Write to us and we'll unblock it.",
+        );
+      }
+    });
+
+    it("keeps the generic sentence for anything else the paymaster refuses", () => {
+      for (const message of ["sponsorshipPolicy sp_server is not active", "Insufficient Pimlico balance for sponsorship, please top up", "limit reached"]) {
+        expect(userMessage(refused(message), es), message).toBe(GENERIC);
+      }
+    });
   });
 
   it("hides everything else behind a generic sentence", () => {
