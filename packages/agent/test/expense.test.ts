@@ -25,6 +25,16 @@ describe("decideExpense", () => {
     expect(decision).toMatchObject({ kind: "reimburse", member: MEMBER });
   });
 
+  it("always puts a contribution given back to the vote, even one that fits in the week's cap", () => {
+    expect(decide({ ...PITCH, kind: "give-back", amount: 10_000n * WARS_UNIT, note: "Deposité en otro fondo" })).toEqual({
+      kind: "propose-payment",
+      member: MEMBER,
+      amount: 10_000n * WARS_UNIT,
+      note: "Deposité en otro fondo",
+      reason: "A contribution given back is always voted on",
+    });
+  });
+
   it("turns any other expense into a payment proposal", () => {
     expect(decide({ ...PITCH, kind: "other", note: "Pelotas nuevas" })).toEqual({
       kind: "propose-payment",

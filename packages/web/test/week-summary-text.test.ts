@@ -32,7 +32,7 @@ function facts(change: Partial<WeekSummaryFacts> = {}): WeekSummaryFacts {
     })),
     contributed: 60_000n * WARS,
     reimbursements: [{ member: EMA, amount: 60_000n * WARS }],
-    payments: [{ member: ALE, amount: 8_000n * WARS, note: "las pelotas" }],
+    payments: [{ member: ALE, amount: 8_000n * WARS, note: "las pelotas", givenBack: false }],
     joined: [],
     ...change,
   };
@@ -82,6 +82,12 @@ What happened:
 
 To contribute: ${LINK}`),
     );
+  });
+
+  it("says a payment that gave a contribution back as one, without its note (spec, 7.3)", () => {
+    const back = facts({ payments: [{ member: FEDE, amount: 10_000n * WARS, note: "reintegro por depositar en otro fondo", givenBack: true }] });
+    expect(text(back)).toContain($("· Se aprobó devolverle $ 10.000 de su aporte a Fede.\n"));
+    expect(text(back, en)).toContain($("· Giving Fede back ARS 10,000 of their contribution was approved.\n"));
   });
 
   it("says everyone paid instead of the list when nobody owes", () => {

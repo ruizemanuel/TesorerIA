@@ -141,7 +141,8 @@ export const expenses = pgTable(
       .references(() => users.id),
     /** Made by the panel when it opens: a double click or a retry sends the same one (Review Focus 3). */
     clientKey: text("client_key").notNull(),
-    kind: text("kind", { enum: ["agreed", "other"] }).notNull(),
+    /** "give-back": part of what the member contributed, given back to them (spec, 7.3). A text column: no migration. */
+    kind: text("kind", { enum: ["agreed", "other", "give-back"] }).notNull(),
     amount: units("amount").notNull(),
     note: text("note").notNull(),
     /** keccak256 of the id: what goes on chain with the reimbursement, and how the agent dedupes it. */
@@ -255,7 +256,8 @@ export type StoredWeekSummary = {
   dues: { member: string; owed: string }[];
   contributed: string;
   reimbursements: { member: string; amount: string }[];
-  payments: { member: string; amount: string; note: string }[];
+  /** `givenBack` (spec, 7.3) is missing from the photos kept before 15/11/2026: they read as payments. */
+  payments: { member: string; amount: string; note: string; givenBack?: boolean }[];
   joined: string[];
 };
 

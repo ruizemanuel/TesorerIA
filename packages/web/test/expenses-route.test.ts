@@ -87,6 +87,14 @@ describe("POST /api/funds/:address/expenses", () => {
     expect(await (await english("45,000")).json()).toEqual({ error: "We couldn't find that fund." });
   });
 
+  it("keeps a contribution given back, which the agent always puts to the vote (spec, 7.3)", async () => {
+    const response = await expense({ kind: "give-back", amount: "10.000", note: "deposité en otro fondo" });
+    expect(await response.json()).toEqual({ status: "proposed", busy: false });
+    const [kept] = await db.select().from(expenses);
+    expect(kept).toMatchObject({ kind: "give-back", amount: 10_000n * WARS, note: "deposité en otro fondo", status: "proposed", sentAction: "propose-payment" });
+    expect(sent).toHaveLength(1);
+  });
+
   it("answers a retry with the first call's state, keeping one expense and one reimbursement", async () => {
     const first = await expense();
     expect(await first.json()).toEqual({ status: "reimbursed", busy: false });

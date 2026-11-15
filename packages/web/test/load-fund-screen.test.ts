@@ -1,6 +1,6 @@
 import { type FundEvent, type FundSnapshot, WARS as WARS_TOKEN, type WeekSummaryFacts } from "@tesoreria/agent";
 import { and, eq, sql } from "drizzle-orm";
-import { type Address, type Hash, getAddress, isAddressEqual, pad, zeroAddress } from "viem";
+import { type Address, type Hash, getAddress, isAddressEqual, pad, toHex, zeroAddress } from "viem";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CurrentUser } from "../src/lib/current-user";
 import type { Db } from "../src/lib/db/client";
@@ -11,7 +11,7 @@ import { finishOperation, recordOperation } from "../src/lib/operations";
 import { HistoryGapError, loadFundScreen as loadScreen, loadPublicFundScreen } from "../src/lib/read-fund";
 import { storeFacts } from "../src/lib/week-summaries";
 import { addLiveFund, addUser, randomAccount, testDb } from "./support/db";
-import { BLOCK, CLOCK, USDT_UNIT, WARS, event, snapshot } from "./support/fixtures";
+import { AGENT, BLOCK, CLOCK, USDT_UNIT, WARS, event, snapshot } from "./support/fixtures";
 
 // Who may see which fund (spec, 9.2) is decided before and around the chain reads, so the chain and the
 // database stand in: the database is a real (in-memory) one, the chain answers what each test sets.
@@ -361,6 +361,53 @@ describe("loadFundScreen: the public view", () => {
       await pass(caro.id, "d2");
       expect((await loadFundScreen(address, asViewer(caro), { publicView: true }))!.cashOutOnItsWay).toBe(false);
     });
+  });
+});
+
+describe("loadFundScreen: a contribution given back (spec, 7.3)", () => {
+  it("takes it off the dues and tells it as one, found by the transaction of the expense the agent proposed it for", async () => {
+    const address = await liveFund();
+    const [fund] = await db.select({ id: funds.id }).from(funds).where(eq(funds.address, address));
+    const caroAccount = getAddress(caro.account);
+    const tx = (n: number) => pad(toHex(n), { size: 32 });
+    // By week 2 Caro put in 35.000, 10.000 of them by mistake, and proposal 0 gave those back: Caro owes 5.000.
+    setHistory([
+      event("Contribution", { member: caroAccount, token: WARS_TOKEN, amount: 35_000n * WARS, creditedWars: 35_000n * WARS }, BLOCK - 500n),
+      event("ProposalCreated", { id: 0n, action: 0, a: caroAccount, b: zeroAddress, amount: 10_000n * WARS, proposer: AGENT, note: "deposité en otro fondo" }, BLOCK - 400n, 77),
+      event("Payment", { member: caroAccount, amount: 10_000n * WARS }, BLOCK - 300n, 78),
+      { ...event("ProposalExecuted", { id: 0n }, BLOCK - 300n, 78), logIndex: 1 },
+    ]);
+    const expense = (kind: "other" | "give-back", proposedIn: Hash) => ({
+      id: crypto.randomUUID(),
+      fundId: fund!.id,
+      userId: caro.id,
+      clientKey: `k-${proposedIn}`,
+      kind,
+      amount: 10_000n * WARS,
+      note: "deposité en otro fondo",
+      ref: `0x${crypto.randomUUID().replaceAll("-", "").padEnd(64, "0")}`,
+      status: "proposed" as const,
+      tx: proposedIn,
+      sentAction: "propose-payment" as const,
+    });
+    await db.insert(expenses).values(expense("other", tx(77)));
+    const caroOwes = async () => (await loadFundScreen(address, asViewer(caro)))!.view.rows[2]?.owed;
+    expect(await caroOwes()).toBe(0n); // an "other" expense: a payment, and the 35.000 all count
+
+    await db.update(expenses).set({ kind: "give-back" }).where(eq(expenses.fundId, fund!.id));
+    const screen = (await loadFundScreen(address, asViewer(caro)))!;
+    expect(screen.view.rows[2]?.owed).toBe(5_000n * WARS);
+    expect(texts(screen).filter((text) => text.includes("devol"))).toEqual([
+      `El fondo le devolvió ${formatPesos(10_000n * WARS, "es")} de su aporte a Caro: la propuesta se aprobó.`,
+      `Propuse devolverle ${formatPesos(10_000n * WARS, "es")} de su aporte a Caro (deposité en otro fondo). Lleva 1 de 2 votos.`,
+    ]);
+    // The public view counts it the same: the dues are the group's list.
+    await db.update(funds).set({ publicView: true }).where(eq(funds.id, fund!.id));
+    expect((await loadFundScreen(address, null, { publicView: true }))!.view.rows[2]?.owed).toBe(5_000n * WARS);
+
+    // A give-back expense the agent hasn't proposed yet, or one in another transaction, marks nothing.
+    await db.update(expenses).set({ tx: tx(99) }).where(eq(expenses.fundId, fund!.id));
+    expect(await caroOwes()).toBe(0n);
   });
 });
 

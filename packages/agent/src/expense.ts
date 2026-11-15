@@ -12,8 +12,11 @@ export type Expense = {
   member: Address;
   /** In wARS (18 decimals). */
   amount: bigint;
-  /** "agreed" is the expense the fund pays back without a vote, up to the weekly cap. */
-  kind: "agreed" | "other";
+  /**
+   * "agreed" is the expense the fund pays back without a vote, up to the weekly cap. "give-back" is part of what the
+   * member contributed, given back to them (spec, 7.3): always voted on, like "other".
+   */
+  kind: "agreed" | "other" | "give-back";
   /** The expense's id in the web app, as 32 bytes: it goes on chain with the reimbursement. */
   ref: Hex;
   note: string;
@@ -123,6 +126,7 @@ export function decideExpense({
     }
     return { kind: "propose-payment", member, amount, note, reason };
   };
+  if (expense.kind === "give-back") return propose("A contribution given back is always voted on");
   if (expense.kind === "other") return propose("Only the agreed expense is paid back without a vote");
   const left = fund.weeklyCap > fund.spentThisWeek ? fund.weeklyCap - fund.spentThisWeek : 0n;
   if (amount > left) {

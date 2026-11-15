@@ -19,7 +19,7 @@ export const maxDuration = 300;
 // Generous caps: submitExpense answers with the friendly message well before these.
 const Expense = z.object({
   clientKey: z.string().max(100),
-  kind: z.enum(["agreed", "other"]),
+  kind: z.enum(["agreed", "other", "give-back"]),
   amount: z.string().max(100),
   note: z.string().max(1000),
   confirmDuplicate: z.boolean().optional(),

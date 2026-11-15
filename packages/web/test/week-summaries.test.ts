@@ -1,9 +1,9 @@
 import { type LogReader, type RawLog, WARS as WARS_TOKEN, type WeekSummaryFacts, fundAbi } from "@tesoreria/agent";
 import { eq } from "drizzle-orm";
-import { type Address, type Hash, type Hex, encodeAbiParameters, encodeEventTopics, getAddress, pad, parseAbiParameters } from "viem";
+import { type Address, type Hash, type Hex, encodeAbiParameters, encodeEventTopics, getAddress, pad, parseAbiParameters, zeroAddress } from "viem";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Db } from "../src/lib/db/client";
-import { funds, weekSummaries } from "../src/lib/db/schema";
+import { expenses, funds, weekSummaries } from "../src/lib/db/schema";
 import { type WeekSummaryDeps, chainWeekSummaryDeps, readFacts, storeFacts, writeWeekSummaries } from "../src/lib/week-summaries";
 import { addLiveFund, addUser, randomAccount, testDb } from "./support/db";
 import { AGENT, ANA, BETO, BLOCK, CARO, FUND, WARS } from "./support/fixtures";
@@ -26,7 +26,10 @@ function facts(week: bigint): WeekSummaryFacts {
     ],
     contributed: 20_000n * WARS,
     reimbursements: [{ member: ANA, amount: 45_000n * WARS }],
-    payments: [{ member: CARO, amount: 8_000n * WARS, note: "las pelotas" }],
+    payments: [
+      { member: CARO, amount: 8_000n * WARS, note: "las pelotas", givenBack: false },
+      { member: BETO, amount: 10_000n * WARS, note: "deposité en otro fondo", givenBack: true },
+    ],
     joined: [CARO],
   };
 }
@@ -88,6 +91,33 @@ describe("writeWeekSummaries: the agent's photo of each week that closes (spec, 
     await writeWeekSummaries(db, deps); // the next heartbeat, still in week 3: the row is there, so nothing is read again
     expect(await stored()).toEqual([{ fundId, week: 2, block: BLOCK + 2n, facts: facts(2n) }]);
     expect(asked).toEqual([{ fund: address, week: 2n }]);
+  });
+
+  it("hands the photo the transactions the agent proposed the fund's give-back expenses in, and no other (spec, 7.3)", async () => {
+    const { deps } = fakeChain(new Map([[address, inWeek(3n)]]));
+    const seen: ReadonlySet<string>[] = [];
+    const photo = deps.facts;
+    deps.facts = async (fund, week, startTime) => {
+      seen.push(fund.giveBackTxs);
+      return photo(fund, week, startTime);
+    };
+    const tx = (n: string) => pad(`0x${n}`, { size: 32 }) as Hash;
+    const expense = (kind: "other" | "give-back", proposedIn: Hash | null) => ({
+      id: crypto.randomUUID(),
+      fundId,
+      userId: anaId,
+      clientKey: crypto.randomUUID(),
+      kind,
+      amount: 10_000n * WARS,
+      note: "",
+      ref: `0x${crypto.randomUUID().replaceAll("-", "").padEnd(64, "0")}`,
+      status: "proposed" as const,
+      tx: proposedIn,
+      sentAction: proposedIn === null ? null : ("propose-payment" as const),
+    });
+    await db.insert(expenses).values([expense("give-back", tx("A1")), expense("other", tx("B2")), expense("give-back", null)]);
+    await writeWeekSummaries(db, deps);
+    expect(seen).toEqual([new Set([tx("a1")])]);
   });
 
   it("after a heartbeat that was down over a week, writes only the last week that closed, and never the one it skipped (Review Focus 1)", async () => {
@@ -165,6 +195,12 @@ describe("storeFacts and readFacts", () => {
     expect(json.dues[1]).toEqual({ member: BETO, owed: "10000000000000000000000" });
     expect(readFacts(json)).toEqual(facts(2n));
   });
+
+  it("read a payment kept before contributions were given back (15/11/2026) as a payment", () => {
+    const json = storeFacts(facts(2n));
+    const old = { ...json, payments: json.payments.map(({ member, amount, note }) => ({ member, amount, note })) };
+    expect(readFacts(old).payments.map((p) => p.givenBack)).toEqual([false, false]);
+  });
 });
 
 describe("chainWeekSummaryDeps: the photo of a week, from the chain", () => {
@@ -191,7 +227,7 @@ describe("chainWeekSummaryDeps: the photo of a week, from the chain", () => {
         : contracts.map((call) => (call.args?.[0] === BETO ? 10_000n * WARS : 0n)),
     readContract: async ({ functionName }: { functionName: string }) => (functionName === "balanceInWars" ? 10_000n * WARS : 0n),
   } as unknown as Parameters<typeof chainWeekSummaryDeps>[0];
-  const fund = { id: "fund", address: FUND, createdBlock: CREATED, weeklyFee: 10_000n * WARS };
+  const fund = { id: "fund", address: FUND, createdBlock: CREATED, weeklyFee: 10_000n * WARS, giveBackTxs: new Set<string>() };
 
   it("counts a contribution Blockscout's history misses, read from the node, so the photo adds up", async () => {
     // 3/11: Blockscout's logs by address were a day behind while its block number was current.
@@ -203,5 +239,54 @@ describe("chainWeekSummaryDeps: the photo of a week, from the chain", () => {
 
     expect(photo.contributed).toBe(10_000n * WARS);
     expect(photo.block).toBe(CREATED + 604_799n);
+  });
+
+  it("tells a payment that gave a contribution back, and takes it off the dues, by the transaction of its expense (spec, 7.3)", async () => {
+    // Later in week 0, the agent proposed giving Beto back his 10.000 (transaction 0xa1), and a vote executed it (0xa2).
+    const proposedIn = pad("0xa1", { size: 32 }) as Hash;
+    const raw = (topics: Hex[], data: Hex, block: bigint, transactionHash: Hash, logIndex: number): RawLog => ({
+      address: FUND,
+      topics,
+      data,
+      blockNumber: block,
+      transactionHash,
+      logIndex,
+    });
+    const logs = [
+      paidByBeto,
+      raw(
+        encodeEventTopics({ abi: fundAbi, eventName: "ProposalCreated", args: { id: 0n, proposer: AGENT } }) as Hex[],
+        encodeAbiParameters(parseAbiParameters("uint8, address, address, uint256, string"), [0, BETO, zeroAddress, 10_000n * WARS, "deposité en otro fondo"]),
+        CREATED + 500_100n,
+        proposedIn,
+        0,
+      ),
+      raw(
+        encodeEventTopics({ abi: fundAbi, eventName: "Payment", args: { member: BETO } }) as Hex[],
+        encodeAbiParameters(parseAbiParameters("uint256"), [10_000n * WARS]),
+        CREATED + 500_200n,
+        pad("0xa2", { size: 32 }) as Hash,
+        0,
+      ),
+      raw(encodeEventTopics({ abi: fundAbi, eventName: "ProposalExecuted", args: { id: 0n } }) as Hex[], "0x", CREATED + 500_200n, pad("0xa2", { size: 32 }) as Hash, 1),
+    ];
+    const reader: LogReader = async ({ fromBlock, toBlock }) => logs.filter((log) => log.blockNumber >= fromBlock && log.blockNumber <= toBlock);
+    const withProposal = {
+      ...client,
+      readContract: async ({ functionName }: { functionName: string }) => (functionName === "proposalCount" ? 1n : client!.readContract({ functionName } as never)),
+    } as unknown as Parameters<typeof chainWeekSummaryDeps>[0];
+    const photo = (giveBackTxs: Set<string>) => chainWeekSummaryDeps(withProposal, reader, AGENT, reader).facts({ ...fund, giveBackTxs }, 0n, START);
+
+    const marked = await photo(new Set([proposedIn]));
+    expect(marked.payments).toEqual([{ member: BETO, amount: 10_000n * WARS, note: "deposité en otro fondo", givenBack: true }]);
+    expect(marked.dues).toEqual([
+      { member: ANA, owed: 10_000n * WARS },
+      { member: BETO, owed: 10_000n * WARS },
+      { member: CARO, owed: 10_000n * WARS },
+    ]);
+    // Without the expense's transaction it's a payment, and Beto's 10.000 count.
+    const unmarked = await photo(new Set());
+    expect(unmarked.payments[0]?.givenBack).toBe(false);
+    expect(unmarked.dues[1]?.owed).toBe(0n);
   });
 });

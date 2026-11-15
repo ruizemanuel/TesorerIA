@@ -1,4 +1,4 @@
-import { FUND_FACTORY_BLOCK, type FundEvent, type FundSnapshot, MIN_CONVERSION_USDT, joinWeeks, readFund, readFundEvents } from "@tesoreria/agent";
+import { FUND_FACTORY_BLOCK, type FundEvent, type FundSnapshot, MIN_CONVERSION_USDT, givenBack, joinWeeks, readFund, readFundEvents } from "@tesoreria/agent";
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { type Address, getAddress, zeroAddress } from "viem";
 import { celoClient, logReader, nodeLogReader } from "./chain";
@@ -9,6 +9,7 @@ import { decisions, expenses, funds, memberships, users, weekSummaries } from ".
 import { env } from "./env";
 import { MAX_MEMBERS, memberFundAbi } from "./fund-abi";
 import { type FundView, buildFundView } from "./fund-view";
+import { giveBackTransactions, proposalsIn } from "./give-backs";
 import { completeHistory } from "./history";
 import type { Locale } from "./i18n/locales";
 import { messagesFor } from "./i18n/messages";
@@ -113,6 +114,8 @@ export async function loadFundScreen(
   const memberNames = people.filter((person) => onChain.has(getAddress(person.account))).map((person) => person.name);
 
   const joined = joinWeeks(events, (e) => weekAt(blockTime(e.blockNumber, clock), snapshot.startTime));
+  // The public view too: the dues are the group's list, and a payment that gave a contribution back says so.
+  const giveBacks = proposalsIn(events, await giveBackTransactions(db, fund.id));
   const proposals = await readProposals(snapshot, events, publicView ? null : (viewer?.account ?? null));
 
   const expenseRows = publicView
@@ -149,6 +152,7 @@ export async function loadFundScreen(
     balance,
     weeklyFee: fund.weeklyFee,
     joined,
+    givenBack: givenBack(events, giveBacks),
     names,
     viewer: publicView ? null : (viewer?.account ?? null),
     m,
@@ -164,6 +168,7 @@ export async function loadFundScreen(
     votesRequired: snapshot.votesRequired,
     memberCount: snapshot.members.length,
     proposals,
+    giveBacks,
     expenses: expenseRows,
     pending,
     // Movimientos shows a request while a proposal made in time could still carry it out (JOIN_REQUEST_REACH_DAYS).

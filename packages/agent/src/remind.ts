@@ -19,7 +19,10 @@ export function joinWeeks(events: readonly FundEvent[], weekOf: (event: FundEven
   return weeks;
 }
 
-/** What a member should have put in by the end of this week, what they did, and what they owe. All in wARS. */
+/**
+ * What a member should have put in by the end of this week, what they did (less what was given back to them), and
+ * what they owe. All in wARS.
+ */
 export type MemberDues = { member: Address; due: bigint; contributed: bigint; owed: bigint };
 
 /**
@@ -30,24 +33,65 @@ export const DUES_DUST = 10n ** 16n;
 
 /**
  * Each member's dues at `weeklyFee` per week, from the week they joined through the current one (spec, 8.1:
- * reminders). `weeklyFee` is the fund's fee, which lives off chain. Under DUES_DUST owed is nothing.
+ * reminders). `weeklyFee` is the fund's fee, which lives off chain. What a member was given back of their
+ * contributions (`givenBack`, by checksummed account) doesn't count as put in. Under DUES_DUST owed is nothing.
  */
 export function memberDues({
   fund,
   weeklyFee,
   joined,
+  givenBack = new Map(),
 }: {
   fund: FundSnapshot;
   weeklyFee: bigint;
   joined: ReadonlyMap<Address, bigint>;
+  givenBack?: ReadonlyMap<Address, bigint>;
 }): MemberDues[] {
   return fund.members.map((member, i) => {
     const weeks = fund.week - (joined.get(getAddress(member)) ?? 0n) + 1n;
     const due = weeks > 0n ? weeklyFee * weeks : 0n;
-    const contributed = fund.contributed[i] ?? 0n;
+    const gross = fund.contributed[i] ?? 0n;
+    const back = givenBack.get(getAddress(member)) ?? 0n;
+    const contributed = gross > back ? gross - back : 0n;
     const short = due > contributed ? due - contributed : 0n;
     return { member, due, contributed, owed: short < DUES_DUST ? 0n : short };
   });
+}
+
+/**
+ * The proposal a Payment in `events` paid: the ProposalExecuted that follows it in the same transaction (Fund.execute
+ * emits it last), so each payment of a batch goes with its own.
+ */
+export function paidProposal(events: readonly FundEvent[], payment: FundEvent): bigint | undefined {
+  const execution = events.find(
+    (other) => other.eventName === "ProposalExecuted" && other.transactionHash === payment.transactionHash && other.logIndex > payment.logIndex,
+  );
+  return execution?.eventName === "ProposalExecuted" ? execution.args.id : undefined;
+}
+
+/**
+ * What each member was given back of their contributions (spec, 7.3): the Payments of the proposals in `giveBacks`
+ * (by id) that `events` executed. The contract can't lower what a member contributed, so the dues take it off. It
+ * moves with a member who is replaced and goes with one who is removed, as the contract does with contributions.
+ */
+export function givenBack(events: readonly FundEvent[], giveBacks: ReadonlySet<bigint>): Map<Address, bigint> {
+  const back = new Map<Address, bigint>();
+  for (const event of events) {
+    if (event.eventName === "Payment") {
+      const id = paidProposal(events, event);
+      if (id === undefined || !giveBacks.has(id)) continue;
+      const member = getAddress(event.args.member);
+      back.set(member, (back.get(member) ?? 0n) + event.args.amount);
+    } else if (event.eventName === "MemberReplaced") {
+      const old = getAddress(event.args.oldMember);
+      const amount = back.get(old);
+      back.delete(old);
+      if (amount !== undefined) back.set(getAddress(event.args.newMember), amount);
+    } else if (event.eventName === "MemberRemoved") {
+      back.delete(getAddress(event.args.member));
+    }
+  }
+  return back;
 }
 
 /** A member's part if the fund closed now. */
@@ -95,8 +139,8 @@ export type WeekSummaryFacts = {
   /** The week's Contribution.creditedWars, added up. */
   contributed: bigint;
   reimbursements: { member: Address; amount: bigint }[];
-  /** Each payment the group approved, with its proposal's note. */
-  payments: { member: Address; amount: bigint; note: string }[];
+  /** Each payment the group approved, with its proposal's note, and whether it gave a contribution back (spec, 7.3). */
+  payments: { member: Address; amount: bigint; note: string; givenBack: boolean }[];
   /** Who joined in the week (MemberAdded). */
   joined: Address[];
 };
@@ -105,7 +149,7 @@ export type WeekSummaryFacts = {
  * The photo of the week `fund` was read in, at its last block (spec, 9.4). `events` go from the fund's creation up to
  * that block: the dues need every MemberAdded (joinWeeks, with the screen's `weekOf`), and a payment's note is in its
  * proposal, which may be older than the week. Only the events from `first` on are the week's. Conversions are left
- * out: for the group they change nothing.
+ * out: for the group they change nothing. `giveBacks` are the proposals (by id) that gave a contribution back.
  */
 export function weekSummary({
   fund,
@@ -114,6 +158,7 @@ export function weekSummary({
   events,
   first,
   weekOf,
+  giveBacks = new Set(),
 }: {
   fund: FundSnapshot;
   balance: bigint;
@@ -121,8 +166,12 @@ export function weekSummary({
   events: readonly FundEvent[];
   first: bigint;
   weekOf: (event: FundEvent) => bigint;
+  giveBacks?: ReadonlySet<bigint>;
 }): WeekSummaryFacts {
-  const dues = memberDues({ fund, weeklyFee, joined: joinWeeks(events, weekOf) }).map(({ member, owed }) => ({ member, owed }));
+  const dues = memberDues({ fund, weeklyFee, joined: joinWeeks(events, weekOf), givenBack: givenBack(events, giveBacks) }).map(({ member, owed }) => ({
+    member,
+    owed,
+  }));
   const notes = new Map<bigint, string>();
   for (const event of events) if (event.eventName === "ProposalCreated") notes.set(event.args.id, event.args.note);
   const week = events.filter((event) => event.blockNumber >= first && event.blockNumber <= fund.block);
@@ -139,12 +188,13 @@ export function weekSummary({
         reimbursements.push({ member: getAddress(event.args.member), amount: event.args.amount });
         break;
       case "Payment": {
-        // Its proposal is the ProposalExecuted that follows it in the same transaction (Fund.execute emits it last).
-        const execution = week.find(
-          (other) => other.eventName === "ProposalExecuted" && other.transactionHash === event.transactionHash && other.logIndex > event.logIndex,
-        );
-        const id = execution?.eventName === "ProposalExecuted" ? execution.args.id : undefined;
-        payments.push({ member: getAddress(event.args.member), amount: event.args.amount, note: id === undefined ? "" : (notes.get(id) ?? "") });
+        const id = paidProposal(week, event);
+        payments.push({
+          member: getAddress(event.args.member),
+          amount: event.args.amount,
+          note: id === undefined ? "" : (notes.get(id) ?? ""),
+          givenBack: id !== undefined && giveBacks.has(id),
+        });
         break;
       }
       case "MemberAdded":

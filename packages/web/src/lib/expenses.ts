@@ -9,7 +9,7 @@ import type { Messages } from "./i18n/messages";
 
 export type ExpenseInput = {
   clientKey: string;
-  kind: "agreed" | "other";
+  kind: "agreed" | "other" | "give-back";
   amount: bigint;
   note: string;
   /** The person said it is another expense, equal to one they loaded a moment ago: keep it anyway. */

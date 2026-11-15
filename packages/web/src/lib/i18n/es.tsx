@@ -314,6 +314,8 @@ export const es = {
       byMember: (who: string, what: string) => `${sentenceStart(who)} propuso ${what}.`,
       agentDetail: (votes: number) => `Lo que no puedo devolver por mi cuenta lo tienen que votar: hacen falta ${votes} votos.`,
       pay: (amount: string, who: string, note: string) => `pagarle ${amount} a ${who}${note ? ` por ${note}` : ""}`,
+      /** A payment that gives part of a contribution back (spec, 7.3); the summary leaves the note out. */
+      giveBack: (amount: string, who: string, note: string) => `devolverle ${amount} de su aporte a ${who}${note ? ` (${note})` : ""}`,
       addMember: (who: string) => `sumar a ${who} al fondo`,
       removeMember: (who: string) => `sacar a ${who} del fondo`,
       replaceMember: (who: string) => `cambiar la cuenta de ${who}`,
@@ -329,6 +331,7 @@ export const es = {
       votes: (votes: number, required: number) => `Lleva ${votes} de ${required} votos.`,
     },
     paid: (amount: string, who: string) => `El fondo le pagó ${amount} a ${who}: la propuesta se aprobó.`,
+    givenBack: (amount: string, who: string) => `El fondo le devolvió ${amount} de su aporte a ${who}: la propuesta se aprobó.`,
     memberAdded: (who: string) => `Se sumó ${who} al fondo.`,
     /** Someone who asked to join a live fund (spec, 9.4), while it's open, and once it expired without a proposal. */
     joinRequest: (who: string) => `${sentenceStart(who)} pidió sumarse al fondo.`,
@@ -549,6 +552,13 @@ export const es = {
     twin: (amount: ReactNode) => <>Hace unos minutos cargaste un gasto de {amount}. ¿Es otro gasto igual?</>,
     another: "Sí, es otro",
     same: "No, es el mismo",
+    /** The third option, and what the panel asks once it's chosen: part of a contribution, given back (spec, 7.3). */
+    giveBack: "Devolverme un aporte (se vota)",
+    giveBackAmountLabel: "Cuánto te devolvemos",
+    giveBackNoteLabel: "¿Por qué?",
+    giveBackNotePlaceholder: "Deposité en otro fondo",
+    giveBackSubmit: "Pedir la devolución",
+    giveBackProposed: "El agente propuso devolvértelo y ahora lo vota el grupo.",
   },
   /** What happened to an expense a member loaded, by its status: the panel and the agent's card say the same. */
   outcome: {

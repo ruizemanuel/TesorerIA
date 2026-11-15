@@ -216,6 +216,28 @@ test("three friends create a fund, contribute, get the agreed expense back, vote
   await expect(onScreen(ana, /las camisetas\. Se aprobó\./)).toBeVisible();
   await expect(onScreen(ana, /El fondo le pagó \$\s12\.000 a Caro/)).toHaveCount(2);
 
+  // Caro then asks for $ 1.000 of it back (spec, 7.3): the panel asks how much and why, the agent always puts it to the
+  // vote, and once Ana's and Beto's votes give it back, Caro owes it again. The runs after the votes must end before
+  // Beto's chat in step 10 (see 7).
+  await open(caro, `${fund}?p=gasto`);
+  await caro.getByLabel("Devolverme un aporte (se vota)").check();
+  await caro.getByLabel("Cuánto te devolvemos").fill("1.000");
+  await caro.getByLabel("¿Por qué?").fill("puse de más");
+  await caro.getByRole("button", { name: "Pedir la devolución" }).click();
+  await expect(caro.getByText("El agente propuso devolvértelo y ahora lo vota el grupo.")).toBeVisible();
+  await open(ana, `${fund}/movimientos`);
+  await expect(onScreen(ana, /^Propuse devolverle \$\s1\.000 de su aporte a Caro \(puse de más\)\./)).toBeVisible();
+  const runAfterAnasGiveBackVote = agentRunOf(ana);
+  await proposal(ana, "puse de más").getByRole("button", { name: "Votar" }).click();
+  await expect(proposal(ana, "puse de más").getByText("Votaste")).toBeVisible();
+  await open(beto, `${fund}/movimientos`);
+  const runAfterBetosGiveBackVote = agentRunOf(beto);
+  await proposal(beto, "puse de más").getByRole("button", { name: "Votar" }).click();
+  await expect(onScreen(beto, /El fondo le devolvió \$\s1\.000 de su aporte a Caro: la propuesta se aprobó\./)).toBeVisible();
+  await Promise.all([runAfterAnasGiveBackVote, runAfterBetosGiveBackVote]);
+  await open(caro, fund);
+  await expect(onScreen(caro, /^Debés \$\s1\.000\./)).toBeVisible();
+
   // 10. Beto asks the agent (the scripted model on the fork), then tells it he paid for new balls: he confirms the
   // card, and the agent proposes it. The conversation outlasts closing the panel (spec, 9.2).
   await open(beto, fund);
@@ -365,9 +387,10 @@ test("three friends create a fund, contribute, get the agreed expense back, vote
   const written = (await summary.locator("p", { hasText: "TesorerIA ·" }).textContent()) ?? "";
   expect(written).toMatch(/^TesorerIA · Fútbol de los jueves\nResumen de la semana 1 \(del \d{1,2}\/\d{1,2} al \d{1,2}\/\d{1,2}\)\n/);
   expect(written).toMatch(/\nEn el fondo hay \$\s[\d.]+(,\d{2})?\.\n/);
-  // Ana, Beto and Caro paid week 1 (the contract's week 0): Ana and Caro $ 10.000 each, Beto 10 USDT. Dani joined in
-  // it and didn't.
-  expect(written).toMatch(/\nPagaron la cuota 3 de 4\. Deben, en total:\n· Dani, \$\s10\.000\n/);
+  // Ana, Beto and Caro paid week 1 (the contract's week 0): Ana and Caro $ 10.000 each, Beto 10 USDT. Caro was given
+  // $ 1.000 of hers back (step 9), so she owes it. Dani joined in it and didn't pay.
+  expect(written).toMatch(/\nPagaron la cuota 2 de 4\. Deben, en total:\n· Caro, \$\s1\.000\n· Dani, \$\s10\.000\n/);
+  expect(written).toMatch(/\n· Se aprobó devolverle \$\s1\.000 de su aporte a Caro\.\n/);
   expect(written).toContain("\n· Se sumó Dani al fondo.\n");
   expect(written).toMatch(/\n· Aportaron \$\s[\d.]+(,\d{2})? entre todos\.\n/);
   expect(written).toMatch(/\n· Le devolví \$\s5\.000 a Ana por la cancha\.\n/);

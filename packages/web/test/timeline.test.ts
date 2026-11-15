@@ -177,6 +177,30 @@ describe("buildTimeline", () => {
     ]);
   });
 
+  it("tells a proposal that gave a contribution back, and its payment, apart from a payment (spec, 7.3)", () => {
+    // The football fund's proposal 4: the agent proposed it for a "give-back" expense, and a vote executed it.
+    const events = [
+      event("ProposalCreated", { id: 4n, action: 0, a: CARO, b: zeroAddress, amount: 10_000n * WARS, proposer: AGENT, note: "deposité en otro fondo" }, BLOCK - 300n),
+      event("Payment", { member: CARO, amount: 10_000n * WARS }, BLOCK - 100n, 77),
+      { ...event("ProposalExecuted", { id: 4n }, BLOCK - 100n, 77), logIndex: 1 },
+    ];
+    const texts = (change: Partial<Parameters<typeof buildTimeline>[0]>) => timeline({ events, ...change }).map((i) => i.text);
+    expect(texts({ giveBacks: new Set([4n]) })).toEqual([
+      $("El fondo le devolvió $ 10.000 de su aporte a Caro: la propuesta se aprobó."),
+      $("Propuse devolverle $ 10.000 de su aporte a Caro (deposité en otro fondo)."),
+    ]);
+    const ars = (text: string) => text.replaceAll("ARS ", `ARS${NBSP}`);
+    expect(texts({ giveBacks: new Set([4n]), m: en })).toEqual([
+      ars("The fund gave Caro back ARS 10,000 of their contribution: the proposal was approved."),
+      ars("I proposed giving Caro back ARS 10,000 of their contribution (“deposité en otro fondo”)."),
+    ]);
+    // Any other proposal, or this one unmarked, is a payment as before.
+    expect(texts({ giveBacks: new Set([3n]) })).toEqual([
+      $("El fondo le pagó $ 10.000 a Caro: la propuesta se aprobó."),
+      $("Propuse pagarle $ 10.000 a Caro por deposité en otro fondo."),
+    ]);
+  });
+
   it("leaves out a RemainderDistributed that moved only rounding dust (spec, 7.3)", () => {
     const items = timeline({
       events: [

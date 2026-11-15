@@ -48,6 +48,7 @@ export function buildFundView({
   balance,
   weeklyFee,
   joined,
+  givenBack = new Map(),
   names,
   viewer,
   m,
@@ -59,6 +60,8 @@ export function buildFundView({
   weeklyFee: bigint;
   /** The week each member joined, from joinWeeks; founders are left out (week 0). */
   joined: ReadonlyMap<Address, bigint>;
+  /** What each member was given back of their contributions (givenBack, spec 7.3): it doesn't count as paid ahead. */
+  givenBack?: ReadonlyMap<Address, bigint>;
   /** First names by checksummed account; a member without one shows as "Miembro N" ("Member N" in English). */
   names: ReadonlyMap<Address, string>;
   viewer: Address | null;
@@ -66,7 +69,7 @@ export function buildFundView({
   m: Messages;
 }): FundView {
   const me = viewer === null ? null : getAddress(viewer);
-  const dues = memberDues({ fund: snapshot, weeklyFee, joined });
+  const dues = memberDues({ fund: snapshot, weeklyFee, joined, givenBack });
   const rows = dues.map(({ member, owed }, i) => {
     const address = getAddress(member);
     return { position: i + 1, member: address, name: names.get(address) ?? m.common.member(i + 1), isMe: address === me, owed };
@@ -78,12 +81,13 @@ export function buildFundView({
     const { due, contributed } = dues[mine.position - 1]!;
     const over = contributed > due ? contributed - due : 0n;
     ahead = over * 10_000n >= weeklyFee * AHEAD_SAID_FROM_BPS ? over : 0n;
-    // Fund._split pays each token in proportion to what each contributed (equal parts if no one did):
-    // in pesos, that's the balance times the member's part.
+    // Fund._split pays each token in proportion to what each contributed (equal parts if no one did): in pesos, that's
+    // the balance times the member's part. The contract's count, with what was given back still in it (spec, 7.3).
+    const counted = snapshot.contributed[mine.position - 1] ?? 0n;
     share =
       snapshot.totalContributed === 0n
         ? balance / BigInt(snapshot.members.length)
-        : (balance * contributed) / snapshot.totalContributed;
+        : (balance * counted) / snapshot.totalContributed;
   }
   return {
     address: snapshot.address,

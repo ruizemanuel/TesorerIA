@@ -1,4 +1,4 @@
-import { type FundEvent, type SkipCode, USDT } from "@tesoreria/agent";
+import { type FundEvent, type SkipCode, USDT, paidProposal } from "@tesoreria/agent";
 import { type Address, type Hash, getAddress, isAddressEqual } from "viem";
 import { type BlockClock, blockTime, weekAt } from "./chain-time";
 import type { ExpenseStatus } from "./db/schema";
@@ -78,6 +78,7 @@ export function buildTimeline({
   votesRequired,
   memberCount,
   proposals,
+  giveBacks = new Set(),
   expenses,
   pending,
   joinRequests = [],
@@ -104,6 +105,8 @@ export function buildTimeline({
   memberCount: number;
   /** By proposal id, for every ProposalCreated in `events`. */
   proposals: ReadonlyMap<bigint, ProposalState>;
+  /** The proposals (by id) that gave a contribution back (spec, 7.3): they and their payments say so. */
+  giveBacks?: ReadonlySet<bigint>;
   expenses: readonly TimelineExpense[];
   pending: readonly TimelinePending[];
   /** Who asked to join (members' screens only), and whether the fund has room for one more on the chain. */
@@ -175,7 +178,10 @@ export function buildTimeline({
       }
       case "ProposalCreated": {
         const { id, action, a, amount, proposer, note } = event.args;
-        const what = proposalText(m, action, a, amount, note, who, newcomer, agreedExpense);
+        const what =
+          action === ProposalAction.Pay && giveBacks.has(id)
+            ? t.proposal.giveBack(formatPesos(amount, m.locale), who(a), note)
+            : proposalText(m, action, a, amount, note, who, newcomer, agreedExpense);
         const byAgent = isAddressEqual(proposer, agent);
         const state = proposals.get(id);
         if (action === ProposalAction.AddMember && state !== undefined && !state.executed && state.deadline > nowSeconds) beingProposed.add(getAddress(a));
@@ -219,7 +225,9 @@ export function buildTimeline({
       }
       case "Payment": {
         const { member, amount } = event.args;
-        items.push({ ...base, actor: { kind: "group" }, text: t.paid(formatPesos(amount, m.locale), who(member)) });
+        const id = paidProposal(events, event);
+        const paid = id !== undefined && giveBacks.has(id) ? t.givenBack : t.paid;
+        items.push({ ...base, actor: { kind: "group" }, text: paid(formatPesos(amount, m.locale), who(member)) });
         break;
       }
       case "MemberAdded": {

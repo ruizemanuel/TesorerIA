@@ -69,6 +69,34 @@ describe("buildFundView", () => {
     expect(ahead(29_000n * WARS)).toBe(0n); // owes instead
   });
 
+  it("doesn't count what was given back of your contributions as paid ahead, while your part stays the contract's (spec, 7.3)", () => {
+    // The real case: Member 7 put in 60.012,34 by week 5 and was given 10.000 back. Here, Ana by week 2.
+    const contributed = [40_012_340_000_000_000_000_000n, 30_000n * WARS, 30_000n * WARS];
+    const total = contributed.reduce((a, b) => a + b, 0n);
+    const given = (back: bigint) =>
+      buildFundView({
+        snapshot: snapshot({ contributed, totalContributed: total }),
+        name: "Fútbol de los jueves",
+        agreedExpense: "la cancha",
+        balance: 100_000n * WARS,
+        weeklyFee: 10_000n * WARS,
+        joined: new Map(),
+        givenBack: new Map([[ANA, back]]),
+        names: NAMES,
+        viewer: ANA,
+        m: es,
+      });
+    expect(given(0n).me?.ahead).toBe(10_012_340_000_000_000_000_000n); // what her screen said
+    // $ 12,34 ahead is under 1 % of the fee, Aportar's margin: nothing to say. Given 5.000 back, she's 5.012,34 ahead.
+    expect(given(10_000n * WARS).me?.ahead).toBe(0n);
+    expect(given(5_000n * WARS).me?.ahead).toBe(5_012_340_000_000_000_000_000n);
+    expect(given(10_000n * WARS).me?.owed).toBe(0n);
+    // Fund._split still counts the 10.000: the contract can't lower what she contributed.
+    expect(given(10_000n * WARS).me?.share).toBe((100_000n * WARS * contributed[0]!) / total);
+    // Given back more than she's ahead by, she owes the rest.
+    expect(given(20_000n * WARS).rows[0]?.owed).toBe(9_987_660_000_000_000_000_000n);
+  });
+
   it("says what's left of the week's cap, never below zero", () => {
     expect(view({ spentThisWeek: 45_000n * WARS }).leftThisWeek).toBe(15_000n * WARS);
     expect(view({ spentThisWeek: 70_000n * WARS, weeklyCap: 60_000n * WARS }).leftThisWeek).toBe(0n);

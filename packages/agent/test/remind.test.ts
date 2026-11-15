@@ -1,7 +1,7 @@
 import { type Address, type Hash, pad, toHex } from "viem";
 import { describe, expect, it } from "vitest";
 import type { FundEvent } from "../src/events";
-import { closeShares, joinWeeks, memberDues, weekSummary } from "../src/remind";
+import { closeShares, givenBack, joinWeeks, memberDues, weekSummary } from "../src/remind";
 import {
   BLOCK,
   MEMBERS,
@@ -63,6 +63,44 @@ describe("memberDues", () => {
     expect(owed(credited + shown)).toBe(0n);
     expect(owed(FEE - centavo + 1n)).toBe(0n);
     expect(owed(FEE - centavo)).toBe(centavo);
+  });
+});
+
+describe("memberDues, with what was given back (spec, 7.3)", () => {
+  it("takes what a member was given back off their contributions: the contract can't lower them", () => {
+    // Week 2: Carla put in 40.000 and was given 10.000 back, so she's even; given 20.000 back, she owes 10.000.
+    const fund = fundSnapshot({ contributed: [30_000n * WARS_UNIT, 30_000n * WARS_UNIT, 40_000n * WARS_UNIT] });
+    const dues = (back: bigint) => memberDues({ fund, weeklyFee: FEE, joined: new Map(), givenBack: new Map([[CARLA, back]]) });
+    expect(dues(10_000n * WARS_UNIT)[2]).toEqual({ member: CARLA, due: 30_000n * WARS_UNIT, contributed: 30_000n * WARS_UNIT, owed: 0n });
+    expect(dues(20_000n * WARS_UNIT)[2]).toMatchObject({ contributed: 20_000n * WARS_UNIT, owed: 10_000n * WARS_UNIT });
+    expect(dues(50_000n * WARS_UNIT)[2]).toMatchObject({ contributed: 0n, owed: 30_000n * WARS_UNIT }); // never below zero
+    expect(dues(10_000n * WARS_UNIT).slice(0, 2).map((d) => d.contributed)).toEqual([30_000n * WARS_UNIT, 30_000n * WARS_UNIT]);
+  });
+});
+
+describe("givenBack", () => {
+  const at = (block: bigint, tx: number, logIndex: number) => ({ blockNumber: block, transactionHash: pad(toHex(tx), { size: 32 }) as Hash, logIndex });
+  const payment = (member: Address, amount: bigint, tx: number, logIndex: number): FundEvent => ({ eventName: "Payment", args: { member, amount }, ...at(BLOCK - 50n, tx, logIndex) });
+  const executed = (id: bigint, tx: number, logIndex: number): FundEvent => ({ eventName: "ProposalExecuted", args: { id }, ...at(BLOCK - 50n, tx, logIndex) });
+
+  it("adds up the payments of the proposals that gave a contribution back, each with the execution that follows it", () => {
+    const events = [
+      // One batch: proposal 3 pays the pitch to Beto, proposal 4 gives Carla back 10.000.
+      payment(BETO, 80_000n * WARS_UNIT, 20, 0),
+      executed(3n, 20, 1),
+      payment(CARLA, 10_000n * WARS_UNIT, 20, 2),
+      executed(4n, 20, 3),
+      payment(CARLA, 2_500n * WARS_UNIT, 21, 0),
+      executed(6n, 21, 1),
+    ];
+    expect(givenBack(events, new Set([4n, 6n]))).toEqual(new Map([[CARLA, 12_500n * WARS_UNIT]]));
+    expect(givenBack(events, new Set())).toEqual(new Map());
+  });
+
+  it("moves it to a member's new account, and drops it with a member who leaves, as the contract does with contributions", () => {
+    const back = [payment(CARLA, 10_000n * WARS_UNIT, 20, 0), executed(4n, 20, 1), payment(BETO, 5_000n * WARS_UNIT, 21, 0), executed(5n, 21, 1)];
+    const removed: FundEvent = { eventName: "MemberRemoved", args: { member: BETO, warsReturned: 0n, usdtReturned: 0n }, ...at(BLOCK - 10n, 23, 0) };
+    expect(givenBack([...back, memberReplaced(CARLA, OUTSIDER, BLOCK - 20n, 22), removed], new Set([4n, 5n]))).toEqual(new Map([[OUTSIDER, 10_000n * WARS_UNIT]]));
   });
 });
 
@@ -151,11 +189,32 @@ describe("weekSummary: the photo of a week that closed (spec, 9.4)", () => {
       contributed: 20_050n * WARS_UNIT,
       reimbursements: [{ member: ANA, amount: 45_000n * WARS_UNIT }],
       payments: [
-        { member: CARLA, amount: 8_000n * WARS_UNIT, note: "las pelotas" },
-        { member: BETO, amount: 3_000n * WARS_UNIT, note: "el asado" },
+        { member: CARLA, amount: 8_000n * WARS_UNIT, note: "las pelotas", givenBack: false },
+        { member: BETO, amount: 3_000n * WARS_UNIT, note: "el asado", givenBack: false },
       ],
       joined: [],
     });
+  });
+
+  it("takes what was given back off the dues, and tells the payments that gave a contribution back (spec, 7.3)", () => {
+    // Everyone put in the three fees by week 2, and proposal 4 gave Carla 10.000 back in the same batch as the pitch.
+    const fund = fundSnapshot({ contributed: [30_000n * WARS_UNIT, 30_000n * WARS_UNIT, 30_000n * WARS_UNIT] });
+    const events = [
+      proposal(3n, BETO, 80_000n * WARS_UNIT, "la cancha", FIRST + 5n, 12),
+      proposal(4n, CARLA, 10_000n * WARS_UNIT, "deposité en otro fondo", FIRST + 6n, 13),
+      payment(BETO, 80_000n * WARS_UNIT, FIRST + 40n, 16, 0),
+      executed(3n, FIRST + 40n, 16, 1),
+      payment(CARLA, 10_000n * WARS_UNIT, FIRST + 40n, 16, 2),
+      executed(4n, FIRST + 40n, 16, 3),
+    ];
+    const facts = (giveBacks?: ReadonlySet<bigint>) =>
+      weekSummary({ fund, balance: 0n, weeklyFee: FEE, events, first: FIRST, weekOf, ...(giveBacks === undefined ? {} : { giveBacks }) });
+    expect(facts(new Set([4n])).payments).toEqual([
+      { member: BETO, amount: 80_000n * WARS_UNIT, note: "la cancha", givenBack: false },
+      { member: CARLA, amount: 10_000n * WARS_UNIT, note: "deposité en otro fondo", givenBack: true },
+    ]);
+    expect(facts(new Set([4n])).dues.map((d) => d.owed)).toEqual([0n, 0n, 10_000n * WARS_UNIT]);
+    expect(facts().dues.map((d) => d.owed)).toEqual([0n, 0n, 0n]); // with no proposal marked, a payment is a payment
   });
 
   it("keeps who owes in a week where nothing happened", () => {

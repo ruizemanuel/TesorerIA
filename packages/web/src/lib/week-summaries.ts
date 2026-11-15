@@ -18,6 +18,7 @@ import type { Db } from "./db/client";
 import { type StoredWeekSummary, funds, weekSummaries } from "./db/schema";
 import { formatDay, formatPesos } from "./format";
 import { memberFundAbi } from "./fund-abi";
+import { giveBackTransactions, proposalsIn } from "./give-backs";
 import { completeHistory } from "./history";
 import type { Messages } from "./i18n/messages";
 
@@ -32,7 +33,7 @@ export function storeFacts(facts: WeekSummaryFacts): StoredWeekSummary {
     dues: facts.dues.map(({ member, owed }) => ({ member, owed: owed.toString() })),
     contributed: facts.contributed.toString(),
     reimbursements: facts.reimbursements.map(({ member, amount }) => ({ member, amount: amount.toString() })),
-    payments: facts.payments.map(({ member, amount, note }) => ({ member, amount: amount.toString(), note })),
+    payments: facts.payments.map(({ member, amount, note, givenBack }) => ({ member, amount: amount.toString(), note, givenBack })),
     joined: [...facts.joined],
   };
 }
@@ -48,13 +49,21 @@ export function readFacts(stored: StoredWeekSummary): WeekSummaryFacts {
     dues: stored.dues.map(({ member, owed }) => ({ member: getAddress(member), owed: BigInt(owed) })),
     contributed: BigInt(stored.contributed),
     reimbursements: stored.reimbursements.map(({ member, amount }) => ({ member: getAddress(member), amount: BigInt(amount) })),
-    payments: stored.payments.map(({ member, amount, note }) => ({ member: getAddress(member), amount: BigInt(amount), note })),
+    payments: stored.payments.map(({ member, amount, note, givenBack }) => ({
+      member: getAddress(member),
+      amount: BigInt(amount),
+      note,
+      givenBack: givenBack ?? false,
+    })),
     joined: stored.joined.map((member) => getAddress(member)),
   };
 }
 
-/** A live fund, as writeWeekSummaries reads it from the database. */
-export type SummaryFund = { id: string; address: Address; createdBlock: bigint; weeklyFee: bigint };
+/**
+ * A live fund, as writeWeekSummaries reads it from the database. `giveBackTxs` are the transactions the agent proposed
+ * its give-back expenses in (giveBackTransactions, spec 7.3), lowercase.
+ */
+export type SummaryFund = { id: string; address: Address; createdBlock: bigint; weeklyFee: bigint; giveBackTxs: ReadonlySet<string> };
 
 /** What writeWeekSummaries reads on the chain: chainWeekSummaryDeps reads it for real, a test stands in for it. */
 export type WeekSummaryDeps = {
@@ -108,7 +117,8 @@ export function chainWeekSummaryDeps(
       const clock = { block: last, timestamp: block.timestamp };
       // The same weekOf as the screen (read-fund.ts), so the summary's dues are the week's list as it closed.
       const weekOf = (event: (typeof events)[number]) => weekAt(blockTime(event.blockNumber, clock), snapshot.startTime);
-      return weekSummary({ fund: snapshot, balance, weeklyFee: fund.weeklyFee, events, first, weekOf });
+      const giveBacks = proposalsIn(events, fund.giveBackTxs);
+      return weekSummary({ fund: snapshot, balance, weeklyFee: fund.weeklyFee, events, first, weekOf, giveBacks });
     },
   };
 }
@@ -134,7 +144,13 @@ export async function writeWeekSummaries(db: Db, deps: WeekSummaryDeps): Promise
     if (row.address === null) continue;
     try {
       // Inside the try: an address that doesn't parse costs that one fund its summary, never the others'.
-      const fund: SummaryFund = { id: row.id, address: getAddress(row.address), createdBlock: row.createdBlock ?? FUND_FACTORY_BLOCK, weeklyFee: row.weeklyFee };
+      const fund: SummaryFund = {
+        id: row.id,
+        address: getAddress(row.address),
+        createdBlock: row.createdBlock ?? FUND_FACTORY_BLOCK,
+        weeklyFee: row.weeklyFee,
+        giveBackTxs: await giveBackTransactions(db, row.id),
+      };
       await writeLastWeek(db, deps, fund);
     } catch (error) {
       console.error(`Could not write the week summary of ${row.address}: ${shortMessage(error)}`);
@@ -180,7 +196,9 @@ export function weekSummaryText(
   const happened = [
     ...(facts.contributed > 0n ? [s.contributed(pesos(facts.contributed))] : []),
     ...facts.reimbursements.map((r) => t.reimbursed(pesos(r.amount), who(r.member), agreedExpense)),
-    ...facts.payments.map((p) => s.approvedPayment(t.proposal.pay(pesos(p.amount), who(p.member), p.note))),
+    ...facts.payments.map((p) =>
+      s.approvedPayment(p.givenBack ? t.proposal.giveBack(pesos(p.amount), who(p.member), "") : t.proposal.pay(pesos(p.amount), who(p.member), p.note)),
+    ),
     // As the movements say a MemberAdded: a name the fund doesn't have is "una cuenta nueva", not "alguien".
     ...facts.joined.map((member) => t.memberAdded(names.get(getAddress(member)) ?? t.newAccount)),
   ];

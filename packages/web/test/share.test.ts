@@ -32,7 +32,7 @@ describe("whatsAppLink: the text, whole, in WhatsApp's link (Review Focus 2)", (
       ],
       contributed: 10_000n * WARS,
       reimbursements: [],
-      payments: [{ member: ana, amount: 5_000n * WARS, note: "pizza #2 + birra 50%\ny la otra?" }],
+      payments: [{ member: ana, amount: 5_000n * WARS, note: "pizza #2 + birra 50%\ny la otra?", givenBack: false }],
       joined: [],
     };
     const names = new Map([
