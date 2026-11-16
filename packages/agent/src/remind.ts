@@ -21,41 +21,46 @@ export function joinWeeks(events: readonly FundEvent[], weekOf: (event: FundEven
 }
 
 /**
- * What a member should have put in by the end of this week, what they did (less what was given back to them), and
- * what they owe. All in wARS.
+ * What a member should have put in by the end of this week, what they did (less what was given back to them and what
+ * converting their USDT lost), and what they owe. All in wARS.
  */
 export type MemberDues = { member: Address; due: bigint; contributed: bigint; owed: bigint };
 
 /**
- * Less than this left to pay is nothing left: one centavo, in wARS. Amounts are shown and typed in centavos, but a
- * contribution in USDT is credited to the wei, so paying what the screen showed can leave a fraction of a centavo.
+ * Less than this part of a weekly fee left to pay (0,5 %: $ 50 of $ 10.000) is no debt yet: it goes with the next
+ * week's, since the dues add up every week's fee. Paying what Aportar asked must never turn into a debt of a few pesos
+ * minutes later, when a conversion lost more than its margin, nor ask for a payment of a few centavos of USDT that
+ * the agent wouldn't even convert (conversion-loss design).
  */
-export const DUES_DUST = 10n ** 16n;
+export const OWED_SAID_FROM_BPS = 50n;
 
 /**
  * Each member's dues at `weeklyFee` per week, from the week they joined through the current one (spec, 8.1:
  * reminders). `weeklyFee` is the fund's fee, which lives off chain. What a member was given back of their
- * contributions (`givenBack`, by checksummed account) doesn't count as put in. Under DUES_DUST owed is nothing.
+ * contributions (`givenBack`) and what converting their USDT lost (`conversionLoss`, negative when it gained), both by
+ * checksummed account, don't count as put in. Under OWED_SAID_FROM_BPS of the fee owed is nothing.
  */
 export function memberDues({
   fund,
   weeklyFee,
   joined,
   givenBack = new Map(),
+  conversionLoss = new Map(),
 }: {
   fund: FundSnapshot;
   weeklyFee: bigint;
   joined: ReadonlyMap<Address, bigint>;
   givenBack?: ReadonlyMap<Address, bigint>;
+  conversionLoss?: ReadonlyMap<Address, bigint>;
 }): MemberDues[] {
   return fund.members.map((member, i) => {
     const weeks = fund.week - (joined.get(getAddress(member)) ?? 0n) + 1n;
     const due = weeks > 0n ? weeklyFee * weeks : 0n;
     const gross = fund.contributed[i] ?? 0n;
-    const back = givenBack.get(getAddress(member)) ?? 0n;
-    const contributed = gross > back ? gross - back : 0n;
+    const net = gross - (givenBack.get(getAddress(member)) ?? 0n) - (conversionLoss.get(getAddress(member)) ?? 0n);
+    const contributed = net > 0n ? net : 0n;
     const short = due > contributed ? due - contributed : 0n;
-    return { member, due, contributed, owed: short < DUES_DUST ? 0n : short };
+    return { member, due, contributed, owed: short * 10_000n < weeklyFee * OWED_SAID_FROM_BPS ? 0n : short };
   });
 }
 
@@ -233,8 +238,9 @@ export type WeekSummaryFacts = {
 /**
  * The photo of the week `fund` was read in, at its last block (spec, 9.4). `events` go from the fund's creation up to
  * that block: the dues need every MemberAdded (joinWeeks, with the screen's `weekOf`), and a payment's note is in its
- * proposal, which may be older than the week. Only the events from `first` on are the week's. Conversions are left
- * out: for the group they change nothing. `giveBacks` are the proposals (by id) that gave a contribution back.
+ * proposal, which may be older than the week. Only the events from `first` on are the week's. Conversions only count
+ * in the dues, through what they got under or over what their USDT was credited (conversionLoss): the summary doesn't
+ * list them. `giveBacks` are the proposals (by id) that gave a contribution back.
  */
 export function weekSummary({
   fund,
@@ -253,7 +259,13 @@ export function weekSummary({
   weekOf: (event: FundEvent) => bigint;
   giveBacks?: ReadonlySet<bigint>;
 }): WeekSummaryFacts {
-  const dues = memberDues({ fund, weeklyFee, joined: joinWeeks(events, weekOf), givenBack: givenBack(events, giveBacks) }).map(({ member, owed }) => ({
+  const dues = memberDues({
+    fund,
+    weeklyFee,
+    joined: joinWeeks(events, weekOf),
+    givenBack: givenBack(events, giveBacks),
+    conversionLoss: conversionLoss(events).byMember,
+  }).map(({ member, owed }) => ({
     member,
     owed,
   }));

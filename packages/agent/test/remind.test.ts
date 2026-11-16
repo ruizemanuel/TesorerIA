@@ -55,15 +55,37 @@ describe("memberDues", () => {
     expect(memberDues({ fund, weeklyFee: FEE, joined: new Map() })[0]?.owed).toBe(0n);
   });
 
-  it("owes nothing under a centavo, as when a contribution in USDT was credited to the wei and the rest paid as shown", () => {
+  it("owes nothing under 0,5 % of the weekly fee, and it goes with the next week's", () => {
     // The real fund, 12/10: 5 USDT credited as 8,034.2278… wARS, then the $ 1.965,77 the screen showed.
     const credited = 8_034_227_833_761_027_780_166n;
     const shown = 1_965_770_000_000_000_000_000n;
-    const centavo = WARS_UNIT / 100n;
-    const owed = (contributed: bigint) => memberDues({ fund: fundSnapshot({ week: 0n, contributed: [contributed, 0n, 0n] }), weeklyFee: FEE, joined: new Map() })[0]?.owed;
+    const owed = (contributed: bigint, week = 0n) =>
+      memberDues({ fund: fundSnapshot({ week, contributed: [contributed, 0n, 0n] }), weeklyFee: FEE, joined: new Map() })[0]?.owed;
     expect(owed(credited + shown)).toBe(0n);
-    expect(owed(FEE - centavo + 1n)).toBe(0n);
-    expect(owed(FEE - centavo)).toBe(centavo);
+    expect(owed(FEE - (4_999n * WARS_UNIT) / 100n)).toBe(0n); // $ 49,99
+    expect(owed(FEE - 50n * WARS_UNIT)).toBe(50n * WARS_UNIT);
+    expect(owed(FEE - (4_999n * WARS_UNIT) / 100n, 1n)).toBe(FEE + (4_999n * WARS_UNIT) / 100n);
+  });
+});
+
+describe("memberDues, with what converting their USDT lost (conversion-loss design)", () => {
+  it("takes what converting a member's USDT lost off what they put in, and adds what it gained", () => {
+    // Week 2: everyone put in 30.000, which is what they owe.
+    const fund = fundSnapshot();
+    const carla = (loss: bigint, back = 0n, contributed = 30_000n * WARS_UNIT) =>
+      memberDues({
+        fund: fundSnapshot({ contributed: [30_000n * WARS_UNIT, 30_000n * WARS_UNIT, contributed] }),
+        weeklyFee: FEE,
+        joined: new Map(),
+        givenBack: new Map([[CARLA, back]]),
+        conversionLoss: new Map([[CARLA, loss]]),
+      })[2];
+    expect(carla(60n * WARS_UNIT)).toMatchObject({ contributed: 29_940n * WARS_UNIT, owed: 60n * WARS_UNIT });
+    expect(carla((2_890n * WARS_UNIT) / 100n)).toMatchObject({ owed: 0n }); // $ 28,90: under $ 50
+    expect(carla(-20n * WARS_UNIT)).toMatchObject({ contributed: 30_020n * WARS_UNIT, owed: 0n });
+    expect(carla(40_000n * WARS_UNIT)).toMatchObject({ contributed: 0n, owed: 30_000n * WARS_UNIT }); // never below zero
+    expect(carla(60n * WARS_UNIT, 10_000n * WARS_UNIT, 40_000n * WARS_UNIT)).toMatchObject({ contributed: 29_940n * WARS_UNIT, owed: 60n * WARS_UNIT });
+    expect(memberDues({ fund, weeklyFee: FEE, joined: new Map(), conversionLoss: new Map([[CARLA, 60n * WARS_UNIT]]) }).slice(0, 2).map((d) => d.owed)).toEqual([0n, 0n]);
   });
 });
 
@@ -250,6 +272,18 @@ describe("weekSummary: the photo of a week that closed (spec, 9.4)", () => {
   });
   const summary = (fund = fundSnapshot(), events: FundEvent[] = []) =>
     weekSummary({ fund, balance: 85_000n * WARS_UNIT, weeklyFee: FEE, events, first: FIRST, weekOf });
+
+  it("takes what converting a member's USDT lost off what they put in (conversion-loss design)", () => {
+    const facts = summary(fundSnapshot(), [
+      { eventName: "Contribution", args: { member: CARLA, token: USDT, amount: 6n * USDT_UNIT, creditedWars: 10_000n * WARS_UNIT }, ...at(FIRST + 10n, 40) },
+      { eventName: "Conversion", args: { usdtIn: 6n * USDT_UNIT, warsOut: 9_940n * WARS_UNIT }, ...at(FIRST + 20n, 41) },
+    ]);
+    expect(facts.dues).toEqual([
+      { member: ANA, owed: 0n },
+      { member: BETO, owed: 0n },
+      { member: CARLA, owed: 60n * WARS_UNIT },
+    ]);
+  });
 
   it("adds up the week's contributions and lists its reimbursements and payments, each payment with its proposal's note", () => {
     const facts = summary(fundSnapshot(), [
