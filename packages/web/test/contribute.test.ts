@@ -145,10 +145,10 @@ describe("Aportar in USDT: what covers the week, at the fund's rate", () => {
   const usdt = (n: number) => BigInt(Math.round(n * 100)) * 10_000n; // n USDT, to the cent
   const week = { owed: 0n, weeklyFee: pesos(10_000), room: pesos(400_000) };
 
-  it("asks for 0,1 % more than the pesos, rounded up to a USDT cent", () => {
-    expect(USDT_MARGIN_BPS).toBe(10n);
-    expect(usdtFor(pesos(10_000), rate)).toBe(usdt(6.26)); // 10.010 / 1.600 = 6,25625
-    expect(usdtFor(pesos(16_000), rate)).toBe(usdt(10.01)); // 16.016 / 1.600 = 10,01 exactly: not a cent more
+  it("asks for 0,3 % more than the pesos, rounded up to a USDT cent", () => {
+    expect(USDT_MARGIN_BPS).toBe(30n);
+    expect(usdtFor(pesos(10_000), rate)).toBe(usdt(6.27)); // 10.030 / 1.600 = 6,26875
+    expect(usdtFor(pesos(16_000), rate)).toBe(usdt(10.03)); // 16.048 / 1.600 = 10,03 exactly: not a cent more
     const cases = [
       [pesos(10_000), 1_606_846_000_000_000_000_000n],
       [pesos(7), 1_234_567_890_123_456_789_012n],
@@ -163,9 +163,9 @@ describe("Aportar in USDT: what covers the week, at the fund's rate", () => {
   });
 
   it("offers what covers the week, like the pesos' tab, or all you hold when it's less; never over the cap", () => {
-    expect(defaultUsdtAmount({ held: usdt(20), rate, ...week })).toBe(usdt(6.26));
+    expect(defaultUsdtAmount({ held: usdt(20), rate, ...week })).toBe(usdt(6.27));
     expect(defaultUsdtAmount({ held: usdt(5), rate, ...week })).toBe(usdt(5));
-    expect(defaultUsdtAmount({ held: usdt(20), rate, ...week, owed: pesos(15_000) })).toBe(usdt(9.39)); // 15.015 / 1.600 = 9,384…
+    expect(defaultUsdtAmount({ held: usdt(20), rate, ...week, owed: pesos(15_000) })).toBe(usdt(9.41)); // 15.045 / 1.600 = 9,403…
     // $ 5.000 left under the cap: the margin can't take it over (20 USDT are $ 32.000; 5.000 of them, 3,125 USDT).
     // What fits is offered to the cent below, 3,12: the field shows what is sent, and a cent is left to spare.
     expect(defaultUsdtAmount({ held: usdt(20), rate, ...week, room: pesos(5_000) })).toBe(3_120_000n);
@@ -182,7 +182,7 @@ describe("Aportar in USDT: what covers the week, at the fund's rate", () => {
     expect(defaultUsdtAmount({ held: 5_126_000n, rate, ...week })).toBe(5_126_000n);
     expect(defaultUsdtAmount({ held: 5_126_000n, rate, ...week, room: pesos(400_000) })).toBe(5_126_000n);
     // Or the week itself when that is less than what fits.
-    expect(defaultUsdtAmount({ held: usdt(20), rate, ...week, weeklyFee: pesos(1_000), room: pesos(5_000) })).toBe(usdt(0.63)); // 1.001 / 1.600 = 0,6256…
+    expect(defaultUsdtAmount({ held: usdt(20), rate, ...week, weeklyFee: pesos(1_000), room: pesos(5_000) })).toBe(usdt(0.63)); // 1.003 / 1.600 = 0,6268…
   });
 
   it("keeps the last rate when reading it again fails, and takes no rate from a zero", () => {
@@ -196,9 +196,9 @@ describe("Aportar in USDT: what covers the week, at the fund's rate", () => {
   });
 
   it("says how much more to send for the week, to the cent up, and nothing once it's there", () => {
-    expect(usdtToSend({ held: 0n, rate, ...week })).toBe(usdt(6.26));
-    expect(usdtToSend({ held: usdt(5), rate, ...week })).toBe(usdt(1.26));
-    expect(usdtToSend({ held: 6_255_000n, rate, ...week })).toBe(usdt(0.01));
+    expect(usdtToSend({ held: 0n, rate, ...week })).toBe(usdt(6.27));
+    expect(usdtToSend({ held: usdt(5), rate, ...week })).toBe(usdt(1.27));
+    expect(usdtToSend({ held: 6_265_000n, rate, ...week })).toBe(usdt(0.01));
     expect(usdtToSend({ held: usdt(7), rate, ...week })).toBe(0n);
     expect(usdtToSend({ held: 0n, rate: null, ...week })).toBeNull();
   });

@@ -35,8 +35,8 @@ export type FundView = {
 };
 
 /**
- * Paid ahead under this part of a weekly fee (1 %) isn't said: it's the margin Aportar adds to USDT
- * (USDT_MARGIN_BPS) and its cents, not money put in ahead.
+ * Paid ahead under this part of a weekly fee (1 %) isn't said: it's what's left of the margin Aportar adds to USDT
+ * (USDT_MARGIN_BPS, 0,3 %) after its conversion, and its cents, not money put in ahead.
  */
 const AHEAD_SAID_FROM_BPS = 100n;
 

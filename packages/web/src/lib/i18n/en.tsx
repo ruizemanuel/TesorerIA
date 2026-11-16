@@ -411,12 +411,14 @@ export const en: Messages = {
     havePesos: "I have pesos in Ripio",
     sendAtLeast: (usdt: ReactNode, pesos: ReactNode) => (
       <>
-        Send at least {usdt} to your fund account from Binance or any exchange: with that you cover {pesos} at the current price.
+        Send at least {usdt} to your fund account from Binance or any exchange: with that you cover {pesos} at the current price, including what's lost
+        converting them to pesos.
       </>
     ),
     sendAtLeastMore: (usdt: ReactNode, pesos: ReactNode) => (
       <>
-        Send at least {usdt} more to your fund account from Binance or any exchange: with what you already have, you cover {pesos} at the current price.
+        Send at least {usdt} more to your fund account from Binance or any exchange: with what you already have, you cover {pesos} at the current
+        price, including what's lost converting them to pesos.
       </>
     ),
     sendUsdt: "Send USDT to your fund account from Binance or any exchange.",

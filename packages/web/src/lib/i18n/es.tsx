@@ -507,13 +507,15 @@ export const es = {
     /** The USDT tab, when this week needs more than the account holds: `usdt` and `pesos` stand out as amounts. */
     sendAtLeast: (usdt: ReactNode, pesos: ReactNode) => (
       <>
-        Mandá al menos {usdt} a tu cuenta del fondo desde Binance o cualquier exchange: con eso cubrís {pesos} al precio de ahora.
+        Mandá al menos {usdt} a tu cuenta del fondo desde Binance o cualquier exchange: con eso cubrís {pesos} al precio de ahora, con lo que se pierde
+        al pasarlos a pesos incluido.
       </>
     ),
     /** The same, when the account already holds some USDT. */
     sendAtLeastMore: (usdt: ReactNode, pesos: ReactNode) => (
       <>
-        Mandá al menos {usdt} más a tu cuenta del fondo desde Binance o cualquier exchange: con lo que ya tenés, cubrís {pesos} al precio de ahora.
+        Mandá al menos {usdt} más a tu cuenta del fondo desde Binance o cualquier exchange: con lo que ya tenés, cubrís {pesos} al precio de ahora,
+        con lo que se pierde al pasarlos a pesos incluido.
       </>
     ),
     /** When there is nothing to send for the week, or no rate to say how much. */

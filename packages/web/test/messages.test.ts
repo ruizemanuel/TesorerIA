@@ -206,16 +206,16 @@ describe("the dictionaries", () => {
     expect([es.contribute.haveUsdt, es.contribute.havePesos]).toEqual(["Tengo USDT", "Tengo pesos en Ripio"]);
     expect([en.contribute.haveUsdt, en.contribute.havePesos]).toEqual(["I have USDT", "I have pesos in Ripio"]);
     expect(html(es.contribute.sendAtLeast(money("6,26 USDT"), money("$ 10.000")))).toBe(
-      'Mandá al menos <span class="money">6,26 USDT</span> a tu cuenta del fondo desde Binance o cualquier exchange: con eso cubrís <span class="money">$ 10.000</span> al precio de ahora.',
+      'Mandá al menos <span class="money">6,26 USDT</span> a tu cuenta del fondo desde Binance o cualquier exchange: con eso cubrís <span class="money">$ 10.000</span> al precio de ahora, con lo que se pierde al pasarlos a pesos incluido.',
     );
     expect(html(es.contribute.sendAtLeastMore(money("1,26 USDT"), money("$ 10.000")))).toBe(
-      'Mandá al menos <span class="money">1,26 USDT</span> más a tu cuenta del fondo desde Binance o cualquier exchange: con lo que ya tenés, cubrís <span class="money">$ 10.000</span> al precio de ahora.',
+      'Mandá al menos <span class="money">1,26 USDT</span> más a tu cuenta del fondo desde Binance o cualquier exchange: con lo que ya tenés, cubrís <span class="money">$ 10.000</span> al precio de ahora, con lo que se pierde al pasarlos a pesos incluido.',
     );
     expect(html(en.contribute.sendAtLeast(money("6.26 USDT"), money("ARS 10,000")))).toBe(
-      'Send at least <span class="money">6.26 USDT</span> to your fund account from Binance or any exchange: with that you cover <span class="money">ARS 10,000</span> at the current price.',
+      `Send at least <span class="money">6.26 USDT</span> to your fund account from Binance or any exchange: with that you cover <span class="money">ARS 10,000</span> at the current price, including what's lost converting them to pesos.`,
     );
     expect(html(en.contribute.sendAtLeastMore(money("1.26 USDT"), money("ARS 10,000")))).toBe(
-      'Send at least <span class="money">1.26 USDT</span> more to your fund account from Binance or any exchange: with what you already have, you cover <span class="money">ARS 10,000</span> at the current price.',
+      `Send at least <span class="money">1.26 USDT</span> more to your fund account from Binance or any exchange: with what you already have, you cover <span class="money">ARS 10,000</span> at the current price, including what's lost converting them to pesos.`,
     );
     expect(es.contribute.sendUsdt).toBe("Mandá USDT a tu cuenta del fondo desde Binance o cualquier exchange.");
     expect(en.contribute.sendUsdt).toBe("Send USDT to your fund account from Binance or any exchange.");

@@ -90,10 +90,12 @@ export function readPesosAmount(text: string, { held, room }: { held: bigint; ro
 }
 
 /**
- * 0,1 %: what Aportar adds to the USDT that covers an amount of pesos, so a small move of the fund's average price
- * before it lands still covers it. What goes over counts as paid ahead (memberDues adds up every week's fee).
+ * 0,3 %: what Aportar adds to the USDT that covers an amount of pesos, so a small move of the fund's average price
+ * before it lands, and what converting it loses (conversionLoss), still cover it: the worst of 37 conversions measured
+ * on 16/11/2026 lost 0,24 %. What its conversion gets over the fee counts as paid ahead, money the fund does hold
+ * (memberDues adds up every week's fee), so the margin costs no one anything (conversion-loss design).
  */
-export const USDT_MARGIN_BPS = 10n;
+export const USDT_MARGIN_BPS = 30n;
 const BPS = 10_000n;
 /** A hundredth of a USDT: amounts in USDT are shown and typed to the cent. */
 const USDT_CENT = 10_000n;
