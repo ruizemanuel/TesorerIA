@@ -1,4 +1,5 @@
-import { type Address, getAddress } from "viem";
+import { type Address, getAddress, isAddressEqual } from "viem";
+import { USDT } from "./chain";
 import type { FundEvent } from "./events";
 import { type FundSnapshot, WEEK } from "./fund";
 
@@ -92,6 +93,90 @@ export function givenBack(events: readonly FundEvent[], giveBacks: ReadonlySet<b
     }
   }
   return back;
+}
+
+/** A conversion's USDT against what it had been credited, in wARS: positive if it brought less, and whose it was. */
+export type ConversionDifference = { difference: bigint; members: Address[] };
+
+export type ConversionLoss = {
+  /** By checksummed member: what converting their USDT lost (positive) or gained (negative) against what it was credited. */
+  byMember: Map<Address, bigint>;
+  /** By the Conversion's `${transactionHash}:${logIndex}`, only when some of its USDT was credited to a current member. */
+  byConversion: Map<string, ConversionDifference>;
+};
+
+/**
+ * What converting each member's USDT got against what it was credited at (conversion-loss design). The contract credits
+ * a USDT contribution at the pool's TWAP, and `convert` gets a little less (or more): the dues count what it got, so the
+ * member whose USDT it was covers the difference and the fund holds what it says was put in.
+ *
+ * USDT is fungible, so conversions take the USDT contributions in order of arrival (the agent converts the whole balance
+ * at once, so this is what happened but for its caps). Every USDT of a conversion is worth the same, `warsOut / usdtIn`,
+ * whatever it was credited at. USDT that came in without `contributeUsdt` has no one to charge. A replaced member's loss
+ * and USDT still waiting move to the new account; a member who leaves takes their loss with them, `usdtReturned` comes
+ * out of the USDT waiting in proportion, without charging anyone, and what they left waiting is no one's.
+ */
+export function conversionLoss(events: readonly FundEvent[]): ConversionLoss {
+  const queue: { member: Address | null; usdt: bigint; credited: bigint }[] = [];
+  const byMember = new Map<Address, bigint>();
+  const byConversion = new Map<string, ConversionDifference>();
+  for (const event of events) {
+    switch (event.eventName) {
+      case "Contribution":
+        if (isAddressEqual(event.args.token, USDT)) {
+          queue.push({ member: getAddress(event.args.member), usdt: event.args.amount, credited: event.args.creditedWars });
+        }
+        break;
+      case "MemberReplaced": {
+        const old = getAddress(event.args.oldMember);
+        const next = getAddress(event.args.newMember);
+        const loss = byMember.get(old);
+        byMember.delete(old);
+        if (loss !== undefined) byMember.set(next, loss);
+        for (const tranche of queue) if (tranche.member === old) tranche.member = next;
+        break;
+      }
+      case "MemberRemoved": {
+        const gone = getAddress(event.args.member);
+        const waiting = queue.reduce((sum, tranche) => sum + tranche.usdt, 0n);
+        const returned = event.args.usdtReturned;
+        if (returned >= waiting) {
+          queue.length = 0;
+        } else if (returned > 0n) {
+          for (const tranche of queue) {
+            tranche.credited -= (tranche.credited * returned) / waiting;
+            tranche.usdt -= (tranche.usdt * returned) / waiting;
+          }
+        }
+        for (const tranche of queue) if (tranche.member === gone) tranche.member = null;
+        byMember.delete(gone);
+        break;
+      }
+      case "Conversion": {
+        const { usdtIn, warsOut } = event.args;
+        let left = usdtIn;
+        let difference = 0n;
+        const members: Address[] = [];
+        while (left > 0n && queue.length > 0) {
+          const head = queue[0]!;
+          const take = head.usdt < left ? head.usdt : left;
+          const credited = (head.credited * take) / head.usdt;
+          const worth = (warsOut * take) / usdtIn;
+          head.usdt -= take;
+          head.credited -= credited;
+          left -= take;
+          if (head.usdt === 0n) queue.shift();
+          if (head.member === null) continue;
+          byMember.set(head.member, (byMember.get(head.member) ?? 0n) + credited - worth);
+          difference += credited - worth;
+          if (!members.includes(head.member)) members.push(head.member);
+        }
+        if (members.length > 0) byConversion.set(`${event.transactionHash}:${event.logIndex}`, { difference, members });
+        break;
+      }
+    }
+  }
+  return { byMember, byConversion };
 }
 
 /** A member's part if the fund closed now. */

@@ -1,7 +1,8 @@
-import { type Address, type Hash, pad, toHex } from "viem";
+import { type Address, type Hash, getAddress, pad, toHex } from "viem";
 import { describe, expect, it } from "vitest";
+import { USDT, WARS } from "../src/chain";
 import type { FundEvent } from "../src/events";
-import { closeShares, givenBack, joinWeeks, memberDues, weekSummary } from "../src/remind";
+import { closeShares, conversionLoss, givenBack, joinWeeks, memberDues, weekSummary } from "../src/remind";
 import {
   BLOCK,
   MEMBERS,
@@ -101,6 +102,96 @@ describe("givenBack", () => {
     const back = [payment(CARLA, 10_000n * WARS_UNIT, 20, 0), executed(4n, 20, 1), payment(BETO, 5_000n * WARS_UNIT, 21, 0), executed(5n, 21, 1)];
     const removed: FundEvent = { eventName: "MemberRemoved", args: { member: BETO, warsReturned: 0n, usdtReturned: 0n }, ...at(BLOCK - 10n, 23, 0) };
     expect(givenBack([...back, memberReplaced(CARLA, OUTSIDER, BLOCK - 20n, 22), removed], new Set([4n, 5n]))).toEqual(new Map([[OUTSIDER, 10_000n * WARS_UNIT]]));
+  });
+});
+
+describe("conversionLoss (conversion-loss design)", () => {
+  const W = WARS_UNIT;
+  const U = USDT_UNIT;
+  const DIEGO = getAddress("0x000000000000000000000000000000000000d1e6");
+  const at = (block: bigint, tx: number) => ({ blockNumber: block, transactionHash: pad(toHex(tx), { size: 32 }) as Hash, logIndex: 0 });
+  const paidUsdt = (member: Address, usdt: bigint, credited: bigint, block: bigint, tx: number): FundEvent => ({
+    eventName: "Contribution",
+    args: { member, token: USDT, amount: usdt, creditedWars: credited },
+    ...at(block, tx),
+  });
+  const conversion = (usdtIn: bigint, warsOut: bigint, block: bigint, tx: number): FundEvent => ({ eventName: "Conversion", args: { usdtIn, warsOut }, ...at(block, tx) });
+  const key = (event: FundEvent) => `${event.transactionHash}:${event.logIndex}`;
+
+  it("charges a member what their USDT brought under what it was credited", () => {
+    const conv = conversion(6n * U, 9_997n * W, BLOCK - 90n, 31);
+    const loss = conversionLoss([paidUsdt(ANA, 6n * U, 10_000n * W, BLOCK - 100n, 30), conv]);
+    expect(loss.byMember).toEqual(new Map([[ANA, 3n * W]]));
+    expect(loss.byConversion.get(key(conv))).toEqual({ difference: 3n * W, members: [ANA] });
+  });
+
+  it("values each USDT of a batch at the same price, whatever it was credited at", () => {
+    const conv = conversion(12n * U, 20_000n * W, BLOCK - 90n, 32);
+    const loss = conversionLoss([paidUsdt(ANA, 6n * U, 10_000n * W, BLOCK - 100n, 30), paidUsdt(BETO, 6n * U, 10_060n * W, BLOCK - 95n, 31), conv]);
+    expect(loss.byMember).toEqual(
+      new Map([
+        [ANA, 0n],
+        [BETO, 60n * W],
+      ]),
+    );
+    expect(loss.byConversion.get(key(conv))).toEqual({ difference: 60n * W, members: [ANA, BETO] });
+  });
+
+  it("follows a contribution converted in two parts, and gives back a gain", () => {
+    const first = conversion(4n * U, 6_380n * W, BLOCK - 90n, 31);
+    const second = conversion(6n * U, 9_630n * W, BLOCK - 80n, 32);
+    const loss = conversionLoss([paidUsdt(ANA, 10n * U, 16_000n * W, BLOCK - 100n, 30), first, second]);
+    expect(loss.byMember).toEqual(new Map([[ANA, -10n * W]]));
+    expect(loss.byConversion.get(key(first))?.difference).toBe(20n * W);
+    expect(loss.byConversion.get(key(second))?.difference).toBe(-30n * W);
+  });
+
+  it("gives nobody the USDT that came in without contributeUsdt", () => {
+    const conv = conversion(9n * U, 14_400n * W, BLOCK - 90n, 31);
+    const loss = conversionLoss([paidUsdt(ANA, 6n * U, 10_000n * W, BLOCK - 100n, 30), conv]);
+    expect(loss.byMember).toEqual(new Map([[ANA, 400n * W]]));
+    expect(loss.byConversion.get(key(conv))).toEqual({ difference: 400n * W, members: [ANA] });
+  });
+
+  it("leaves out wARS contributions and USDT not converted yet", () => {
+    const inWars: FundEvent = { eventName: "Contribution", args: { member: ANA, token: WARS, amount: 10_000n * W, creditedWars: 10_000n * W }, ...at(BLOCK - 100n, 30) };
+    const loss = conversionLoss([inWars, paidUsdt(BETO, 6n * U, 10_000n * W, BLOCK - 95n, 31)]);
+    expect(loss.byMember).toEqual(new Map());
+    expect(loss.byConversion).toEqual(new Map());
+  });
+
+  it("moves a member's loss and their USDT waiting to their new account", () => {
+    const later = conversion(6n * U, 9_990n * W, BLOCK - 50n, 36);
+    const loss = conversionLoss([
+      paidUsdt(ANA, 6n * U, 10_000n * W, BLOCK - 100n, 30),
+      conversion(6n * U, 9_997n * W, BLOCK - 90n, 31),
+      paidUsdt(BETO, 6n * U, 10_000n * W, BLOCK - 80n, 32),
+      memberReplaced(ANA, OUTSIDER, BLOCK - 70n, 33),
+      memberReplaced(BETO, DIEGO, BLOCK - 60n, 34),
+      later,
+    ]);
+    expect(loss.byMember).toEqual(
+      new Map([
+        [OUTSIDER, 3n * W],
+        [DIEGO, 10n * W],
+      ]),
+    );
+    expect(loss.byConversion.get(key(later))?.members).toEqual([DIEGO]);
+  });
+
+  it("drops a member who leaves: their loss, and their share of the USDT waiting goes to nobody", () => {
+    const removed: FundEvent = { eventName: "MemberRemoved", args: { member: ANA, warsReturned: 0n, usdtReturned: 3n * U }, ...at(BLOCK - 70n, 34) };
+    const conv = conversion(9n * U, 14_970n * W, BLOCK - 60n, 35);
+    const loss = conversionLoss([
+      paidUsdt(ANA, 6n * U, 10_000n * W, BLOCK - 100n, 30),
+      conversion(6n * U, 9_997n * W, BLOCK - 95n, 31),
+      paidUsdt(ANA, 6n * U, 10_000n * W, BLOCK - 90n, 32),
+      paidUsdt(BETO, 6n * U, 10_000n * W, BLOCK - 80n, 33),
+      removed,
+      conv,
+    ]);
+    expect(loss.byMember).toEqual(new Map([[BETO, 15n * W]]));
+    expect(loss.byConversion.get(key(conv))).toEqual({ difference: 15n * W, members: [BETO] });
   });
 });
 
