@@ -249,6 +249,10 @@ export const en: Messages = {
     you: "You",
     contributed: (who: string, what: string) => `${sentenceStart(who)} contributed ${what}.`,
     converted: (usdt: string, pesos: string) => `I converted the ${usdt} that came in to ${pesos}.`,
+    convertedLess: (usdt: string, pesos: string, diff: string, who: string | null) =>
+      `I converted the ${usdt} that came in to ${pesos}, ${diff} less than they were worth when contributed. ${who === null ? "The members who contributed them cover that difference." : `${who} covers that difference.`}`,
+    convertedMore: (usdt: string, pesos: string, diff: string, who: string | null) =>
+      `I converted the ${usdt} that came in to ${pesos}, ${diff} more than they were worth when contributed. ${who === null ? "That difference goes to the members who contributed them." : `That difference goes to ${who}.`}`,
     convertedDetail: "I converted them and checked that the price was within 2 % of the dollar's reference price, as my rules say.",
     // What the group wrote goes in quotes in English: it stays as they wrote it, in Spanish (spec, 9.3).
     reimbursed: (amount: string, who: string, expense: string) => `I paid ${who} back ${amount} for “${expense}”.`,

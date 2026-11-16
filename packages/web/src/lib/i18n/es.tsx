@@ -302,6 +302,14 @@ export const es = {
     you: "Vos",
     contributed: (who: string, what: string) => `${sentenceStart(who)} aportó ${what}.`,
     converted: (usdt: string, pesos: string) => `Pasé a pesos los ${usdt} que entraron: ${pesos}.`,
+    /**
+     * When the conversion got a centavo or more under (Less) or over (More) what its USDT was credited at: `who` is the
+     * one member it was from, or null when it was several (conversion-loss design).
+     */
+    convertedLess: (usdt: string, pesos: string, diff: string, who: string | null) =>
+      `Pasé a pesos los ${usdt} que entraron: ${pesos}, ${diff} menos de lo que valían al aportarlos. ${who === null ? "Esa diferencia la ponen quienes los aportaron." : `Esa diferencia la pone ${who}.`}`,
+    convertedMore: (usdt: string, pesos: string, diff: string, who: string | null) =>
+      `Pasé a pesos los ${usdt} que entraron: ${pesos}, ${diff} más de lo que valían al aportarlos. ${who === null ? "Esa diferencia les queda a favor a quienes los aportaron." : `Esa diferencia le queda a favor a ${who}.`}`,
     // Plain words, no jargon (spec, 9): the exchange and the price feed stay out of what people read.
     convertedDetail: "Los cambié a pesos y revisé que el precio no se alejara más de 2 % del precio de referencia del dólar, como dicen mis reglas.",
     reimbursed: (amount: string, who: string, expense: string) => `Le devolví ${amount} a ${who} por ${expense}.`,

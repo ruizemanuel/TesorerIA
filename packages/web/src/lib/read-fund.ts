@@ -173,6 +173,7 @@ export async function loadFundScreen(
     memberCount: snapshot.members.length,
     proposals,
     giveBacks,
+    conversions: loss.byConversion,
     expenses: expenseRows,
     pending,
     // Movimientos shows a request while a proposal made in time could still carry it out (JOIN_REQUEST_REACH_DAYS).

@@ -5,7 +5,7 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CurrentUser } from "../src/lib/current-user";
 import type { Db } from "../src/lib/db/client";
 import { decisions, expenses, funds, joinRequests, memberships, operations, weekSummaries } from "../src/lib/db/schema";
-import { formatPesos } from "../src/lib/format";
+import { formatPesos, formatUsdt } from "../src/lib/format";
 import { JOIN_REQUEST_REACH_DAYS } from "../src/lib/join-requests";
 import { finishOperation, recordOperation } from "../src/lib/operations";
 import { HistoryGapError, loadFundScreen as loadScreen, loadPublicFundScreen } from "../src/lib/read-fund";
@@ -374,7 +374,11 @@ describe("loadFundScreen: what converting USDT lost (conversion-loss design)", (
       event("Contribution", { member: caroAccount, token: USDT, amount: 6n * USDT_UNIT, creditedWars: 10_000n * WARS }, BLOCK - 400n),
       event("Conversion", { usdtIn: 6n * USDT_UNIT, warsOut: 9_940n * WARS }, BLOCK - 390n),
     ]);
-    expect((await loadFundScreen(address, asViewer(caro)))!.view.rows[2]?.owed).toBe(60n * WARS);
+    const screen = (await loadFundScreen(address, asViewer(caro)))!;
+    expect(screen.view.rows[2]?.owed).toBe(60n * WARS);
+    expect(texts(screen).filter((text) => text.startsWith("Pasé a pesos"))).toEqual([
+      `Pasé a pesos los ${formatUsdt(6n * USDT_UNIT, "es")} que entraron: ${formatPesos(9_940n * WARS, "es")}, ${formatPesos(60n * WARS, "es")} menos de lo que valían al aportarlos. Esa diferencia la pone Caro.`,
+    ]);
   });
 });
 

@@ -594,6 +594,45 @@ describe("buildTimeline in English", () => {
   });
 });
 
+describe("buildTimeline: what a conversion got under or over its USDT's credit (conversion-loss design)", () => {
+  const conv = event("Conversion", { usdtIn: 10n * USDT_UNIT, warsOut: 16_050n * WARS }, BLOCK - 500n);
+  const key = `${conv.transactionHash}:${conv.logIndex}`;
+  const said = (difference: bigint, members: Address[], m = es) => timeline({ events: [conv], conversions: new Map([[key, { difference, members }]]), m })[0]?.text;
+  const ars = (text: string) => text.replaceAll("ARS ", `ARS${NBSP}`).replaceAll(" USDT", `${NBSP}USDT`);
+  const LOST = 195n * 10n ** 16n;
+  const GAINED = -441n * 10n ** 16n;
+
+  it("says in Spanish what it got under or over, and who covers or keeps it", () => {
+    expect(said(LOST, [ANA])).toBe($("Pasé a pesos los 10 USDT que entraron: $ 16.050, $ 1,95 menos de lo que valían al aportarlos. Esa diferencia la pone Ana."));
+    expect(said(GAINED, [ANA])).toBe(
+      $("Pasé a pesos los 10 USDT que entraron: $ 16.050, $ 4,41 más de lo que valían al aportarlos. Esa diferencia le queda a favor a Ana."),
+    );
+    expect(said(LOST, [ANA, BETO])).toBe(
+      $("Pasé a pesos los 10 USDT que entraron: $ 16.050, $ 1,95 menos de lo que valían al aportarlos. Esa diferencia la ponen quienes los aportaron."),
+    );
+    expect(said(GAINED, [ANA, BETO])).toBe(
+      $("Pasé a pesos los 10 USDT que entraron: $ 16.050, $ 4,41 más de lo que valían al aportarlos. Esa diferencia les queda a favor a quienes los aportaron."),
+    );
+  });
+
+  it("keeps today's sentence under a centavo, or for a conversion with no credited USDT", () => {
+    expect(said(10n ** 16n - 1n, [ANA])).toBe($("Pasé a pesos los 10 USDT que entraron: $ 16.050."));
+    expect(said(-(10n ** 16n) + 1n, [ANA])).toBe($("Pasé a pesos los 10 USDT que entraron: $ 16.050."));
+    expect(timeline({ events: [conv], conversions: new Map() })[0]?.text).toBe($("Pasé a pesos los 10 USDT que entraron: $ 16.050."));
+  });
+
+  it("says it in English too", () => {
+    expect(said(LOST, [ANA], en)).toBe(ars("I converted the 10 USDT that came in to ARS 16,050, ARS 1.95 less than they were worth when contributed. Ana covers that difference."));
+    expect(said(LOST, [ANA, BETO], en)).toBe(
+      ars("I converted the 10 USDT that came in to ARS 16,050, ARS 1.95 less than they were worth when contributed. The members who contributed them cover that difference."),
+    );
+    expect(said(GAINED, [ANA], en)).toBe(ars("I converted the 10 USDT that came in to ARS 16,050, ARS 4.41 more than they were worth when contributed. That difference goes to Ana."));
+    expect(said(GAINED, [ANA, BETO], en)).toBe(
+      ars("I converted the 10 USDT that came in to ARS 16,050, ARS 4.41 more than they were worth when contributed. That difference goes to the members who contributed them."),
+    );
+  });
+});
+
 describe("buildTimeline: asking to join a live fund (spec, 9.4)", () => {
   const LUCAS = getAddress("0x000000000000000000000000000000000000aaa4");
   const ASKED = new Date(NOW.getTime() - 3_600_000);

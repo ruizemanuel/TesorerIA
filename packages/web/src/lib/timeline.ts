@@ -1,4 +1,4 @@
-import { type FundEvent, type SkipCode, USDT, paidProposal } from "@tesoreria/agent";
+import { type ConversionDifference, type FundEvent, type SkipCode, USDT, paidProposal } from "@tesoreria/agent";
 import { type Address, type Hash, getAddress, isAddressEqual } from "viem";
 import { type BlockClock, blockTime, weekAt } from "./chain-time";
 import type { ExpenseStatus } from "./db/schema";
@@ -6,6 +6,9 @@ import { ProposalAction } from "./fund-abi";
 import { formatPesos, formatUsdt, upToCentavo } from "./format";
 import type { Messages } from "./i18n/messages";
 import { sameName } from "./same-name";
+
+/** A centavo, in wARS: a conversion that got less than this under or over its USDT's credit keeps the plain sentence. */
+const CENTAVO = 10n ** 16n;
 
 export type Actor = { kind: "agent" } | { kind: "member"; name: string } | { kind: "group" };
 
@@ -79,6 +82,7 @@ export function buildTimeline({
   memberCount,
   proposals,
   giveBacks = new Set(),
+  conversions = new Map(),
   expenses,
   pending,
   joinRequests = [],
@@ -107,6 +111,11 @@ export function buildTimeline({
   proposals: ReadonlyMap<bigint, ProposalState>;
   /** The proposals (by id) that gave a contribution back (spec, 7.3): they and their payments say so. */
   giveBacks?: ReadonlySet<bigint>;
+  /**
+   * By the Conversion's `${transactionHash}:${logIndex}`, what it got under or over what its USDT was credited and
+   * whose it was (conversionLoss, conversion-loss design).
+   */
+  conversions?: ReadonlyMap<string, ConversionDifference>;
   expenses: readonly TimelineExpense[];
   pending: readonly TimelinePending[];
   /** Who asked to join (members' screens only), and whether the fund has room for one more on the chain. */
@@ -154,12 +163,17 @@ export function buildTimeline({
       }
       case "Conversion": {
         const { usdtIn, warsOut } = event.args;
-        items.push({
-          ...base,
-          actor: { kind: "agent" },
-          text: t.converted(formatUsdt(usdtIn, m.locale), formatPesos(warsOut, m.locale)),
-          detail: t.convertedDetail,
-        });
+        const usdt = formatUsdt(usdtIn, m.locale);
+        const pesos = formatPesos(warsOut, m.locale);
+        const found = conversions.get(`${event.transactionHash}:${event.logIndex}`);
+        const size = found === undefined ? 0n : found.difference < 0n ? -found.difference : found.difference;
+        let text = t.converted(usdt, pesos);
+        if (found !== undefined && size >= CENTAVO) {
+          const whose = found.members.length === 1 ? who(found.members[0]!) : null;
+          const said = found.difference > 0n ? t.convertedLess : t.convertedMore;
+          text = said(usdt, pesos, formatPesos(size, m.locale), whose);
+        }
+        items.push({ ...base, actor: { kind: "agent" }, text, detail: t.convertedDetail });
         break;
       }
       case "Reimbursement": {
