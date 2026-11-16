@@ -148,10 +148,23 @@ export function conversionLoss(events: readonly FundEvent[]): ConversionLoss {
         if (returned >= waiting) {
           queue.length = 0;
         } else if (returned > 0n) {
+          // Floored shares take out a little less than `returned`: the rest comes off the latest tranches, so what waits
+          // is exactly what the fund still holds and no speck is left for a later conversion to take first.
+          let out = 0n;
           for (const tranche of queue) {
+            const usdt = (tranche.usdt * returned) / waiting;
             tranche.credited -= (tranche.credited * returned) / waiting;
-            tranche.usdt -= (tranche.usdt * returned) / waiting;
+            tranche.usdt -= usdt;
+            out += usdt;
           }
+          for (let i = queue.length - 1; i >= 0 && out < returned; i--) {
+            const tranche = queue[i]!;
+            const usdt = tranche.usdt < returned - out ? tranche.usdt : returned - out;
+            tranche.credited -= (tranche.credited * usdt) / tranche.usdt;
+            tranche.usdt -= usdt;
+            out += usdt;
+          }
+          for (let i = queue.length - 1; i >= 0; i--) if (queue[i]!.usdt === 0n) queue.splice(i, 1);
         }
         for (const tranche of queue) if (tranche.member === gone) tranche.member = null;
         byMember.delete(gone);

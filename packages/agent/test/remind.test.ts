@@ -215,6 +215,23 @@ describe("conversionLoss (conversion-loss design)", () => {
     expect(loss.byMember).toEqual(new Map([[BETO, 15n * W]]));
     expect(loss.byConversion.get(key(conv))).toEqual({ difference: 15n * W, members: [BETO] });
   });
+
+  it("takes out exactly what a member who leaves took, with uneven amounts waiting, so no speck is left to a later conversion", () => {
+    // 6,000000 and 6,000001 USDT waiting, 3 USDT returned: floored shares would leave a micro-USDT the fund no longer
+    // holds, and each later conversion would take it first, naming two members where there was one.
+    const all = conversion(9_000_001n, 15_000n * W, BLOCK - 60n, 35);
+    const later = conversion(6n * U, 9_994n * W, BLOCK - 40n, 37);
+    const loss = conversionLoss([
+      paidUsdt(BETO, 6_000_000n, 10_000n * W, BLOCK - 90n, 31),
+      paidUsdt(CARLA, 6_000_001n, 10_000n * W, BLOCK - 80n, 32),
+      { eventName: "MemberRemoved", args: { member: ANA, warsReturned: 0n, usdtReturned: 3n * U }, ...at(BLOCK - 70n, 33) },
+      all,
+      paidUsdt(DIEGO, 6n * U, 10_000n * W, BLOCK - 50n, 36),
+      later,
+    ]);
+    expect(loss.byConversion.get(key(all))?.members).toEqual([BETO, CARLA]);
+    expect(loss.byConversion.get(key(later))).toEqual({ difference: 6n * W, members: [DIEGO] });
+  });
 });
 
 describe("closeShares", () => {
