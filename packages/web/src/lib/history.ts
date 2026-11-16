@@ -1,5 +1,5 @@
-import { type FundEvent, type FundSnapshot, RPC_LOG_RANGE } from "@tesoreria/agent";
-import { type Address, getAddress } from "viem";
+import { type FundEvent, type FundSnapshot, RPC_LOG_RANGE, USDT } from "@tesoreria/agent";
+import { type Address, getAddress, isAddressEqual } from "viem";
 
 /** The history read doesn't add up: some event is missing, so nothing is shown from it. */
 export class HistoryGapError extends Error {
@@ -11,13 +11,17 @@ export class HistoryGapError extends Error {
  * - only reimbursements add to spentInWeek (Fund.sol), so this week's Reimbursement events must sum to it;
  * - each member's Contribution events must sum to what the contract says they contributed, following a replaced
  *   member's to who took their place (Fund.sol moves it) and leaving out one who left (it's zeroed);
- * - there must be one ProposalCreated per proposal.
+ * - there must be one ProposalCreated per proposal;
+ * - the USDT contributed, less what conversions, members who left and closing took out, can't be more than the fund
+ *   holds: a missing Conversion would make what converting each member's USDT lost come out wrong (conversion-loss
+ *   design). USDT sent straight to the fund only adds to what it holds, so it's a bound, not an equality.
  * Blockscout once answered a day behind for logs by address while its block number was current (3/11): only the
  * contract's own counts tell a whole history from one with a hole.
  */
 function historyGap(snapshot: FundSnapshot, events: readonly FundEvent[]): string | null {
   let reimbursed = 0n;
   let proposals = 0n;
+  let usdtLeft = 0n;
   const contributed = new Map<Address, bigint>();
   for (const e of events) {
     switch (e.eventName) {
@@ -30,16 +34,28 @@ function historyGap(snapshot: FundSnapshot, events: readonly FundEvent[]): strin
       case "Contribution": {
         const member = getAddress(e.args.member);
         contributed.set(member, (contributed.get(member) ?? 0n) + e.args.creditedWars);
+        if (isAddressEqual(e.args.token, USDT)) usdtLeft += e.args.amount;
         break;
       }
+      case "Conversion":
+        usdtLeft -= e.args.usdtIn;
+        break;
+      case "FundClosed":
+      case "RemainderDistributed":
+        usdtLeft -= e.args.usdtBalance;
+        break;
       case "MemberReplaced":
         contributed.set(getAddress(e.args.newMember), contributed.get(getAddress(e.args.oldMember)) ?? 0n);
         contributed.delete(getAddress(e.args.oldMember));
         break;
       case "MemberRemoved":
         contributed.delete(getAddress(e.args.member));
+        usdtLeft -= e.args.usdtReturned;
         break;
     }
+  }
+  if (usdtLeft > snapshot.usdtBalance) {
+    return `USDT contributed less what left adds up to ${usdtLeft}, more than the fund holds (${snapshot.usdtBalance})`;
   }
   if (reimbursed !== snapshot.spentThisWeek) {
     return `This week's reimbursements add up to ${reimbursed}, but spentInWeek is ${snapshot.spentThisWeek}`;
