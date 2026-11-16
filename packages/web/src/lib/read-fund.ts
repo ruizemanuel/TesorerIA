@@ -1,4 +1,4 @@
-import { FUND_FACTORY_BLOCK, type FundEvent, type FundSnapshot, MIN_CONVERSION_USDT, givenBack, joinWeeks, readFund, readFundEvents } from "@tesoreria/agent";
+import { FUND_FACTORY_BLOCK, type FundEvent, type FundSnapshot, MIN_CONVERSION_USDT, conversionLoss, givenBack, joinWeeks, readFund, readFundEvents } from "@tesoreria/agent";
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { type Address, getAddress, zeroAddress } from "viem";
 import { celoClient, logReader, nodeLogReader } from "./chain";
@@ -145,6 +145,9 @@ export async function loadFundScreen(
     text: weekSummaryText(readFacts(row.facts), { fundName: fund.name, agreedExpense: fund.agreedExpense, names, link }, m),
   }));
 
+  // What converting each member's USDT got under or over what it was credited (conversion-loss design): the dues and
+  // Movements both read it.
+  const loss = conversionLoss(events);
   const view = buildFundView({
     snapshot,
     name: fund.name,
@@ -153,6 +156,7 @@ export async function loadFundScreen(
     weeklyFee: fund.weeklyFee,
     joined,
     givenBack: givenBack(events, giveBacks),
+    conversionLoss: loss.byMember,
     names,
     viewer: publicView ? null : (viewer?.account ?? null),
     m,

@@ -1,4 +1,4 @@
-import { type FundEvent, type FundSnapshot, WARS as WARS_TOKEN, type WeekSummaryFacts } from "@tesoreria/agent";
+import { type FundEvent, type FundSnapshot, USDT, WARS as WARS_TOKEN, type WeekSummaryFacts } from "@tesoreria/agent";
 import { and, eq, sql } from "drizzle-orm";
 import { type Address, type Hash, getAddress, isAddressEqual, pad, toHex, zeroAddress } from "viem";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -361,6 +361,20 @@ describe("loadFundScreen: the public view", () => {
       await pass(caro.id, "d2");
       expect((await loadFundScreen(address, asViewer(caro), { publicView: true }))!.cashOutOnItsWay).toBe(false);
     });
+  });
+});
+
+describe("loadFundScreen: what converting USDT lost (conversion-loss design)", () => {
+  it("takes it off the dues of the member whose USDT it was", async () => {
+    const address = await liveFund();
+    const caroAccount = getAddress(caro.account);
+    // By week 2 Caro put in 20.000 in wARS and 6 USDT credited at 10.000, which the agent converted into 9.940.
+    setHistory([
+      event("Contribution", { member: caroAccount, token: WARS_TOKEN, amount: 20_000n * WARS, creditedWars: 20_000n * WARS }, BLOCK - 500n),
+      event("Contribution", { member: caroAccount, token: USDT, amount: 6n * USDT_UNIT, creditedWars: 10_000n * WARS }, BLOCK - 400n),
+      event("Conversion", { usdtIn: 6n * USDT_UNIT, warsOut: 9_940n * WARS }, BLOCK - 390n),
+    ]);
+    expect((await loadFundScreen(address, asViewer(caro)))!.view.rows[2]?.owed).toBe(60n * WARS);
   });
 });
 

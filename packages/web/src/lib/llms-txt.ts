@@ -90,7 +90,7 @@ Each member has an account on this site: a Safe smart account on Celo, which the
 
 ### USDT contributions
 
-A USDT contribution is credited to the member at once, in wARS, at the pool's ${TWAP_WINDOW / 60}-minute TWAP: that's \`creditedWars\` in \`Contribution\`, and it's what counts toward their dues. The agent then converts the USDT with \`convert\`, whose minimum can't be more than ${MAX_DEVIATION_PERCENT} % below the TWAP quote. What the swap gets is \`warsOut\` in \`Conversion\`, and the fund absorbs the difference from what was credited.
+A USDT contribution is credited to the member at once, in wARS, at the pool's ${TWAP_WINDOW / 60}-minute TWAP: that's \`creditedWars\` in \`Contribution\`, and what the contract counts, also when it splits the fund at the close. The agent then converts the USDT with \`convert\`, whose minimum can't be more than ${MAX_DEVIATION_PERCENT} % below the TWAP quote. What the swap gets is \`warsOut\` in \`Conversion\`. Toward a member's dues, this site counts each USDT contribution at what its conversion got, matching conversions to USDT contributions in order of arrival: the member who contributed that USDT covers the difference from what was credited, or keeps it if the swap got more. Until it's converted, it counts at what was credited. What's left to pay under 0.5 % of the weekly fee isn't called a debt; it goes with the next week's.
 
 ## Agent
 

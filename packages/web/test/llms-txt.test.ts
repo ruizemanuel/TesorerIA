@@ -120,12 +120,15 @@ describe("/llms.txt: the site for an agent that reads it (llmstxt.org)", () => {
     expect(text).toContain("its week N is the contract's week N − 1");
   });
 
-  it("says a USDT contribution is credited at the pool's TWAP, and the fund absorbs what the conversion gets below it", async () => {
+  it("says a USDT contribution is credited at the pool's TWAP, and counts toward dues at what its conversion got", async () => {
     const text = await GET().text();
     expect(text).toContain("30-minute TWAP");
     expect(text).toContain("`creditedWars` in `Contribution`");
     expect(text).toContain("`warsOut` in `Conversion`");
     expect(text).toContain("more than 2 % below");
+    expect(text).toContain("what its conversion got");
+    expect(text).toContain("covers the difference");
+    expect(text).not.toContain("the fund absorbs");
   });
 
   it("lists the functions the site and its agent call, with their parameters, who may call them and propose's actions", async () => {

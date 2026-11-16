@@ -49,6 +49,7 @@ export function buildFundView({
   weeklyFee,
   joined,
   givenBack = new Map(),
+  conversionLoss = new Map(),
   names,
   viewer,
   m,
@@ -62,6 +63,8 @@ export function buildFundView({
   joined: ReadonlyMap<Address, bigint>;
   /** What each member was given back of their contributions (givenBack, spec 7.3): it doesn't count as paid ahead. */
   givenBack?: ReadonlyMap<Address, bigint>;
+  /** What converting each member's USDT lost, negative if it gained (conversionLoss): it doesn't count as put in either. */
+  conversionLoss?: ReadonlyMap<Address, bigint>;
   /** First names by checksummed account; a member without one shows as "Miembro N" ("Member N" in English). */
   names: ReadonlyMap<Address, string>;
   viewer: Address | null;
@@ -69,7 +72,7 @@ export function buildFundView({
   m: Messages;
 }): FundView {
   const me = viewer === null ? null : getAddress(viewer);
-  const dues = memberDues({ fund: snapshot, weeklyFee, joined, givenBack });
+  const dues = memberDues({ fund: snapshot, weeklyFee, joined, givenBack, conversionLoss });
   const rows = dues.map(({ member, owed }, i) => {
     const address = getAddress(member);
     return { position: i + 1, member: address, name: names.get(address) ?? m.common.member(i + 1), isMe: address === me, owed };

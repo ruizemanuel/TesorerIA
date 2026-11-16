@@ -97,6 +97,45 @@ describe("buildFundView", () => {
     expect(given(20_000n * WARS).rows[0]?.owed).toBe(9_987_660_000_000_000_000_000n);
   });
 
+  it("counts what converting your USDT lost as not put in, while your part stays the contract's (conversion-loss design)", () => {
+    const contributed = [30_000n * WARS, 30_000n * WARS, 30_000n * WARS];
+    const lost = (loss: bigint) =>
+      buildFundView({
+        snapshot: snapshot({ contributed, totalContributed: 90_000n * WARS }),
+        name: "Fútbol de los jueves",
+        agreedExpense: "la cancha",
+        balance: 100_000n * WARS,
+        weeklyFee: 10_000n * WARS,
+        joined: new Map(),
+        conversionLoss: new Map([[ANA, loss]]),
+        names: NAMES,
+        viewer: ANA,
+        m: es,
+      });
+    expect(lost(60n * WARS).rows[0]?.owed).toBe(60n * WARS);
+    expect(lost(60n * WARS).me?.owed).toBe(60n * WARS);
+    expect(lost(60n * WARS).me?.share).toBe(lost(0n).me?.share);
+  });
+
+  it("after paying what Aportar asked, a conversion that lost up to 0,3 % leaves no debt and nothing ahead; one that lost more than that and $ 50 does", () => {
+    // Week 0: Ana sent the fee plus Aportar's 0,3 %, credited at 10.030.
+    const paid = (loss: bigint) =>
+      buildFundView({
+        snapshot: snapshot({ week: 0n, contributed: [10_030n * WARS, 10_000n * WARS, 10_000n * WARS], totalContributed: 30_030n * WARS }),
+        name: "Fútbol de los jueves",
+        agreedExpense: "la cancha",
+        balance: 30_000n * WARS,
+        weeklyFee: 10_000n * WARS,
+        joined: new Map(),
+        conversionLoss: new Map([[ANA, loss]]),
+        names: NAMES,
+        viewer: ANA,
+        m: es,
+      }).me;
+    expect(paid((2_407n * WARS) / 100n)).toMatchObject({ owed: 0n, ahead: 0n }); // 0,24 %, the worst measured
+    expect(paid(100n * WARS)).toMatchObject({ owed: 70n * WARS, ahead: 0n });
+  });
+
   it("says what's left of the week's cap, never below zero", () => {
     expect(view({ spentThisWeek: 45_000n * WARS }).leftThisWeek).toBe(15_000n * WARS);
     expect(view({ spentThisWeek: 70_000n * WARS, weeklyCap: 60_000n * WARS }).leftThisWeek).toBe(0n);
