@@ -294,7 +294,8 @@ contract FundV2 is ReentrancyGuardTransient, IUniswapV3SwapCallback {
     // ---------------------------------------------------------------- Conversion (agent)
     /// @notice Swaps the dollars of several members for the currency in one swap, and credits each of them their share
     ///         of what arrives, net of the fee. `minCurrencyOut` can't be more than 2% below the TWAP quote of the
-    ///         whole `sum(dollarAmounts)`, and what arrives can't be less than `minCurrencyOut`.
+    ///         whole `sum(dollarAmounts)`, and what arrives can't be less than `minCurrencyOut`. It reverts with
+    ///         `InsufficientOutput` if the pool takes less than all of the dollars (a partial fill).
     /// @dev Each member's share is `received * amount / total`, rounded down, so what is credited plus what is set
     ///      aside as the fee never exceeds `received`. What rounding leaves over belongs to no member: it stays in the
     ///      fund, in what it can pay or split.
@@ -315,6 +316,7 @@ contract FundV2 is ReentrancyGuardTransient, IUniswapV3SwapCallback {
 
         bool zeroForOne = _dollarIsToken0;
         uint256 balanceBefore = currency.balanceOf(address(this));
+        uint256 dollarBefore = dollar.balanceOf(address(this));
         _swapDollarLimit = total;
         pool.swap(
             address(this),
@@ -324,6 +326,10 @@ contract FundV2 is ReentrancyGuardTransient, IUniswapV3SwapCallback {
             ""
         );
         _swapDollarLimit = 0;
+        // A pool that runs out of liquidity before the price limit fills only part of the swap. The members were
+        // debited for all of `total`, so the swap must have taken all of it, or what is left would be dollars no
+        // member has pending.
+        if (dollarBefore - dollar.balanceOf(address(this)) != total) revert InsufficientOutput();
         received = currency.balanceOf(address(this)) - balanceBefore;
         if (received < minCurrencyOut) revert InsufficientOutput();
 

@@ -9,6 +9,7 @@ import {FundV2} from "../../src/FundV2.sol";
 import {MockERC20} from "../mocks/MockERC20.sol";
 import {MockPool} from "../mocks/MockPool.sol";
 import {Attacker, MockPoolHostile} from "../mocks/MockPoolHostile.sol";
+import {MockPoolPartialFill} from "./MockPoolPartialFill.sol";
 
 contract FundV2ConversionTest is BaseFundV2Test {
     /// The fund of every test: m0 has 60 pending dollars and m1 has 40. It has room under its cap for the fuzz test's
@@ -245,6 +246,42 @@ contract FundV2ConversionTest is BaseFundV2Test {
         assertEq(fund.pendingDollar(members[0]), 60e6);
         assertEq(fund.pendingDollar(members[1]), 40e6);
         assertEq(dollar.balanceOf(address(fund)), 100e6);
+    }
+
+    /// A pool that fills only part of the swap (here 99%, so what arrives still clears the minimum): the members were
+    /// debited for the whole total, so a conversion that doesn't take all of it from the fund reverts, and no one's
+    /// pending dollars are left behind as dollars nobody can convert.
+    function test_partialFillReverts() public {
+        MockPoolPartialFill shallow = new MockPoolPartialFill(address(currency), address(dollar), -350142);
+        currency.mint(address(shallow), 1_000_000_000e18);
+        uniFactory.setPool(address(currency), address(dollar), shallow.fee(), address(shallow));
+        pool = MockPool(address(shallow));
+        fund = _create(_roomyParams());
+        _contributeDollar(members[0], 60e6);
+        _contributeDollar(members[1], 40e6);
+
+        uint256 floor = _out(100e6) * 9_800 / 10_000;
+        shallow.setFill(9_900);
+        assertGe(_out(100e6) * 9_900 / 10_000, floor); // the currency that arrives would pass the minimum
+
+        vm.prank(agent);
+        vm.expectRevert(FundV2.InsufficientOutput.selector);
+        fund.convert(_list(members[0], members[1]), _amounts(60e6, 40e6), floor);
+
+        assertEq(fund.pendingDollar(members[0]), 60e6);
+        assertEq(fund.pendingDollar(members[1]), 40e6);
+        assertEq(fund.totalPendingDollar(), 100e6);
+        assertEq(dollar.balanceOf(address(fund)), 100e6);
+        assertEq(fund.contributed(members[0]), 0);
+        assertEq(fund.contributed(members[1]), 0);
+
+        // The same pool filling all of it converts as usual.
+        shallow.setFill(10_000);
+        vm.prank(agent);
+        uint256 received = fund.convert(_list(members[0], members[1]), _amounts(60e6, 40e6), floor);
+        assertEq(received, _out(100e6));
+        assertEq(fund.totalPendingDollar(), 0);
+        assertEq(dollar.balanceOf(address(fund)), 0);
     }
 
     // ---------------------------------------------------------------- The swap's callback
