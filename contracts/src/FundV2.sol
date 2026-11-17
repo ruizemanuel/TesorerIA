@@ -600,33 +600,38 @@ contract FundV2 is ReentrancyGuardTransient, IUniswapV3SwapCallback {
         emit FundClosed(bc, bd);
     }
 
-    /// @dev Pays each member their own pending dollars, then splits what the fund can pay in the currency and what is
-    ///      left of the dollar among the members in proportion to contributions (equally if no one contributed). The
-    ///      fee set aside is left in the contract for `payFee`. Returns what the fund could pay in the currency and
-    ///      its dollar balance, both read before the split. Rounding dust stays in the contract.
+    // ---------------------------------------------------------------- After closing
+    /// @notice Splits whatever reached the fund after it closed (for example, an exchange withdrawal that was still
+    ///         in transit) with the same rule as the close. The fee set aside is left for `payFee`. Anyone can call it.
+    function distributeRemainder() external nonReentrant {
+        if (!closed) revert FundNotClosed();
+        (uint256 bc, uint256 bd) = _split();
+        if (bc == 0 && bd == 0) revert ZeroAmount();
+        emit RemainderDistributed(bc, bd);
+    }
+
+    /// @dev Returns each member's own pending dollars first, then splits what the fund can pay in the currency, and
+    ///      what is left of the dollar (dollars no member has pending), among the members in proportion to
+    ///      contributions (equally if no one contributed). A member gets their pending dollars and their part of the
+    ///      rest in one transfer. The fee set aside is left in the contract for `payFee`, and so is the rounding dust
+    ///      (under 1 wei per member), which the next `distributeRemainder` splits along with what arrived. Returns
+    ///      what the fund could pay in the currency and its dollar balance, both read before the split. A fund with no
+    ///      dollar never calls it.
     function _split() internal returns (uint256 bc, uint256 bd) {
         bc = availableCurrency();
-        uint256 n = _members.length;
-        bool hasDollar = address(dollar) != address(0);
-        uint256 leftDollar = 0;
-        if (hasDollar) {
+        uint256 stray = 0;
+        if (address(dollar) != address(0)) {
             bd = dollar.balanceOf(address(this));
-            for (uint256 i; i < n; ++i) {
-                address m = _members[i];
-                uint256 pending = pendingDollar[m];
-                if (pending > 0) {
-                    pendingDollar[m] = 0;
-                    dollar.safeTransfer(m, pending);
-                }
-            }
+            stray = bd - totalPendingDollar;
             totalPendingDollar = 0;
-            leftDollar = dollar.balanceOf(address(this));
         }
+        uint256 n = _members.length;
         uint256 total = totalContributed;
         for (uint256 i; i < n; ++i) {
             address m = _members[i];
             uint256 c = total == 0 ? bc / n : bc * contributed[m] / total;
-            uint256 d = total == 0 ? leftDollar / n : leftDollar * contributed[m] / total;
+            uint256 d = pendingDollar[m] + (total == 0 ? stray / n : stray * contributed[m] / total);
+            delete pendingDollar[m];
             if (c > 0) currency.safeTransfer(m, c);
             if (d > 0) dollar.safeTransfer(m, d);
         }
