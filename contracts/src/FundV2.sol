@@ -5,6 +5,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 import {IUniswapV3Pool} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
+import {OracleLibrary} from "@uniswap/v3-periphery/contracts/libraries/OracleLibrary.sol";
 
 /// @title TesorerIA fund, version 2
 /// @notice A group's shared fund in any wFIAT (its currency). No one in the group holds the money: the agent can only
@@ -220,9 +221,29 @@ contract FundV2 is ReentrancyGuardTransient {
         return currency.balanceOf(address(this)) - feeOwed;
     }
 
-    /// @notice The fund's total balance in the currency.
+    /// @notice How much of the currency `dollarAmount` is worth at the pool's 30-minute TWAP.
+    function quoteDollar(uint256 dollarAmount) public view returns (uint256) {
+        if (address(dollar) == address(0)) revert NoDollar();
+        if (dollarAmount == 0) return 0;
+        if (dollarAmount > type(uint128).max) revert InvalidParams();
+        return OracleLibrary.getQuoteAtTick(_averageTick(), uint128(dollarAmount), address(dollar), address(currency));
+    }
+
+    /// @notice The fund's total balance in the currency: what it can pay or split, plus every dollar it holds (the
+    ///         pending ones and any sent to it directly) valued at the TWAP. A fund with no dollar never reads a pool.
     function balanceInCurrency() public view returns (uint256) {
-        return availableCurrency();
+        uint256 available = availableCurrency();
+        if (address(dollar) == address(0)) return available;
+        return available + quoteDollar(dollar.balanceOf(address(this)));
+    }
+
+    function _averageTick() internal view returns (int24 t) {
+        uint32[] memory secondsAgos = new uint32[](2);
+        secondsAgos[0] = TWAP_WINDOW;
+        (int56[] memory tickCumulatives,) = pool.observe(secondsAgos);
+        int56 delta = tickCumulatives[1] - tickCumulatives[0];
+        t = int24(delta / int56(uint56(TWAP_WINDOW)));
+        if (delta < 0 && (delta % int56(uint56(TWAP_WINDOW)) != 0)) t--;
     }
 
     // ---------------------------------------------------------------- Contributions
@@ -237,6 +258,17 @@ contract FundV2 is ReentrancyGuardTransient {
         totalContributed += credited;
         if (balanceInCurrency() > balanceCap) revert BalanceCapExceeded();
         emit Contribution(msg.sender, address(currency), received, credited);
+    }
+
+    /// @notice Contribute `amount` of the dollar. It is held as the member's pending dollars, and is credited to them
+    ///         (net of the fee) only when the agent converts it into the currency.
+    function contributeDollar(uint256 amount) external onlyMember whenOpen nonReentrant {
+        if (address(dollar) == address(0)) revert NoDollar();
+        uint256 received = _pullTokens(dollar, amount);
+        pendingDollar[msg.sender] += received;
+        totalPendingDollar += received;
+        if (balanceInCurrency() > balanceCap) revert BalanceCapExceeded();
+        emit Contribution(msg.sender, address(dollar), received, 0);
     }
 
     /// @dev Measures what arrived by balance difference, within the call (the spec's CIP-64 rule).

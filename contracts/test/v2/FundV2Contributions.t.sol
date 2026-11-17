@@ -37,6 +37,26 @@ contract FundV2ContributionsTest is BaseFundV2Test {
         assertEq(fund.availableCurrency(), 10_000e18);
     }
 
+    /// CIP-64 rule: the fund credits and takes the fee on what actually arrived, measured by balance difference,
+    /// never on the amount sent.
+    function test_contributeCreditsOnlyWhatArrivesWithATransferFee() public {
+        currency.setFeeBps(100); // 1% never arrives
+        currency.mint(members[0], 10_000e18);
+        vm.startPrank(members[0]);
+        currency.approve(address(fund), 10_000e18);
+        uint256 fee = 9_900e18 * FEE_BPS / 10_000;
+        vm.expectEmit(true, true, false, true, address(fund));
+        emit FundV2.Contribution(members[0], address(currency), 9_900e18, 9_900e18 - fee);
+        fund.contribute(10_000e18);
+        vm.stopPrank();
+
+        assertEq(currency.balanceOf(address(fund)), 9_900e18);
+        assertEq(fund.feeOwed(), fee);
+        assertEq(fund.contributed(members[0]), 9_900e18 - fee);
+        assertEq(fund.totalContributed(), 9_900e18 - fee);
+        assertEq(fund.availableCurrency(), 9_900e18 - fee);
+    }
+
     function test_balanceCapCountsAvailableOnly() public {
         uint256 a = BALANCE_CAP * 10_000 / 9_975;
         _contribute(members[0], a);

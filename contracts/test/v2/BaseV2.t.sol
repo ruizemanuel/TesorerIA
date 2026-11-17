@@ -84,4 +84,13 @@ abstract contract BaseFundV2Test is Test {
         fund.contribute(amount);
         vm.stopPrank();
     }
+
+    /// `m` contributes `amount` of the dollar to `fund`, minted for the occasion. It stays pending until converted.
+    function _contributeDollar(address m, uint256 amount) internal {
+        dollar.mint(m, amount);
+        vm.startPrank(m);
+        dollar.approve(address(fund), amount);
+        fund.contributeDollar(amount);
+        vm.stopPrank();
+    }
 }
