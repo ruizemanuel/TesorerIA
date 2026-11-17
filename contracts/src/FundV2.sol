@@ -243,10 +243,21 @@ contract FundV2 is ReentrancyGuardTransient, IUniswapV3SwapCallback {
 
     /// @notice The fund's total balance in the currency: what it can pay or split, plus every dollar it holds (the
     ///         pending ones and any sent to it directly) valued at the TWAP. A fund with no dollar never reads a pool.
+    /// @dev A full-value view only. What `balanceCap` limits is narrower: see `_requireUnderCap`.
     function balanceInCurrency() public view returns (uint256) {
         uint256 available = availableCurrency();
         if (address(dollar) == address(0)) return available;
         return available + quoteDollar(dollar.balanceOf(address(this)));
+    }
+
+    /// @dev Reverts with `BalanceCapExceeded` if what counts toward `balanceCap` is above it: what the fund can pay
+    ///      plus the pending dollars at the TWAP. Dollars sent to the fund directly belong to no one, so they never
+    ///      count and can't keep members from contributing. With nothing pending, and in a fund with no dollar, it
+    ///      never reads a pool.
+    function _requireUnderCap() private view {
+        uint256 counted = availableCurrency();
+        if (address(dollar) != address(0)) counted += quoteDollar(totalPendingDollar);
+        if (counted > balanceCap) revert BalanceCapExceeded();
     }
 
     function _averageTick() internal view returns (int24 t) {
@@ -260,7 +271,8 @@ contract FundV2 is ReentrancyGuardTransient, IUniswapV3SwapCallback {
 
     // ---------------------------------------------------------------- Contributions
     /// @notice Contribute `amount` of the currency. The fee is set aside from what arrives, and the rest is credited
-    ///         to the member.
+    ///         to the member. It reverts with `BalanceCapExceeded` if the fund then holds more than `balanceCap`, counting
+    ///         the available currency and the pending dollars (not dollars sent to the fund directly).
     function contribute(uint256 amount) external onlyMember whenOpen nonReentrant {
         uint256 received = _pullTokens(currency, amount);
         uint256 fee = received * feeBps / BPS;
@@ -268,18 +280,19 @@ contract FundV2 is ReentrancyGuardTransient, IUniswapV3SwapCallback {
         feeOwed += fee;
         contributed[msg.sender] += credited;
         totalContributed += credited;
-        if (balanceInCurrency() > balanceCap) revert BalanceCapExceeded();
+        _requireUnderCap();
         emit Contribution(msg.sender, address(currency), received, credited);
     }
 
     /// @notice Contribute `amount` of the dollar. It is held as the member's pending dollars, and is credited to them
-    ///         (net of the fee) only when the agent converts it into the currency.
+    ///         (net of the fee) only when the agent converts it into the currency. The cap check is the one of
+    ///         `contribute`.
     function contributeDollar(uint256 amount) external onlyMember whenOpen nonReentrant {
         if (address(dollar) == address(0)) revert NoDollar();
         uint256 received = _pullTokens(dollar, amount);
         pendingDollar[msg.sender] += received;
         totalPendingDollar += received;
-        if (balanceInCurrency() > balanceCap) revert BalanceCapExceeded();
+        _requireUnderCap();
         emit Contribution(msg.sender, address(dollar), received, 0);
     }
 

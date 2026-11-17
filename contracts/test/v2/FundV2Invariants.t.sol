@@ -55,8 +55,8 @@ contract FundV2Handler is CommonBase, StdCheats, StdUtils {
         if (room == 0) return;
         amount = _amount(amount, _dollarsWorth(room));
         // The same cap check the fund makes, so a quote that rounds up past the room doesn't revert.
-        uint256 held = dollar.balanceOf(address(fund)) + amount;
-        if (fund.availableCurrency() + fund.quoteDollar(held) > fund.balanceCap()) return;
+        uint256 pending = fund.totalPendingDollar() + amount;
+        if (fund.availableCurrency() + fund.quoteDollar(pending) > fund.balanceCap()) return;
         address m = _member(seed);
         dollar.mint(m, amount);
         vm.startPrank(m);
@@ -65,11 +65,11 @@ contract FundV2Handler is CommonBase, StdCheats, StdUtils {
         vm.stopPrank();
     }
 
-    /// Dollars no member contributed: sent to the fund address directly, they belong to no one's pending.
+    /// Dollars no member contributed: sent to the fund address directly, they belong to no one's pending. They don't
+    /// count toward the balance cap, so they can be worth far more than the room left, and the contributions the handler
+    /// goes on making (which fail the run if the fund refuses them) show that they never keep the fund from taking any.
     function sendStrayDollar(uint256 amount) external {
-        uint256 room = _room();
-        if (room == 0) return;
-        dollar.mint(address(fund), _amount(amount, _dollarsWorth(room)));
+        dollar.mint(address(fund), _amount(amount, _dollarsWorth(fund.balanceCap())));
     }
 
     // ---------------------------------------------------------------- Agent
@@ -293,9 +293,10 @@ contract FundV2Handler is CommonBase, StdCheats, StdUtils {
         return (address(0), false);
     }
 
-    /// How much the fund can still take in before it passes its balance cap, in the currency.
+    /// How much the fund can still take in before it passes its balance cap, in the currency. The cap counts what the
+    /// fund can pay and the pending dollars, never the dollars sent to it directly.
     function _room() internal view returns (uint256) {
-        uint256 balance = fund.balanceInCurrency();
+        uint256 balance = fund.availableCurrency() + fund.quoteDollar(fund.totalPendingDollar());
         uint256 cap = fund.balanceCap();
         return balance >= cap ? 0 : cap - balance;
     }

@@ -84,6 +84,73 @@ contract FundV2DollarTest is BaseFundV2Test {
         vm.stopPrank();
     }
 
+    /// The cap counts the available currency and the PENDING dollars at the TWAP, on `contribute` as on
+    /// `contributeDollar`.
+    function test_pendingDollarsCountTowardTheCapOnContribute() public {
+        _contributeDollar(members[0], 150e6); // ~ 240,882 pending
+        _contribute(members[1], 200_000e18); // 199,500 more: ~ 440,382, under the 450,000 cap
+
+        // Another 20,000 (19,950 net) would take it to ~ 460,332.
+        currency.mint(members[2], 20_000e18);
+        vm.startPrank(members[2]);
+        currency.approve(address(fund), 20_000e18);
+        assertGt(fund.availableCurrency() + _net(20_000e18) + fund.quoteDollar(150e6), BALANCE_CAP);
+        vm.expectRevert(FundV2.BalanceCapExceeded.selector);
+        fund.contribute(20_000e18);
+        vm.stopPrank();
+    }
+
+    /// Dollars sent to the fund directly belong to no one and are never counted toward the cap, so no amount of them can
+    /// keep members from contributing. `balanceInCurrency` is the full-value view and still counts them.
+    function test_strayDollarsNeverCountTowardBalanceCap() public {
+        dollar.mint(address(fund), 1_000e6); // ~ 1.6 million wARS, far above the 450,000 cap
+        assertGt(fund.balanceInCurrency(), BALANCE_CAP);
+
+        _contribute(members[0], 1_000e18);
+        _contributeDollar(members[1], 10e6);
+        assertEq(fund.contributed(members[0]), _net(1_000e18));
+        assertEq(fund.pendingDollar(members[1]), 10e6);
+        assertEq(fund.totalPendingDollar(), 10e6);
+        assertEq(dollar.balanceOf(address(fund)), 1_010e6);
+    }
+
+    /// With dollars sent directly the cap still binds: it counts what is available and what is pending, and nothing
+    /// else.
+    function test_capStillBindsWhenStrayDollarsAreThere() public {
+        dollar.mint(address(fund), 1_000e6);
+        _contributeDollar(members[1], 10e6); // ~ 16,058 pending
+
+        // 440,000 (438,900 net) and the pending dollars take it to ~ 454,958.
+        currency.mint(members[0], 440_000e18);
+        vm.startPrank(members[0]);
+        currency.approve(address(fund), 440_000e18);
+        vm.expectRevert(FundV2.BalanceCapExceeded.selector);
+        fund.contribute(440_000e18);
+        vm.stopPrank();
+
+        // 300 USDT pending (~ 481,764) is over the cap by itself.
+        dollar.mint(members[2], 300e6);
+        vm.startPrank(members[2]);
+        dollar.approve(address(fund), 300e6);
+        vm.expectRevert(FundV2.BalanceCapExceeded.selector);
+        fund.contributeDollar(300e6);
+        vm.stopPrank();
+    }
+
+    /// With nothing pending, `contribute` never reads the pool, even if dollars (1 wei is enough) were sent to the fund.
+    function test_contributeIgnoresStrayDollarsAndDoesNotReadPoolWithNothingPending() public {
+        dollar.mint(address(fund), 1);
+        pool.setObserveReverts(true);
+
+        _contribute(members[0], 1_000e18);
+        assertEq(fund.contributed(members[0]), _net(1_000e18));
+        assertEq(fund.availableCurrency(), _net(1_000e18));
+
+        // The full-value view does read the pool for the dollar the fund holds.
+        vm.expectRevert(bytes("OLD"));
+        fund.balanceInCurrency();
+    }
+
     // ---------------------------------------------------------------- Quoting
     function test_quoteDollarUsesTwap() public view {
         uint256 quote = fund.quoteDollar(1e6);
