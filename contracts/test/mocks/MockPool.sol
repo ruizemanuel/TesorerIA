@@ -16,6 +16,10 @@ contract MockPool {
     uint256 public overcharge;
     /// If true, the pool calls the callback twice.
     bool public collectTwice;
+    /// The pool's fee tier, in hundredths of a bip (the real wARS/USDT pool is 0.01 %).
+    uint24 public fee = 100;
+    /// If true, `observe` reverts with "OLD", as a real pool does when its history is shorter than the window.
+    bool public observeReverts;
 
     constructor(address tokenA, address tokenB, int24 tick_) {
         (token0, token1) = tokenA < tokenB ? (tokenA, tokenB) : (tokenB, tokenA);
@@ -42,11 +46,16 @@ contract MockPool {
         collectTwice = t;
     }
 
+    function setObserveReverts(bool r) external {
+        observeReverts = r;
+    }
+
     function observe(uint32[] calldata secondsAgos)
         external
         view
         returns (int56[] memory tickCumulatives, uint160[] memory secondsPerLiquidityCumulativeX128s)
     {
+        require(!observeReverts, "OLD");
         tickCumulatives = new int56[](secondsAgos.length);
         secondsPerLiquidityCumulativeX128s = new uint160[](secondsAgos.length);
         for (uint256 i; i < secondsAgos.length; ++i) {
