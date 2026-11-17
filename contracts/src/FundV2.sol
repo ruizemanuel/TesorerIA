@@ -500,42 +500,11 @@ contract FundV2 is ReentrancyGuardTransient, IUniswapV3SwapCallback {
             _payCurrency(p.a, p.amount);
             emit Payment(p.a, p.amount);
         } else if (action == Action.AddMember) {
-            if (p.a == address(0) || p.a == agent || isMember[p.a] || _members.length >= MAX_MEMBERS) {
-                revert InvalidParams();
-            }
-            isMember[p.a] = true;
-            _members.push(p.a);
-            emit MemberAdded(p.a);
+            _addMember(p.a);
         } else if (action == Action.RemoveMember) {
-            if (!isMember[p.a] || _members.length - 1 <= votesRequired) revert InvalidParams();
-            uint256 c = _shareOf(p.a);
-            uint256 d = pendingDollar[p.a];
-            totalContributed -= contributed[p.a];
-            contributed[p.a] = 0;
-            totalPendingDollar -= d;
-            pendingDollar[p.a] = 0;
             _removeMember(p.a);
-            if (c > 0) currency.safeTransfer(p.a, c);
-            if (d > 0) dollar.safeTransfer(p.a, d);
-            emit MemberRemoved(p.a, c, d);
         } else if (action == Action.ReplaceMember) {
-            if (!isMember[p.a] || p.b == address(0) || p.b == agent || isMember[p.b]) {
-                revert InvalidParams();
-            }
-            uint256 n = _members.length;
-            for (uint256 i; i < n; ++i) {
-                if (_members[i] == p.a) {
-                    _members[i] = p.b;
-                    break;
-                }
-            }
-            isMember[p.a] = false;
-            isMember[p.b] = true;
-            contributed[p.b] = contributed[p.a];
-            contributed[p.a] = 0;
-            pendingDollar[p.b] = pendingDollar[p.a];
-            pendingDollar[p.a] = 0;
-            emit MemberReplaced(p.a, p.b);
+            _replaceMember(p.a, p.b);
         } else if (action == Action.SetWeeklyCap) {
             if (p.amount > balanceCap) revert InvalidParams();
             weeklyCap = p.amount;
@@ -573,16 +542,55 @@ contract FundV2 is ReentrancyGuardTransient, IUniswapV3SwapCallback {
         return availableCurrency() * contributed[m] / totalContributed;
     }
 
+    /// @dev A member added or put in another's place can't be the zero address, this contract, the agent or a member.
+    function _requireNew(address m) internal view {
+        if (m == address(0) || m == address(this) || m == agent || isMember[m]) revert InvalidParams();
+    }
+
+    function _addMember(address m) internal {
+        if (_members.length >= MAX_MEMBERS) revert InvalidParams();
+        _requireNew(m);
+        isMember[m] = true;
+        _members.push(m);
+        emit MemberAdded(m);
+    }
+
+    /// @dev Pays `m` their share of what the fund can pay and all of their own pending dollars, and takes them out. A
+    ///      removal must leave more members than `votesRequired`. It never reaches the fee set aside, nor dollars that
+    ///      are no member's.
     function _removeMember(address m) internal {
-        uint256 n = _members.length;
-        for (uint256 i; i < n; ++i) {
-            if (_members[i] == m) {
-                _members[i] = _members[n - 1];
-                _members.pop();
-                break;
-            }
-        }
+        if (!isMember[m] || _members.length - 1 <= votesRequired) revert InvalidParams();
+        uint256 c = _shareOf(m);
+        uint256 d = pendingDollar[m];
+        totalContributed -= contributed[m];
+        totalPendingDollar -= d;
+        delete contributed[m];
+        delete pendingDollar[m];
+        _members[_indexOf(m)] = _members[_members.length - 1];
+        _members.pop();
         isMember[m] = false;
+        if (c > 0) currency.safeTransfer(m, c);
+        if (d > 0) dollar.safeTransfer(m, d);
+        emit MemberRemoved(m, c, d);
+    }
+
+    /// @dev `to` takes `m`'s place in the list, with what `m` contributed and has pending.
+    function _replaceMember(address m, address to) internal {
+        if (!isMember[m]) revert InvalidParams();
+        _requireNew(to);
+        _members[_indexOf(m)] = to;
+        isMember[m] = false;
+        isMember[to] = true;
+        contributed[to] = contributed[m];
+        delete contributed[m];
+        pendingDollar[to] = pendingDollar[m];
+        delete pendingDollar[m];
+        emit MemberReplaced(m, to);
+    }
+
+    /// @dev Where `m`, who must be a member, is in the list.
+    function _indexOf(address m) internal view returns (uint256 i) {
+        while (_members[i] != m) ++i;
     }
 
     /// @dev Closes the fund and splits what it holds. Emits the balances read before the split.
