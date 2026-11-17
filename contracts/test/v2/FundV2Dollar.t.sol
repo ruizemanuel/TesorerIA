@@ -103,8 +103,8 @@ contract FundV2DollarTest is BaseFundV2Test {
         fund.quoteDollar(uint256(type(uint128).max) + 1);
     }
 
-    /// The pool's own token order is read at creation: with the dollar as token0 the quote is still the dollar's
-    /// worth in the currency, at that pool's tick.
+    /// The quote doesn't depend on which token the pool lists first: `OracleLibrary` orders the two by address, so the
+    /// quote is the dollar's worth in the currency at that pool's tick whichever way round the pool is.
     function test_quoteDollarWhenTheDollarIsToken0() public {
         MockERC20 d = new MockERC20("USDT", "USDT", 6);
         MockERC20 c = new MockERC20("wARS", "wARS", 18);
@@ -151,6 +151,10 @@ contract FundV2DollarTest is BaseFundV2Test {
         fund.quoteDollar(1e6);
         vm.expectRevert(FundV2.NoDollar.selector);
         fund.quoteDollar(0);
+        // Before the lists are even looked at, so empty ones don't turn it into InvalidParams.
+        vm.prank(agent);
+        vm.expectRevert(FundV2.NoDollar.selector);
+        fund.convert(new address[](0), new uint256[](0), 0);
     }
 
     /// A fund with no dollar never reads a pool, so dollars someone sends it can't keep it from taking contributions.

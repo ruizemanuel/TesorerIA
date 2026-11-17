@@ -5,6 +5,8 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 import {IUniswapV3Pool} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
+import {IUniswapV3SwapCallback} from "@uniswap/v3-core/contracts/interfaces/callback/IUniswapV3SwapCallback.sol";
+import {TickMath} from "@uniswap/v3-core/contracts/libraries/TickMath.sol";
 import {OracleLibrary} from "@uniswap/v3-periphery/contracts/libraries/OracleLibrary.sol";
 
 /// @title TesorerIA fund, version 2
@@ -13,7 +15,7 @@ import {OracleLibrary} from "@uniswap/v3-periphery/contracts/libraries/OracleLib
 ///         convert the dollars members contributed into the currency. Everything else is voted on. Each fund keeps
 ///         a fee, fixed when it is created, that is set aside from every contribution.
 /// @dev Version 2 sits next to `Fund` (version 1), which stays as deployed. Created by `FundFactoryV2`.
-contract FundV2 is ReentrancyGuardTransient {
+contract FundV2 is ReentrancyGuardTransient, IUniswapV3SwapCallback {
     using SafeERC20 for IERC20;
 
     // ---------------------------------------------------------------- Constants
@@ -155,9 +157,17 @@ contract FundV2 is ReentrancyGuardTransient {
     mapping(uint256 => mapping(address => bool)) public hasVoted;
     mapping(uint256 week => mapping(address => uint256)) public proposalsInWeek;
 
+    /// @dev Dollars the pool may still collect in the current conversion; zero outside `convert`.
+    uint256 private transient _swapDollarLimit;
+
     // ---------------------------------------------------------------- Modifiers
     modifier onlyMember() {
         if (!isMember[msg.sender]) revert NotMember();
+        _;
+    }
+
+    modifier onlyAgent() {
+        if (msg.sender != agent) revert OnlyAgent();
         _;
     }
 
@@ -222,6 +232,8 @@ contract FundV2 is ReentrancyGuardTransient {
     }
 
     /// @notice How much of the currency `dollarAmount` is worth at the pool's 30-minute TWAP.
+    /// @dev Reverts with `NoDollar` in a fund with no dollar. It returns 0 for 0 without reading the pool, and, as in
+    ///      version 1, reverts with `InvalidParams` above `type(uint128).max`.
     function quoteDollar(uint256 dollarAmount) public view returns (uint256) {
         if (address(dollar) == address(0)) revert NoDollar();
         if (dollarAmount == 0) return 0;
@@ -277,6 +289,102 @@ contract FundV2 is ReentrancyGuardTransient {
         uint256 balanceBefore = token.balanceOf(address(this));
         token.safeTransferFrom(msg.sender, address(this), amount);
         return token.balanceOf(address(this)) - balanceBefore;
+    }
+
+    // ---------------------------------------------------------------- Conversion (agent)
+    /// @notice Swaps the dollars of several members for the currency in one swap, and credits each of them their share
+    ///         of what arrives, net of the fee. `minCurrencyOut` can't be more than 2% below the TWAP quote of the
+    ///         whole `sum(dollarAmounts)`, and what arrives can't be less than `minCurrencyOut`.
+    /// @dev Each member's share is `received * amount / total`, rounded down, so what is credited plus what is set
+    ///      aside as the fee never exceeds `received`. What rounding leaves over belongs to no member: it stays in the
+    ///      fund, in what it can pay or split.
+    /// @param members_ The members whose pending dollars are converted, with no repeats.
+    /// @param dollarAmounts How much of each member's pending dollars to convert, in the same order.
+    /// @return received What the swap delivered, in the currency.
+    function convert(address[] calldata members_, uint256[] calldata dollarAmounts, uint256 minCurrencyOut)
+        external
+        onlyAgent
+        whenOpen
+        nonReentrant
+        returns (uint256 received)
+    {
+        if (address(dollar) == address(0)) revert NoDollar();
+        uint256 total = _takePending(members_, dollarAmounts);
+        uint256 expected = quoteDollar(total);
+        if (minCurrencyOut < expected * (BPS - MAX_DEVIATION_BPS) / BPS) revert MinOutTooLow();
+
+        bool zeroForOne = _dollarIsToken0;
+        uint256 balanceBefore = currency.balanceOf(address(this));
+        _swapDollarLimit = total;
+        pool.swap(
+            address(this),
+            zeroForOne,
+            int256(total),
+            zeroForOne ? TickMath.MIN_SQRT_RATIO + 1 : TickMath.MAX_SQRT_RATIO - 1,
+            ""
+        );
+        _swapDollarLimit = 0;
+        received = currency.balanceOf(address(this)) - balanceBefore;
+        if (received < minCurrencyOut) revert InsufficientOutput();
+
+        _creditShares(members_, dollarAmounts, received, total);
+    }
+
+    /// @dev Validates the two lists and takes each member's amount off their pending dollars. Returns the total.
+    function _takePending(address[] calldata members_, uint256[] calldata dollarAmounts)
+        private
+        returns (uint256 total)
+    {
+        uint256 n = members_.length;
+        if (n == 0 || n != dollarAmounts.length) revert InvalidParams();
+        for (uint256 i; i < n; ++i) {
+            address member = members_[i];
+            uint256 amount = dollarAmounts[i];
+            if (amount == 0) revert ZeroAmount();
+            // Each entry must be a distinct member with dollars pending, so no more than MAX_MEMBERS get this far and
+            // a pairwise check for repeats is cheap.
+            for (uint256 j; j < i; ++j) {
+                if (members_[j] == member) revert InvalidParams();
+            }
+            if (pendingDollar[member] < amount) revert InsufficientPending();
+            pendingDollar[member] -= amount;
+            total += amount;
+        }
+        totalPendingDollar -= total;
+    }
+
+    /// @dev Splits `received` by each member's part of `total`, sets the fee of each share aside and credits the rest.
+    function _creditShares(
+        address[] calldata members_,
+        uint256[] calldata dollarAmounts,
+        uint256 received,
+        uint256 total
+    ) private {
+        uint256 fees;
+        uint256 credits;
+        for (uint256 i; i < members_.length; ++i) {
+            address member = members_[i];
+            uint256 share = received * dollarAmounts[i] / total;
+            uint256 fee = share * feeBps / BPS;
+            uint256 credited = share - fee;
+            fees += fee;
+            credits += credited;
+            contributed[member] += credited;
+            emit Conversion(member, dollarAmounts[i], share, credited);
+        }
+        feeOwed += fees;
+        totalContributed += credits;
+    }
+
+    /// @dev Only the pool, only during `convert` and only once, can collect the swap's dollars, and never more than
+    ///      the total being converted.
+    function uniswapV3SwapCallback(int256 amount0Delta, int256 amount1Delta, bytes calldata) external override {
+        uint256 limit = _swapDollarLimit;
+        if (msg.sender != address(pool) || limit == 0) revert OnlyPool();
+        int256 owed = _dollarIsToken0 ? amount0Delta : amount1Delta;
+        if (owed <= 0 || uint256(owed) > limit) revert SwapOverpayment();
+        _swapDollarLimit = 0;
+        dollar.safeTransfer(address(pool), uint256(owed));
     }
 
     // ---------------------------------------------------------------- Fee
