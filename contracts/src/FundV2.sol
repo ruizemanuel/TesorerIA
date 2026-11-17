@@ -314,6 +314,8 @@ contract FundV2 is ReentrancyGuardTransient, IUniswapV3SwapCallback {
     ///      fund, in what it can pay or split.
     /// @param members_ The members whose pending dollars are converted, with no repeats.
     /// @param dollarAmounts How much of each member's pending dollars to convert, in the same order.
+    /// @param minCurrencyOut The least the swap must deliver, in the currency. It can't be more than 2% below the TWAP
+    ///        quote of `sum(dollarAmounts)`.
     /// @return received What the swap delivered, in the currency.
     function convert(address[] calldata members_, uint256[] calldata dollarAmounts, uint256 minCurrencyOut)
         external
@@ -630,6 +632,9 @@ contract FundV2 is ReentrancyGuardTransient, IUniswapV3SwapCallback {
     ///      (under 1 wei per member), which the next `distributeRemainder` splits along with what arrived. Returns
     ///      what the fund could pay in the currency and its dollar balance, both read before the split. A fund with no
     ///      dollar never calls it.
+    ///      Assumes the dollar is a standard token: it doesn't rebase and takes no fee from the sender on a transfer.
+    ///      So the pending dollars add up to `totalPendingDollar`, which is at most the dollar balance, and
+    ///      `bd - totalPendingDollar` can't underflow, nor can a member be paid more dollars than the fund holds.
     function _split() internal returns (uint256 bc, uint256 bd) {
         bc = availableCurrency();
         uint256 stray = 0;
