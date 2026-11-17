@@ -420,6 +420,9 @@ contract FundV2 is ReentrancyGuardTransient, IUniswapV3SwapCallback {
     }
 
     // ---------------------------------------------------------------- Proposals and votes
+    /// @notice A member or the agent proposes `action`; a member proposer votes for it too. Each proposer may make at
+    ///         most `MAX_PROPOSALS_PER_WEEK` proposals per week (the count starts over each week, the agent's too), and
+    ///         `note` is at most `MAX_NOTE_BYTES` bytes.
     function propose(Action action, address a, address b, uint256 amount, string calldata note)
         external
         whenOpen
@@ -427,6 +430,8 @@ contract FundV2 is ReentrancyGuardTransient, IUniswapV3SwapCallback {
     {
         bool member = isMember[msg.sender];
         if (!member && msg.sender != agent) revert OnlyMemberOrAgent();
+        if (bytes(note).length > MAX_NOTE_BYTES) revert NoteTooLong();
+        if (++proposalsInWeek[currentWeek()][msg.sender] > MAX_PROPOSALS_PER_WEEK) revert TooManyProposals();
         id = _proposals.length;
         _proposals.push(
             Proposal({
@@ -532,6 +537,7 @@ contract FundV2 is ReentrancyGuardTransient, IUniswapV3SwapCallback {
             pendingDollar[p.a] = 0;
             emit MemberReplaced(p.a, p.b);
         } else if (action == Action.SetWeeklyCap) {
+            if (p.amount > balanceCap) revert InvalidParams();
             weeklyCap = p.amount;
             emit WeeklyCapChanged(p.amount);
         } else if (action == Action.SetVotesRequired) {
@@ -539,7 +545,7 @@ contract FundV2 is ReentrancyGuardTransient, IUniswapV3SwapCallback {
             votesRequired = uint8(p.amount);
             emit VotesRequiredChanged(uint8(p.amount));
         } else if (action == Action.SetAgent) {
-            if (isMember[p.a]) revert InvalidParams();
+            if (p.a == address(0) || p.a == address(this) || isMember[p.a]) revert InvalidParams();
             agent = p.a;
             emit AgentChanged(p.a);
         } else if (action == Action.GiveBack) {
