@@ -2,6 +2,7 @@
 pragma solidity 0.8.37;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 import {IUniswapV3Pool} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
 
@@ -12,6 +13,8 @@ import {IUniswapV3Pool} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Po
 ///         a fee, fixed when it is created, that is set aside from every contribution.
 /// @dev Version 2 sits next to `Fund` (version 1), which stays as deployed. Created by `FundFactoryV2`.
 contract FundV2 is ReentrancyGuardTransient {
+    using SafeERC20 for IERC20;
+
     // ---------------------------------------------------------------- Constants
     uint256 public constant MIN_MEMBERS = 3;
     uint256 public constant MAX_MEMBERS = 10;
@@ -151,6 +154,17 @@ contract FundV2 is ReentrancyGuardTransient {
     mapping(uint256 => mapping(address => bool)) public hasVoted;
     mapping(uint256 week => mapping(address => uint256)) public proposalsInWeek;
 
+    // ---------------------------------------------------------------- Modifiers
+    modifier onlyMember() {
+        if (!isMember[msg.sender]) revert NotMember();
+        _;
+    }
+
+    modifier whenOpen() {
+        if (closed) revert FundIsClosed();
+        _;
+    }
+
     // ---------------------------------------------------------------- Creation
     /// @dev Validates the whole shape of the fund; `FundFactoryV2` checks the pool against Uniswap's factory afterwards.
     constructor(Params memory p, address feeRecipient_) {
@@ -199,5 +213,47 @@ contract FundV2 is ReentrancyGuardTransient {
 
     function currentWeek() public view returns (uint256) {
         return (block.timestamp - startTime) / WEEK;
+    }
+
+    /// @notice The currency the fund can pay or split: its balance minus the fee set aside.
+    function availableCurrency() public view returns (uint256) {
+        return currency.balanceOf(address(this)) - feeOwed;
+    }
+
+    /// @notice The fund's total balance in the currency.
+    function balanceInCurrency() public view returns (uint256) {
+        return availableCurrency();
+    }
+
+    // ---------------------------------------------------------------- Contributions
+    /// @notice Contribute `amount` of the currency. The fee is set aside from what arrives, and the rest is credited
+    ///         to the member.
+    function contribute(uint256 amount) external onlyMember whenOpen nonReentrant {
+        uint256 received = _pullTokens(currency, amount);
+        uint256 fee = received * feeBps / BPS;
+        uint256 credited = received - fee;
+        feeOwed += fee;
+        contributed[msg.sender] += credited;
+        totalContributed += credited;
+        if (balanceInCurrency() > balanceCap) revert BalanceCapExceeded();
+        emit Contribution(msg.sender, address(currency), received, credited);
+    }
+
+    /// @dev Measures what arrived by balance difference, within the call (the spec's CIP-64 rule).
+    function _pullTokens(IERC20 token, uint256 amount) internal returns (uint256) {
+        if (amount == 0) revert ZeroAmount();
+        uint256 balanceBefore = token.balanceOf(address(this));
+        token.safeTransferFrom(msg.sender, address(this), amount);
+        return token.balanceOf(address(this)) - balanceBefore;
+    }
+
+    // ---------------------------------------------------------------- Fee
+    /// @notice Send the fee set aside to `feeRecipient`. Anyone may call it, with the fund open or closed.
+    function payFee() external nonReentrant {
+        uint256 owed = feeOwed;
+        if (owed == 0) revert ZeroAmount();
+        feeOwed = 0;
+        currency.safeTransfer(feeRecipient, owed);
+        emit FeePaid(owed);
     }
 }

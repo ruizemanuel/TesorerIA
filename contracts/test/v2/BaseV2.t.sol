@@ -70,4 +70,18 @@ abstract contract BaseFundV2Test is Test {
     function _create(FundV2.Params memory p) internal returns (FundV2) {
         return FundV2(factory.createFund(p));
     }
+
+    /// What a contribution of `amount` credits after the default fee (`FEE_BPS`).
+    function _net(uint256 amount) internal pure returns (uint256) {
+        return amount - amount * FEE_BPS / 10_000;
+    }
+
+    /// `m` contributes `amount` of the currency to `fund`, minted for the occasion.
+    function _contribute(address m, uint256 amount) internal {
+        currency.mint(m, amount);
+        vm.startPrank(m);
+        currency.approve(address(fund), amount);
+        fund.contribute(amount);
+        vm.stopPrank();
+    }
 }
