@@ -179,6 +179,25 @@ contract FundV2CreationTest is BaseFundV2Test {
         _create(p);
     }
 
+    /// The fund can't be its own agent or one of its members, as `SetAgent` and adding or replacing a member already
+    /// require. Its address is known before it exists: it is the next one the factory creates.
+    function test_rejectsTheFundItselfAsAgentOrMember() public {
+        address predicted = vm.computeCreateAddress(address(factory), vm.getNonce(address(factory)));
+
+        FundV2.Params memory p = _params();
+        p.agent = predicted;
+        vm.expectRevert(FundV2.InvalidParams.selector);
+        _create(p);
+
+        p = _params();
+        p.members[2] = predicted;
+        vm.expectRevert(FundV2.InvalidParams.selector);
+        _create(p);
+
+        // The prediction is right: a fund that doesn't name itself gets that address.
+        assertEq(address(_create(_params())), predicted);
+    }
+
     function test_membersRulesAsV1() public {
         FundV2.Params memory p = _params();
 

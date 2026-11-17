@@ -182,8 +182,8 @@ contract FundV2 is ReentrancyGuardTransient, IUniswapV3SwapCallback {
         uint256 n = p.members.length;
         if (
             n < MIN_MEMBERS || n > MAX_MEMBERS || p.votesRequired < MIN_VOTES || p.votesRequired >= n
-                || p.agent == address(0) || p.balanceCap == 0 || p.weeklyCap > p.balanceCap || p.feeBps > MAX_FEE_BPS
-                || feeRecipient_ == address(0) || address(p.currency) == address(0)
+                || p.agent == address(0) || p.agent == address(this) || p.balanceCap == 0 || p.weeklyCap > p.balanceCap
+                || p.feeBps > MAX_FEE_BPS || feeRecipient_ == address(0) || address(p.currency) == address(0)
                 || address(p.dollar) == address(p.currency)
                 || (address(p.dollar) == address(0)) != (address(p.pool) == address(0))
         ) revert InvalidParams();
@@ -198,7 +198,7 @@ contract FundV2 is ReentrancyGuardTransient, IUniswapV3SwapCallback {
         }
         for (uint256 i; i < n; ++i) {
             address m = p.members[i];
-            if (m == address(0) || m == p.agent || isMember[m]) revert InvalidParams();
+            if (m == address(0) || m == address(this) || m == p.agent || isMember[m]) revert InvalidParams();
             isMember[m] = true;
             _members.push(m);
         }
