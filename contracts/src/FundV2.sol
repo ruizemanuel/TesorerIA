@@ -393,6 +393,231 @@ contract FundV2 is ReentrancyGuardTransient, IUniswapV3SwapCallback {
         dollar.safeTransfer(address(pool), uint256(owed));
     }
 
+    // ---------------------------------------------------------------- Reimbursement (agent)
+    /// @notice Pays a member back for the expense the group agreed on, without votes, up to `weeklyCap` per week. It is
+    ///         paid from what the fund can pay (`availableCurrency`), never from the fee set aside.
+    /// @param ref Hash of the expense entered in the web app (the timeline uses it to link to the expense).
+    function reimburseAgreedExpense(address member, uint256 amount, bytes32 ref)
+        external
+        onlyAgent
+        whenOpen
+        nonReentrant
+    {
+        if (!isMember[member]) revert RecipientNotMember();
+        if (amount == 0) revert ZeroAmount();
+        uint256 week = currentWeek();
+        uint256 spent = spentInWeek[week] + amount;
+        if (spent > weeklyCap) revert WeeklyCapExceeded();
+        spentInWeek[week] = spent;
+        _payCurrency(member, amount);
+        emit Reimbursement(member, amount, ref, week);
+    }
+
+    /// @dev Pays `amount` of the currency out of `availableCurrency()`, so the fee set aside is never touched.
+    function _payCurrency(address to, uint256 amount) internal {
+        if (availableCurrency() < amount) revert InsufficientBalance();
+        currency.safeTransfer(to, amount);
+    }
+
+    // ---------------------------------------------------------------- Proposals and votes
+    function propose(Action action, address a, address b, uint256 amount, string calldata note)
+        external
+        whenOpen
+        returns (uint256 id)
+    {
+        bool member = isMember[msg.sender];
+        if (!member && msg.sender != agent) revert OnlyMemberOrAgent();
+        id = _proposals.length;
+        _proposals.push(
+            Proposal({
+                action: action,
+                a: a,
+                b: b,
+                amount: amount,
+                deadline: uint64(block.timestamp + PROPOSAL_DURATION),
+                executed: false,
+                proposer: msg.sender,
+                note: note
+            })
+        );
+        emit ProposalCreated(id, action, a, b, amount, msg.sender, note);
+        if (member) _vote(id);
+    }
+
+    function vote(uint256 id) external onlyMember whenOpen {
+        _activeProposal(id);
+        _vote(id);
+    }
+
+    function execute(uint256 id) external whenOpen nonReentrant {
+        Proposal storage p = _activeProposal(id);
+        if (voteCount(id) < votesRequired) revert NotEnoughVotes();
+        p.executed = true;
+        _apply(p);
+        emit ProposalExecuted(id);
+    }
+
+    /// @notice Votes in favor, counting only current members.
+    function voteCount(uint256 id) public view returns (uint256 n) {
+        uint256 count = _members.length;
+        for (uint256 i; i < count; ++i) {
+            if (hasVoted[id][_members[i]]) ++n;
+        }
+    }
+
+    function proposalCount() external view returns (uint256) {
+        return _proposals.length;
+    }
+
+    function getProposal(uint256 id) external view returns (Proposal memory) {
+        if (id >= _proposals.length) revert ProposalNotFound();
+        return _proposals[id];
+    }
+
+    function _vote(uint256 id) internal {
+        if (hasVoted[id][msg.sender]) revert AlreadyVoted();
+        hasVoted[id][msg.sender] = true;
+        emit VoteCast(id, msg.sender);
+    }
+
+    function _activeProposal(uint256 id) internal view returns (Proposal storage p) {
+        if (id >= _proposals.length) revert ProposalNotFound();
+        p = _proposals[id];
+        if (p.executed) revert ProposalAlreadyExecuted();
+        if (block.timestamp > p.deadline) revert ProposalExpired();
+    }
+
+    function _apply(Proposal storage p) internal {
+        Action action = p.action;
+        if (action == Action.Pay) {
+            if (!isMember[p.a]) revert RecipientNotMember();
+            if (p.amount == 0) revert ZeroAmount();
+            _payCurrency(p.a, p.amount);
+            emit Payment(p.a, p.amount);
+        } else if (action == Action.AddMember) {
+            if (p.a == address(0) || p.a == agent || isMember[p.a] || _members.length >= MAX_MEMBERS) {
+                revert InvalidParams();
+            }
+            isMember[p.a] = true;
+            _members.push(p.a);
+            emit MemberAdded(p.a);
+        } else if (action == Action.RemoveMember) {
+            if (!isMember[p.a] || _members.length - 1 <= votesRequired) revert InvalidParams();
+            uint256 c = _shareOf(p.a);
+            uint256 d = pendingDollar[p.a];
+            totalContributed -= contributed[p.a];
+            contributed[p.a] = 0;
+            totalPendingDollar -= d;
+            pendingDollar[p.a] = 0;
+            _removeMember(p.a);
+            if (c > 0) currency.safeTransfer(p.a, c);
+            if (d > 0) dollar.safeTransfer(p.a, d);
+            emit MemberRemoved(p.a, c, d);
+        } else if (action == Action.ReplaceMember) {
+            if (!isMember[p.a] || p.b == address(0) || p.b == agent || isMember[p.b]) {
+                revert InvalidParams();
+            }
+            uint256 n = _members.length;
+            for (uint256 i; i < n; ++i) {
+                if (_members[i] == p.a) {
+                    _members[i] = p.b;
+                    break;
+                }
+            }
+            isMember[p.a] = false;
+            isMember[p.b] = true;
+            contributed[p.b] = contributed[p.a];
+            contributed[p.a] = 0;
+            pendingDollar[p.b] = pendingDollar[p.a];
+            pendingDollar[p.a] = 0;
+            emit MemberReplaced(p.a, p.b);
+        } else if (action == Action.SetWeeklyCap) {
+            weeklyCap = p.amount;
+            emit WeeklyCapChanged(p.amount);
+        } else if (action == Action.SetVotesRequired) {
+            if (p.amount < MIN_VOTES || p.amount >= _members.length) revert InvalidParams();
+            votesRequired = uint8(p.amount);
+            emit VotesRequiredChanged(uint8(p.amount));
+        } else if (action == Action.SetAgent) {
+            if (isMember[p.a]) revert InvalidParams();
+            agent = p.a;
+            emit AgentChanged(p.a);
+        } else if (action == Action.GiveBack) {
+            _giveBack(p.a, p.amount);
+        } else {
+            _close();
+        }
+    }
+
+    /// @dev Pays a member back part of what they contributed, and takes it off what they contributed.
+    function _giveBack(address member, uint256 amount) internal {
+        if (!isMember[member]) revert RecipientNotMember();
+        if (amount == 0) revert ZeroAmount();
+        if (amount > contributed[member]) revert GiveBackTooLarge();
+        contributed[member] -= amount;
+        totalContributed -= amount;
+        _payCurrency(member, amount);
+        emit ContributionGivenBack(member, amount);
+    }
+
+    /// @dev `m`'s proportional share of what the fund can pay, by contribution. If no one has contributed, `m` gets
+    ///      nothing.
+    function _shareOf(address m) internal view returns (uint256) {
+        if (totalContributed == 0) return 0;
+        return availableCurrency() * contributed[m] / totalContributed;
+    }
+
+    function _removeMember(address m) internal {
+        uint256 n = _members.length;
+        for (uint256 i; i < n; ++i) {
+            if (_members[i] == m) {
+                _members[i] = _members[n - 1];
+                _members.pop();
+                break;
+            }
+        }
+        isMember[m] = false;
+    }
+
+    /// @dev Closes the fund and splits what it holds. Emits the balances read before the split.
+    function _close() internal {
+        closed = true;
+        (uint256 bc, uint256 bd) = _split();
+        emit FundClosed(bc, bd);
+    }
+
+    /// @dev Pays each member their own pending dollars, then splits what the fund can pay in the currency and what is
+    ///      left of the dollar among the members in proportion to contributions (equally if no one contributed). The
+    ///      fee set aside is left in the contract for `payFee`. Returns what the fund could pay in the currency and
+    ///      its dollar balance, both read before the split. Rounding dust stays in the contract.
+    function _split() internal returns (uint256 bc, uint256 bd) {
+        bc = availableCurrency();
+        uint256 n = _members.length;
+        bool hasDollar = address(dollar) != address(0);
+        uint256 leftDollar = 0;
+        if (hasDollar) {
+            bd = dollar.balanceOf(address(this));
+            for (uint256 i; i < n; ++i) {
+                address m = _members[i];
+                uint256 pending = pendingDollar[m];
+                if (pending > 0) {
+                    pendingDollar[m] = 0;
+                    dollar.safeTransfer(m, pending);
+                }
+            }
+            totalPendingDollar = 0;
+            leftDollar = dollar.balanceOf(address(this));
+        }
+        uint256 total = totalContributed;
+        for (uint256 i; i < n; ++i) {
+            address m = _members[i];
+            uint256 c = total == 0 ? bc / n : bc * contributed[m] / total;
+            uint256 d = total == 0 ? leftDollar / n : leftDollar * contributed[m] / total;
+            if (c > 0) currency.safeTransfer(m, c);
+            if (d > 0) dollar.safeTransfer(m, d);
+        }
+    }
+
     // ---------------------------------------------------------------- Fee
     /// @notice Send the fee set aside to `feeRecipient`. Anyone may call it, with the fund open or closed.
     function payFee() external nonReentrant {

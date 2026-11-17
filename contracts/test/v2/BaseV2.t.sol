@@ -93,4 +93,29 @@ abstract contract BaseFundV2Test is Test {
         fund.contributeDollar(amount);
         vm.stopPrank();
     }
+
+    /// `who` proposes `action` on `fund`; a member proposer votes for it too, the agent does not.
+    function _propose(address who, FundV2.Action action, address a, address b, uint256 amount)
+        internal
+        returns (uint256 id)
+    {
+        vm.prank(who);
+        id = fund.propose(action, a, b, amount, "note");
+    }
+
+    /// The members who haven't voted on `id` vote until it has `votesRequired` votes.
+    function _castVotes(uint256 id) internal {
+        address[] memory current = fund.members();
+        for (uint256 i; i < current.length && fund.voteCount(id) < fund.votesRequired(); ++i) {
+            if (fund.hasVoted(id, current[i])) continue;
+            vm.prank(current[i]);
+            fund.vote(id);
+        }
+    }
+
+    /// Votes `id` through (see `_castVotes`) and executes it.
+    function _pass(uint256 id) internal {
+        _castVotes(id);
+        fund.execute(id);
+    }
 }
