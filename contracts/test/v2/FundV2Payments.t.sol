@@ -80,6 +80,23 @@ contract FundV2PaymentsTest is BaseFundV2Test {
         assertTrue(fund.getProposal(id).executed);
     }
 
+    function test_payToNonMemberReverts() public {
+        uint256 id = _propose(members[0], FundV2.Action.Pay, outsider, address(0), 1_000e18);
+        _castVotes(id);
+        vm.expectRevert(FundV2.RecipientNotMember.selector);
+        fund.execute(id);
+        assertEq(currency.balanceOf(outsider), 0);
+        assertFalse(fund.getProposal(id).executed);
+    }
+
+    function test_payZeroReverts() public {
+        uint256 id = _propose(members[0], FundV2.Action.Pay, members[1], address(0), 0);
+        _castVotes(id);
+        vm.expectRevert(FundV2.ZeroAmount.selector);
+        fund.execute(id);
+        assertFalse(fund.getProposal(id).executed);
+    }
+
     // ---------------------------------------------------------------- GiveBack
     function test_giveBackPaysAndLowersContributed() public {
         _contribute(members[0], 100_000e18);

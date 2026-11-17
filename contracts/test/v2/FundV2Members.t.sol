@@ -153,6 +153,13 @@ contract FundV2MembersTest is BaseFundV2Test {
         assertTrue(fund.isMember(members[0]));
     }
 
+    function test_replaceWithZeroAddressReverts() public {
+        _expectExecuteReverts(FundV2.Action.ReplaceMember, members[0], address(0), FundV2.InvalidParams.selector);
+        assertTrue(fund.isMember(members[0]));
+        assertFalse(fund.isMember(address(0)));
+        assertEq(fund.members().length, 5);
+    }
+
     function test_addMemberAddsThemToTheList() public {
         uint256 id = _propose(members[0], FundV2.Action.AddMember, newcomer, address(0), 0);
         _castVotes(id);

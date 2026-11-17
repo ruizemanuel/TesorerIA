@@ -46,6 +46,15 @@ contract FundV2ProposalsTest is BaseFundV2Test {
         assertEq(fund.proposalsInWeek(0, agent), 10);
     }
 
+    function test_outsiderCannotPropose() public {
+        uint256 week = fund.currentWeek();
+        vm.prank(outsider);
+        vm.expectRevert(FundV2.OnlyMemberOrAgent.selector);
+        fund.propose(FundV2.Action.SetWeeklyCap, address(0), address(0), 1, "note");
+        assertEq(fund.proposalsInWeek(week, outsider), 0);
+        assertEq(fund.proposalCount(), 0);
+    }
+
     function test_noteUpTo560Bytes() public {
         bytes memory ok = new bytes(560);
         for (uint256 i; i < ok.length; ++i) {

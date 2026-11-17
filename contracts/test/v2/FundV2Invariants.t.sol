@@ -375,6 +375,18 @@ contract FundV2InvariantsTest is BaseFundV2Test {
         assertEq(sum, fund.totalPendingDollar());
     }
 
+    /// Whoever is not a member holds nothing: a member who left had what they contributed paid out and their pending
+    /// dollars returned, one who was replaced passed both on, and neither can be credited again until they rejoin. It
+    /// covers every address the handler touches, those who were members at some point and those who could become one.
+    function invariant_nonMembersHoldNothing() public view {
+        address[] memory actors = handler.actors();
+        for (uint256 i; i < actors.length; ++i) {
+            if (fund.isMember(actors[i])) continue;
+            assertEq(fund.contributed(actors[i]), 0);
+            assertEq(fund.pendingDollar(actors[i]), 0);
+        }
+    }
+
     /// Every pending dollar is in the fund, whether or not anyone has sent it extra dollars.
     function invariant_pendingBackedByDollars() public view {
         assertLe(fund.totalPendingDollar(), dollar.balanceOf(address(fund)));
