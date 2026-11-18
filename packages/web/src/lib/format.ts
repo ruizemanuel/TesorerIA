@@ -50,6 +50,21 @@ export function upToCentavo(units: bigint): bigint {
   return ((units + CENT - 1n) / CENT) * CENT;
 }
 
+/** wARS units down to a whole centavo: a most said so that typing it never asks for more than there is. */
+export function downToCentavo(units: bigint): bigint {
+  return (units / CENT) * CENT;
+}
+
+/**
+ * Basis points as a percentage, the way each language writes it: "0,25 %" in Spanish, with a space that doesn't break
+ * before the sign, and "0.25%" in English. A v2 fund's fee (feeBps).
+ */
+export function formatPercent(bps: number, locale: Locale): string {
+  const rest = bps % 100;
+  const decimals = rest === 0 ? "" : `${STYLE[locale].decimal}${rest.toString().padStart(2, "0").replace(/0$/, "")}`;
+  return `${Math.floor(bps / 100)}${decimals}${locale === "es" ? `${NBSP}%` : "%"}`;
+}
+
 /** USDT from its 6-decimal units: "10 USDT", "10,5 USDT" ("10.5 USDT" in English). */
 export function formatUsdt(units: bigint, locale: Locale): string {
   const style = STYLE[locale];

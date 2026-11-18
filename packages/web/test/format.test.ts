@@ -3,7 +3,9 @@ import {
   NBSP,
   USDT_UNIT,
   WARS_UNIT,
+  downToCentavo,
   formatDay,
+  formatPercent,
   formatPesos,
   formatUsdt,
   formatWhen,
@@ -28,6 +30,23 @@ describe("formatPesos", () => {
     expect(formatPesos(10n * WARS_UNIT + 5n * 10n ** 15n, "es")).toBe(`$${NBSP}10,01`);
     expect(formatPesos(10n * WARS_UNIT + 4n * 10n ** 15n, "es")).toBe(`$${NBSP}10`);
     expect(formatPesos(-45_000n * WARS_UNIT, "es")).toBe(`-$${NBSP}45.000`);
+  });
+});
+
+describe("formatPercent", () => {
+  it("writes basis points as a percentage, in each language's way: a v2 fund's fee", () => {
+    expect(formatPercent(25, "es")).toBe(`0,25${NBSP}%`);
+    expect(formatPercent(25, "en")).toBe("0.25%");
+    expect([formatPercent(50, "es"), formatPercent(100, "es"), formatPercent(5, "es")]).toEqual([`0,5${NBSP}%`, `1${NBSP}%`, `0,05${NBSP}%`]);
+    expect([formatPercent(50, "en"), formatPercent(100, "en"), formatPercent(0, "en")]).toEqual(["0.5%", "1%", "0%"]);
+  });
+});
+
+describe("downToCentavo", () => {
+  it("takes wARS units down to a whole centavo: the most a member can ask back, never over what they have", () => {
+    expect(downToCentavo(10_000n * WARS_UNIT + 7_325n * 10n ** 12n)).toBe(10_000n * WARS_UNIT);
+    expect(downToCentavo(10_000n * WARS_UNIT - 1n)).toBe(9_999n * WARS_UNIT + 99n * 10n ** 16n);
+    expect(downToCentavo(5n * 10n ** 16n)).toBe(5n * 10n ** 16n);
   });
 });
 

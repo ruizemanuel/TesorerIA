@@ -1,4 +1,4 @@
-import { type FundSnapshot, memberDues } from "@tesoreria/agent";
+import { type FundSnapshot, type FundVersion, memberDues } from "@tesoreria/agent";
 import { type Address, getAddress } from "viem";
 import type { Messages } from "./i18n/messages";
 
@@ -22,6 +22,19 @@ export type FundView = {
    * balanceInWars, version 2's balanceInCurrency.
    */
   balance: bigint;
+  /** The fund's contract version, and the currency and the dollar it takes (version 1: wARS and USDT). */
+  version: FundVersion;
+  currency: Address;
+  dollar: Address | null;
+  /** What each contribution leaves for the fund's operations, in basis points (FundV2.feeBps): 0 in version 1. */
+  feeBps: number;
+  /** The most the contract lets the fund hold, as it counts it (`counted`). */
+  balanceCap: bigint;
+  /**
+   * What the contract counts toward `balanceCap`: version 1's whole balance; version 2's available currency and every
+   * member's pending dollars at their TWAP value, without the dollars sent to it directly, which are nobody's.
+   */
+  counted: bigint;
   weeklyFee: bigint;
   weeklyCap: bigint;
   spentThisWeek: bigint;
@@ -84,6 +97,8 @@ export function buildFundView({
     return { position: i + 1, member: address, name: names.get(address) ?? m.common.member(i + 1), isMe: address === me, owed };
   });
   const mine = rows.find((row) => row.isMe);
+  // Every member's pending dollars at their TWAP value: only version 2 holds them apart until they're converted.
+  const pending = snapshot.version === 2 ? snapshot.pendingValue.reduce((sum, value) => sum + value, 0n) : 0n;
   let share = 0n;
   let ahead = 0n;
   if (mine !== undefined) {
@@ -96,7 +111,6 @@ export function buildFundView({
     // that way: the balance less everyone's pending dollars at their TWAP value.
     const i = mine.position - 1;
     const counted = snapshot.contributed[i] ?? 0n;
-    const pending = snapshot.version === 2 ? snapshot.pendingValue.reduce((sum, value) => sum + value, 0n) : 0n;
     const rest = balance > pending ? balance - pending : 0n;
     const own = snapshot.version === 2 ? (snapshot.pendingValue[i] ?? 0n) : 0n;
     share =
@@ -108,6 +122,12 @@ export function buildFundView({
     agreedExpense,
     closed: snapshot.closed,
     balance,
+    version: snapshot.version,
+    currency: snapshot.currency,
+    dollar: snapshot.dollar,
+    feeBps: snapshot.feeBps,
+    balanceCap: snapshot.balanceCap,
+    counted: snapshot.version === 2 ? snapshot.currencyBalance + pending : balance,
     weeklyFee,
     weeklyCap: snapshot.weeklyCap,
     spentThisWeek: snapshot.spentThisWeek,

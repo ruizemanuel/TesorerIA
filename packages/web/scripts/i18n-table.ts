@@ -10,7 +10,8 @@
 import { writeFileSync } from "node:fs";
 import { createElement, Fragment, isValidElement, type ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { formatDay, formatPesos, formatUsdt, formatWhen, intlLocale, TIME_ZONE, USDT_UNIT, WARS_UNIT } from "../src/lib/format";
+import { FEE_BPS } from "@tesoreria/agent";
+import { formatDay, formatPercent, formatPesos, formatUsdt, formatWhen, intlLocale, TIME_ZONE, USDT_UNIT, WARS_UNIT } from "../src/lib/format";
 import { en } from "../src/lib/i18n/en";
 import { es, type Messages } from "../src/lib/i18n/es";
 import type { Locale } from "../src/lib/i18n/locales";
@@ -110,6 +111,17 @@ const ARGS: Record<string, (k: Kit) => Case[]> = {
   "invitation.proposed": ({ m }) => [call(NAME, 1, 2), when("an account with no name", m.timeline.someone, 1, 2)],
   "timeline.contributed": ({ m, pesos }) => [call(NAME, pesos(10_000)), when("an account with no name", m.timeline.someone, pesos(10_000))],
   "timeline.converted": ({ pesos, usdt }) => [call(usdt(10), pesos(16_000))],
+  "timeline.convertedLess": ({ pesos, usdt }) => [
+    when("one member's", usdt(10), pesos(16_050), pesos(1.95), NAME),
+    when("several members'", usdt(10), pesos(16_050), pesos(1.95), null),
+  ],
+  "timeline.convertedMore": ({ pesos, usdt }) => [
+    when("one member's", usdt(10), pesos(16_050), pesos(4.41), NAME),
+    when("several members'", usdt(10), pesos(16_050), pesos(4.41), null),
+  ],
+  "timeline.convertedFor": ({ m, pesos, usdt }) => [call(usdt(6.3), pesos(8_012.34), NAME), when("an account with no name", usdt(6.3), pesos(8_012.34), m.timeline.someone)],
+  "timeline.feePaid": ({ pesos, locale }) => [call(pesos(200.05), formatPercent(FEE_BPS, locale))],
+  "timeline.feePaidDetail": ({ locale }) => [call(formatPercent(FEE_BPS, locale))],
   "timeline.reimbursed": ({ pesos, expense }) => [call(pesos(45_000), NAME, expense)],
   "timeline.reimbursedLeftThisWeek": ({ pesos }) => [call(pesos(15_000))],
   "timeline.reimbursedLeftThatWeek": ({ pesos }) => [call(pesos(15_000))],
@@ -126,9 +138,14 @@ const ARGS: Record<string, (k: Kit) => Case[]> = {
   "timeline.proposal.replaceMember": () => [call(THIRD)],
   "timeline.proposal.setWeeklyCap": ({ expense, pesos }) => [call(expense, pesos(80_000))],
   "timeline.proposal.setVotesRequired": ({ expense }) => [call(5, expense)],
+  "timeline.proposal.giveBack": ({ m, pesos }) => [
+    when("with a note", pesos(10_000), THIRD, m.expense.giveBackNotePlaceholder),
+    when("without a note", pesos(10_000), THIRD, ""),
+  ],
   "timeline.proposal.short": ({ pesos }) => [call(pesos(3_000))],
   "timeline.proposal.votes": () => [call(3, 5)],
   "timeline.paid": ({ pesos }) => [call(pesos(3_000), NAME)],
+  "timeline.givenBack": ({ pesos }) => [call(pesos(10_000), THIRD)],
   "timeline.memberAdded": () => [call(THIRD)],
   "timeline.joinRequest": () => [call(NEWCOMER)],
   "timeline.joinRequestExpired": () => [call(NEWCOMER)],
@@ -147,6 +164,7 @@ const ARGS: Record<string, (k: Kit) => Case[]> = {
   "timeline.expense.waiting": ({ m, pesos, note }) => [call(m.timeline.expense.what(pesos(45_000), NAME, note))],
   "timeline.expense.blocked": ({ m, pesos, note }) => [call(m.timeline.expense.what(pesos(45_000), NAME, note))],
   "timeline.expense.rejected": ({ m, pesos, note }) => [call(m.timeline.expense.what(pesos(45_000), NAME, note))],
+  "timeline.expense.quota": ({ m, pesos, note }) => [call(m.timeline.expense.what(pesos(45_000), NAME, note))],
   "timeline.onItsWay.contribution": ({ pesos }) => [call(pesos(10_000))],
   "fund.owe": ({ bold, pesos }) => [call(bold(pesos(10_000)))],
   "fund.upToDateAhead": ({ bold, pesos }) => [call(bold(pesos(20_000)))],
@@ -172,8 +190,11 @@ const ARGS: Record<string, (k: Kit) => Case[]> = {
   "contribute.covers": ({ pesos }) => [call(pesos(10_000))],
   "contribute.worth": ({ pesos }) => [call(pesos(16_000))],
   "contribute.youHold": ({ bold, usdt }) => [call(bold(usdt(6.18)))],
+  "contribute.feeNote": ({ locale }) => [call(formatPercent(FEE_BPS, locale))],
   "expense.agreed": ({ expense }) => [call(expense)],
   "expense.twin": ({ bold, pesos }) => [call(bold(pesos(45_000)))],
+  "expense.giveBackMax": ({ pesos }) => [call(pesos(10_000))],
+  "expense.proposalsLeft": () => [when("several left", 3), when("one left", 1)],
   "cashOut.passed": ({ bold, pesos }) => [call(bold(pesos(45_000)))],
   "cashOut.submitAmount": ({ pesos }) => [call(pesos(45_000))],
   "cashOut.accountHolds": ({ pesos }) => [call(pesos(45_000))],

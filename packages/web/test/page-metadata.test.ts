@@ -1,3 +1,4 @@
+import { USDT, WARS as WARS_TOKEN } from "@tesoreria/agent";
 import type { Metadata } from "next";
 import { getAddress } from "viem";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -41,6 +42,12 @@ function screen(): FundScreen {
     agreedExpense: "la cancha",
     closed: false,
     balance: 80_000n * WARS,
+    version: 1,
+    currency: WARS_TOKEN,
+    dollar: USDT,
+    feeBps: 0,
+    balanceCap: 450_000n * WARS,
+    counted: 80_000n * WARS,
     weeklyFee: 10_000n * WARS,
     weeklyCap: 60_000n * WARS,
     spentThisWeek: 0n,
@@ -61,6 +68,8 @@ function screen(): FundScreen {
     publicView: true,
     contributionOnItsWay: false,
     cashOutOnItsWay: false,
+    proposalsLeft: null,
+    giveBackMax: null,
   };
 }
 

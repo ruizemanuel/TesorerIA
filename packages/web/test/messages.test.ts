@@ -343,6 +343,7 @@ describe("the dictionaries", () => {
       blocked: "No se pudo procesar ahora. El agente lo vuelve a intentar en un rato.",
       sending: "El agente ya lo mandó. En un rato aparece en los movimientos.",
       new: "El agente está ocupado: lo procesa en unos minutos.",
+      quota: "Ya se usaron los pedidos que se votan de esta semana: el agente lo propone cuando empiece la próxima.",
     });
   });
 

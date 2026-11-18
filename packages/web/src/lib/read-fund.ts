@@ -7,11 +7,12 @@ import {
   conversionLoss,
   givenBack,
   joinWeeks,
+  proposalQuota,
   readFund,
   readFundEvents,
 } from "@tesoreria/agent";
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
-import { type Address, getAddress, zeroAddress } from "viem";
+import { type Address, getAddress, isAddressEqual, zeroAddress } from "viem";
 import { celoClient, logReader, nodeLogReader } from "./chain";
 import { blockTime, weekAt } from "./chain-time";
 import type { CurrentUser } from "./current-user";
@@ -51,6 +52,16 @@ export type FundScreen = {
   contributionOnItsWay: boolean;
   /** The viewer has a pass to pesos that went out and has no receipt yet: Pasar a pesos must not offer to send another. */
   cashOutOnItsWay: boolean;
+  /**
+   * For a member of a version 2 fund, how many of the agent's proposals this week they may still ask for (proposalQuota):
+   * Cargar un gasto says it for another expense or a give-back. Null for anyone else, and in version 1, which has no limit.
+   */
+  proposalsLeft: number | null;
+  /**
+   * For a member of a version 2 fund, the most they can ask back: what counts as their contribution, to the wei, which
+   * the contract takes a GiveBack off. Null for anyone else, and in version 1, whose give-backs are payments.
+   */
+  giveBackMax: bigint | null;
 };
 
 // The history check lives in history.ts (week-summaries.ts needs it too); these names stay importable from here.
@@ -203,12 +214,16 @@ export async function loadFundScreen(
     conversionHold: hold,
     summaries: summaryRows.map((row) => ({ week: row.week, at: row.createdAt })),
     currencyBalance: snapshot.currencyBalance,
+    feeBps: snapshot.feeBps,
     viewerIsMember: !publicView && viewerIsMember,
     now: new Date(Number(clock.timestamp) * 1000),
     m,
   });
   const contributionOnItsWay = pending.some((operation) => operation.kind === "contribute");
   const cashOutOnItsWay = !publicView && viewer !== null && viewerIsMember ? await cashOutPending(db, viewer.id) : false;
+  // A member of a version 2 fund, on the chain's list: their weekly proposals and what they contributed are counted there.
+  const member = !publicView && viewerIsMember && snapshot.version === 2 ? (viewer?.account ?? null) : null;
+  const seat = member === null ? -1 : snapshot.members.findIndex((address) => isAddressEqual(address, member));
   return {
     fundId: fund.id,
     block: snapshot.block,
@@ -220,6 +235,8 @@ export async function loadFundScreen(
     publicView,
     contributionOnItsWay,
     cashOutOnItsWay,
+    proposalsLeft: member === null || seat < 0 ? null : (proposalQuota(snapshot, events, member)?.left ?? null),
+    giveBackMax: seat < 0 ? null : (snapshot.contributed[seat] ?? null),
   };
 }
 

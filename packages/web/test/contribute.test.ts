@@ -1,4 +1,4 @@
-import { USDT, WARS } from "@tesoreria/agent";
+import { USDT, WARS, fundV2Abi } from "@tesoreria/agent";
 import { decodeFunctionData, erc20Abi, getAddress } from "viem";
 import { describe, expect, it } from "vitest";
 import {
@@ -18,12 +18,16 @@ import {
   usdtToSend,
   usdtWorth,
   usdtWorthText,
+  warsField,
   weeklyContribution,
+  withFee,
 } from "../src/lib/contribute";
 import { DEFAULT_BALANCE_CAP, memberFundAbi } from "../src/lib/fund-abi";
-import { NBSP, USDT_UNIT, WARS_UNIT, formatPesos } from "../src/lib/format";
+import { buildFundView } from "../src/lib/fund-view";
+import { NBSP, USDT_UNIT, WARS_UNIT, formatPesos, upToCentavo } from "../src/lib/format";
 import { en } from "../src/lib/i18n/en";
 import { es } from "../src/lib/i18n/es";
+import { snapshot } from "./support/fixtures";
 
 const FUND = getAddress("0x00000000000000000000000000000000000f00d1");
 const ME = getAddress("0x2F8218c7cF6d822091EDe24Db9c46B0324c21A6F");
@@ -35,7 +39,7 @@ describe("contributeCalls", () => {
       ["usdt", USDT, "contributeUsdt"],
       ["wars", WARS, "contributeWars"],
     ] as const) {
-      const [approve, contribute] = contributeCalls({ fund: FUND, token, amount: 10_000_000n });
+      const [approve, contribute] = contributeCalls({ fund: FUND, version: 1, token, amount: 10_000_000n, currency: WARS, dollar: USDT });
       expect(approve?.to).toBe(address);
       expect(decodeFunctionData({ abi: erc20Abi, data: approve!.data! })).toEqual({ functionName: "approve", args: [FUND, 10_000_000n] });
       expect(contribute?.to).toBe(FUND);
@@ -80,9 +84,9 @@ describe("what Aportar offers", () => {
 describe("the fund's cap", () => {
   it("is $ 450.000 by default, and the room is what is left of it", () => {
     expect(formatPesos(DEFAULT_BALANCE_CAP, "es")).toBe(`$${NBSP}450.000`);
-    expect(roomUnderCap(pesos(440_000))).toBe(pesos(10_000));
-    expect(roomUnderCap(DEFAULT_BALANCE_CAP)).toBe(0n);
-    expect(roomUnderCap(DEFAULT_BALANCE_CAP + 1n)).toBe(0n);
+    expect(roomUnderCap(pesos(440_000), DEFAULT_BALANCE_CAP, 0)).toBe(pesos(10_000));
+    expect(roomUnderCap(DEFAULT_BALANCE_CAP, DEFAULT_BALANCE_CAP, 0)).toBe(0n);
+    expect(roomUnderCap(DEFAULT_BALANCE_CAP + 1n, DEFAULT_BALANCE_CAP, 0)).toBe(0n);
   });
 
   it("fits what you hold under the room, in the token's own units", () => {
@@ -281,5 +285,122 @@ describe("what Aportar reads and writes in English", () => {
     const rate = 1_600n * WARS_UNIT;
     expect(usdtWorthText(6_260_000n, rate, pesos(10_000), en)).toBe(`That covers ARS${NBSP}10,000 at the current price.`);
     expect(usdtWorthText(10_000_000n, rate, pesos(10_000), en)).toBe(`That comes to about ARS${NBSP}16,000 at the current price.`);
+  });
+});
+
+describe("Aportar in a v2 fund", () => {
+  const rate = 1_600n * WARS_UNIT; // what one USDT is worth to the fund (quoteDollar of 1 USDT)
+  const week = { owed: 0n, weeklyFee: pesos(10_000), room: pesos(400_000) };
+
+  it("a v2 fund asks what credits the whole fee", () => {
+    const x = withFee(pesos(10_000), 25);
+    expect(x).toBe(10_025_062_656_641_604_010_026n);
+    // FundV2.contribute credits what arrives less its fee, rounded down: the week whole, or a wei more.
+    const credited = x - (x * 25n) / 10_000n;
+    expect([pesos(10_000), pesos(10_000) + 1n]).toContain(credited);
+    expect(pesosText(upToCentavo(x), "es")).toBe("10.025,07");
+    expect(pesosText(upToCentavo(x), "en")).toBe("10,025.07");
+    // The pesos tab offers it, within what the account holds and what fits under the cap.
+    expect(defaultWarsAmount({ held: pesos(45_000), ...week, feeBps: 25 })).toBe(x);
+    expect(defaultWarsAmount({ held: pesos(10_020), ...week, feeBps: 25 })).toBe(pesos(10_020));
+    expect(defaultWarsAmount({ held: pesos(45_000), ...week, room: pesos(5_000), feeBps: 25 })).toBe(pesos(5_000));
+    // Without a fee it is the week itself.
+    expect(withFee(pesos(10_000), 0)).toBe(pesos(10_000));
+    expect(defaultWarsAmount({ held: pesos(45_000), ...week, feeBps: 0 })).toBe(pesos(10_000));
+  });
+
+  it("an untouched field sends the exact amount, not the rounded one it shows", () => {
+    const x = withFee(pesos(10_000), 25);
+    const limits = { held: pesos(45_000), room: pesos(400_000) };
+    expect(warsField(null, x, 2, limits, es)).toEqual({ value: "10.025,07", reading: { ok: true, amount: x } });
+    expect(warsField(null, x, 2, limits, en)).toEqual({ value: "10,025.07", reading: { ok: true, amount: x } });
+    // What the field shows is a fraction of a centavo over it: typed, that is what goes.
+    expect(warsField("10.025,07", x, 2, limits, es)).toEqual({
+      value: "10.025,07",
+      reading: { ok: true, amount: pesos(10_025) + 7n * 10n ** 16n },
+    });
+    expect(warsField("10.025", x, 2, limits, es).reading).toEqual({ ok: true, amount: pesos(10_025) });
+    expect(warsField("50.000", x, 2, limits, es).reading).toEqual({ ok: false, error: `En tu cuenta tenés ${formatPesos(pesos(45_000), "es")}.` });
+    // A version 1 fund sends what its field shows, as it always did.
+    const owed = pesos(9_940) + 123n * 10n ** 15n;
+    expect(warsField(null, owed, 1, limits, es)).toEqual({ value: "9.940,12", reading: { ok: true, amount: pesos(9_940) + 12n * 10n ** 16n } });
+  });
+
+  it("in USDT, the margin covers the conversion and the fee once", () => {
+    const offer = { held: 20n * USDT_UNIT, rate, ...week, feeBps: 25 };
+    expect(defaultUsdtAmount(offer)).toBe(usdtFor(pesos(10_000), rate, 55n));
+    expect(defaultUsdtAmount(offer)).toBe(6_290_000n); // 10.055 / 1.600 = 6,284…
+    expect(usdtFor(withFee(pesos(10_000), 25), rate, 55n)).toBe(6_310_000n); // the fee twice: not what is asked
+    expect(usdtToSend({ ...offer, held: 0n })).toBe(6_290_000n);
+    expect(usdtToSend({ ...offer, held: 5n * USDT_UNIT })).toBe(1_290_000n);
+    // What it says under the field is about the week, net of the fee.
+    expect(usdtWorthText(6_290_000n, rate, pesos(10_000), es)).toBe(`Cubre los ${formatPesos(pesos(10_000), "es")}, al precio de ahora.`);
+    // Without a fee, the margin of a v1 fund.
+    expect(defaultUsdtAmount({ ...offer, feeBps: 0 })).toBe(usdtFor(pesos(10_000), rate));
+  });
+
+  it("contributeCalls for a v2 fund approves its currency or dollar and calls contribute or contributeDollar", () => {
+    const WBRL = getAddress("0xD76f5Faf6888e24D9F04Bf92a0c8B921FE4390e0");
+    for (const [token, currency, dollar, asset, fn] of [
+      ["wars", WARS, USDT, WARS, "contribute"],
+      ["usdt", WARS, USDT, USDT, "contributeDollar"],
+      ["wars", WBRL, null, WBRL, "contribute"],
+    ] as const) {
+      const [approve, contribute] = contributeCalls({ fund: FUND, version: 2, token, amount: 10_000_000n, currency, dollar });
+      expect(approve?.to).toBe(asset);
+      expect(decodeFunctionData({ abi: erc20Abi, data: approve!.data! })).toEqual({ functionName: "approve", args: [FUND, 10_000_000n] });
+      expect(contribute?.to).toBe(FUND);
+      expect(decodeFunctionData({ abi: fundV2Abi, data: contribute!.data! })).toEqual({ functionName: fn, args: [10_000_000n] });
+    }
+    // A fund with no dollar takes none.
+    expect(() => contributeCalls({ fund: FUND, version: 2, token: "usdt", amount: 1n, currency: WBRL, dollar: null })).toThrow();
+  });
+
+  it("the room under a v2 fund's cap leaves out dollars sent to it directly", () => {
+    // Caro's 6 USDT wait for the agent, worth $ 10.020; `stray` more reached the fund without contributeDollar.
+    const view = (stray: bigint) =>
+      buildFundView({
+        snapshot: snapshot({
+          version: 2,
+          feeBps: 25,
+          pendingDollar: [0n, 0n, 6n * USDT_UNIT],
+          pendingValue: [0n, 0n, pesos(10_020)],
+          totalPendingDollar: 6n * USDT_UNIT,
+          dollarBalance: 6n * USDT_UNIT + stray,
+        }),
+        name: "Fútbol de los jueves",
+        agreedExpense: "la cancha",
+        balance: pesos(90_000) + pesos(10_020) + usdtWorth(stray, rate),
+        weeklyFee: pesos(10_000),
+        joined: new Map(),
+        names: new Map(),
+        viewer: null,
+        m: es,
+      });
+    // 300 USDT of nobody's: $ 480.000, over the cap on their own, and the room doesn't shrink.
+    const withStray = view(300n * USDT_UNIT);
+    expect(withStray.balance).toBe(pesos(580_020));
+    expect(withStray.counted).toBe(pesos(100_020));
+    expect(view(0n).counted).toBe(pesos(100_020));
+    expect([withStray.version, withStray.feeBps, withStray.balanceCap]).toEqual([2, 25, DEFAULT_BALANCE_CAP]);
+    // In pesos, what goes in before the fee: (450.000 − 100.020) × 10.000 / 9.975, down; its fee leaves the cap whole.
+    const room = roomUnderCap(withStray.counted, withStray.balanceCap, withStray.feeBps);
+    expect(room).toBe(350_857_142_857_142_857_142_857n);
+    expect(withStray.counted + room - (room * 25n) / 10_000n).toBeLessThanOrEqual(withStray.balanceCap);
+    // In USDT, their value at the fund's rate: the contract counts pending dollars whole.
+    expect(roomUnderCap(withStray.counted, withStray.balanceCap, 0)).toBe(pesos(349_980));
+    // A v1 fund counts its whole balance, as before.
+    const v1 = buildFundView({
+      snapshot: snapshot(),
+      name: "Fútbol de los jueves",
+      agreedExpense: "la cancha",
+      balance: pesos(87_500),
+      weeklyFee: pesos(10_000),
+      joined: new Map(),
+      names: new Map(),
+      viewer: null,
+      m: es,
+    });
+    expect([v1.version, v1.counted, v1.feeBps, v1.balanceCap, v1.currency, v1.dollar]).toEqual([1, pesos(87_500), 0, DEFAULT_BALANCE_CAP, WARS, USDT]);
   });
 });

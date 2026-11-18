@@ -1,4 +1,4 @@
-import { AGENT_ADDRESS, FUND_FACTORY, fundFactoryAbi } from "@tesoreria/agent";
+import { AGENT_ADDRESS, FUND_FACTORY, USDT, WARS as WARS_TOKEN, fundFactoryAbi } from "@tesoreria/agent";
 import { keyChangeCallData } from "@tesoreria/wallet";
 import { createFakePasskey } from "@tesoreria/wallet/testing";
 import { eq } from "drizzle-orm";
@@ -73,7 +73,7 @@ vi.mock("../src/lib/agent-address", async (importOriginal) => {
 const CELO = numberToHex(42220);
 const FUND: Address = randomAccount(); // the member's live fund
 /** An operation from `sender`: by default, contributing to the member's fund, as Aportar sends it. */
-const op = (sender: string, callData: string = safeCallData(contributeCalls({ fund: FUND, token: "wars", amount: 10n ** 18n }))) => ({
+const op = (sender: string, callData: string = safeCallData(contributeCalls({ fund: FUND, version: 1, token: "wars", amount: 10n ** 18n, currency: WARS_TOKEN, dollar: USDT }))) => ({
   sender,
   nonce: "0x0",
   callData,

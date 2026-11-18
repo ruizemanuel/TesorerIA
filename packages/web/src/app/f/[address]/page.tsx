@@ -62,14 +62,27 @@ export default async function FundPage({ params, searchParams }: { params: Promi
         aportar: (
           <ContributePanel
             fund={screen.view.address}
+            version={screen.view.version}
             account={user.account}
+            currency={screen.view.currency}
+            dollar={screen.view.dollar}
+            feeBps={screen.view.feeBps}
             balance={screen.view.balance}
+            counted={screen.view.counted}
+            balanceCap={screen.view.balanceCap}
             owed={screen.view.me?.owed ?? 0n}
             weeklyFee={screen.view.weeklyFee}
             contributionOnItsWay={screen.contributionOnItsWay}
           />
         ),
-        gasto: <ExpensePanel fund={screen.view.address} agreedExpense={screen.view.agreedExpense} />,
+        gasto: (
+          <ExpensePanel
+            fund={screen.view.address}
+            agreedExpense={screen.view.agreedExpense}
+            proposalsLeft={screen.proposalsLeft}
+            giveBackMax={screen.giveBackMax}
+          />
+        ),
         cuenta: (
           <AccountPanel
             userName={user.name}

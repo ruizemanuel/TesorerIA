@@ -254,7 +254,10 @@ export const en: Messages = {
       `I converted the ${usdt} that came in to ${pesos}, ${diff} less than they were worth when contributed. ${who === null ? "The members who contributed them cover that difference." : `${who} covers that difference.`}`,
     convertedMore: (usdt: string, pesos: string, diff: string, who: string | null) =>
       `I converted the ${usdt} that came in to ${pesos}, ${diff} more than they were worth when contributed. ${who === null ? "That difference goes to the members who contributed them." : `That difference goes to ${who}.`}`,
+    convertedFor: (usdt: string, pesos: string, who: string) => `I converted ${who}'s ${usdt} to ${pesos}.`,
     convertedDetail: "I converted them and checked that the price was within 2 % of the dollar's reference price, as my rules say.",
+    feePaid: (pesos: string, percent: string) => `I sent ${pesos} of the ${percent} fee to TesorerIA, to cover what the fund's operations cost.`,
+    feePaidDetail: (percent: string) => `${percent} of each contribution covers what the fund's operations cost. I collect it and send it once a week.`,
     // What the group wrote goes in quotes in English: it stays as they wrote it, in Spanish (spec, 9.3).
     reimbursed: (amount: string, who: string, expense: string) => `I paid ${who} back ${amount} for “${expense}”.`,
     reimbursedLeftThisWeek: (left: string) => `This week's cap has ${left} left.`,
@@ -309,6 +312,7 @@ export const en: Messages = {
       waiting: (what: string) => `I've saved ${what}: I'll pay it back when the fund has the pesos.`,
       blocked: (what: string) => `I couldn't process ${what}. I'll try again in a while.`,
       rejected: (what: string) => `I can't pay back ${what}.`,
+      quota: (what: string) => `I've saved ${what}: I'll propose it when next week starts.`,
     },
     onItsWay: {
       vote: "Your vote is on its way.",
@@ -441,6 +445,7 @@ export const en: Messages = {
     usdtFormat: "Write it like 6 or 6.25.",
     covers: (pesos: string) => `That covers ${pesos} at the current price.`,
     worth: (pesos: string) => `That comes to about ${pesos} at the current price.`,
+    feeNote: (percent: string) => `It includes the ${percent} that covers what the fund's operations cost: the rest counts as your contribution.`,
   },
   expense: {
     which: "Which expense is it?",
@@ -461,6 +466,10 @@ export const en: Messages = {
     giveBackNotePlaceholder: "I deposited into another fund",
     giveBackSubmit: "Ask for it back",
     giveBackProposed: "The agent proposed giving it back to you, and now the group votes on it.",
+    giveBackMax: (amount: string) => `You can ask for up to ${amount}, what counts as contributed.`,
+    proposalsLeft: (left: number) =>
+      left === 1 ? "You have 1 request left this week that goes to a vote." : `You have ${left} requests left this week that go to a vote.`,
+    noProposalsLeft: "You've used this week's requests that go to a vote: if you add it, the agent proposes it when next week starts.",
   },
   outcome: {
     reimbursed: "Done: the agent paid you back.",
@@ -469,6 +478,7 @@ export const en: Messages = {
     rejected: "The agent can't pay this expense back.",
     blocked: "It couldn't be processed right now. The agent will try again in a while.",
     sending: "The agent already sent it. It'll show up in the activity in a while.",
+    quota: "This week's requests that go to a vote are used up: the agent proposes it when next week starts.",
     new: "The agent is busy: it'll process it in a few minutes.",
   },
   cashOut: {

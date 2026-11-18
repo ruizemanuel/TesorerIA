@@ -549,6 +549,45 @@ describe("loadFundScreen: a version 2 fund", () => {
     expect(await holds(address)).toEqual([expect.stringContaining(`Todavía no pasé a pesos ${formatUsdt(6n * USDT_UNIT, "es")}: el precio de referencia`)]);
   });
 
+  it("a v2 member sees how many proposals they have left, and how much they can ask back", async () => {
+    // Caro put in $ 10.025,07, which credited $ 10.000,007325; this week the agent proposed two of Beto's expenses.
+    const credited = 10_000_007_325_000_000_000_000n;
+    const betoAccount = getAddress(beto.account);
+    const proposal = (id: bigint, block: bigint) =>
+      event("ProposalCreated", { id, action: 0, a: betoAccount, b: zeroAddress, amount: 1_000n * WARS, proposer: AGENT, note: "pelota" }, block);
+    setHistory([
+      event("Contribution", { member: caroAccount(), token: WARS_TOKEN, amount: 10_025_070_000_000_000_000_000n, credited }, BLOCK - 900n),
+      proposal(0n, BLOCK - 200n),
+      proposal(1n, BLOCK - 100n),
+    ]);
+    const address = await liveFundV2({ agentProposalsThisWeek: 2n });
+    const seen = async (person: Person) => {
+      const screen = (await loadFundScreen(address, asViewer(person)))!;
+      return [screen.proposalsLeft, screen.giveBackMax];
+    };
+    // 8 left this week: Caro keeps all but Ana's one; Beto, who had two, all but Ana's and Caro's. To the wei.
+    expect(await seen(caro)).toEqual([7, credited]);
+    expect(await seen(beto)).toEqual([6, 0n]);
+    // The public view is no one's.
+    await db.update(funds).set({ publicView: true }).where(eq(funds.address, address));
+    const shown = (await loadFundScreen(address, null, { publicView: true }))!;
+    expect([shown.proposalsLeft, shown.giveBackMax]).toEqual([null, null]);
+  });
+
+  it("a v1 fund has no weekly proposals to count, and its give-backs are payments: neither number", async () => {
+    setHistory([paidByBeto()]);
+    const screen = (await loadFundScreen(await liveFund(), asViewer(beto)))!;
+    expect([screen.proposalsLeft, screen.giveBackMax]).toEqual([null, null]);
+  });
+
+  it("tells the fee sent with the fund's own percent", async () => {
+    setHistory([event("FeePaid", { amount: 200n * WARS }, BLOCK - 100n)]);
+    const address = await liveFundV2();
+    expect(texts((await loadFundScreen(address, asViewer(ana)))!)).toEqual([
+      `Pasé ${formatPesos(200n * WARS, "es")} de la comisión del 0,25 % a TesorerIA, para cubrir lo que cuestan las operaciones del fondo.`,
+    ]);
+  });
+
   it("takes no failed fee payment for a reason the dollars wait", async () => {
     // The heartbeat sends the week's fee before converting: a fee it couldn't send says nothing about the dollars.
     setHistory([event("Contribution", { member: caroAccount(), token: USDT, amount: 6n * USDT_UNIT, credited: 0n }, BLOCK - 100n)]);

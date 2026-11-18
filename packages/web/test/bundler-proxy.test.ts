@@ -72,7 +72,8 @@ const createFundCall = (members: Address[] = [ME, OTHER, randomAccount()]): Call
 });
 /** A createFund as `frozenCreateFunds` gives it: the factory it goes to, and its calldata. */
 const frozen = (call: Call): { to: Address; data: Hex } => ({ to: call.to, data: call.data! });
-const contribute = (fund: Address, token: "wars" | "usdt" = "wars") => contributeCalls({ fund, token, amount: 10n ** 18n });
+/** Aportar's calls as a v1 fund takes them (contributeWars or contributeUsdt), to any fund: a v2 fund refuses them. */
+const contribute = (fund: Address, token: "wars" | "usdt" = "wars") => contributeCalls({ fund, version: 1, token, amount: 10n ** 18n, currency: WARS, dollar: USDT });
 const op = (sender: string, callData: string = safeCallData(contribute(FUND))) => ({ sender, nonce: "0x0", callData });
 
 /** The settings a createFund's data carries. */

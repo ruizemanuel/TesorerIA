@@ -4,7 +4,7 @@ import { MAX_NOTE_LENGTH } from "@tesoreria/agent";
 import { useRef, useState } from "react";
 import { post } from "../lib/client/api";
 import { userMessage } from "../lib/client/errors";
-import { type ExpenseKind, expenseFields, panelOutcome } from "../lib/expense-fields";
+import { type ExpenseKind, expenseFields, expenseLimits, panelOutcome } from "../lib/expense-fields";
 import { MAX_PESOS, formatPesos, parsePesos } from "../lib/format";
 import { useLocale, useMessages } from "../lib/i18n/client";
 import { useRefresh } from "./refresh-provider";
@@ -15,9 +15,21 @@ type Twin = { status: string; amount: bigint };
 
 /**
  * Cargar un gasto (spec, 9, pantalla 6): the agreed expense, another one, or part of a contribution given back (spec,
- * 7.3), the amount and a note. What the fields ask follows the kind chosen.
+ * 7.3), the amount and a note. What the fields ask follows the kind chosen. In a version 2 fund it also says how many of
+ * this week's proposals the member has left (`proposalsLeft`) and the most a give-back can ask (`giveBackMax`), and
+ * doesn't send one over it (FundScreen).
  */
-export function ExpensePanel({ fund, agreedExpense }: { fund: string; agreedExpense: string }) {
+export function ExpensePanel({
+  fund,
+  agreedExpense,
+  proposalsLeft,
+  giveBackMax,
+}: {
+  fund: string;
+  agreedExpense: string;
+  proposalsLeft: number | null;
+  giveBackMax: bigint | null;
+}) {
   const m = useMessages();
   const locale = useLocale();
   const { refresh } = useRefresh();
@@ -30,6 +42,7 @@ export function ExpensePanel({ fund, agreedExpense }: { fund: string; agreedExpe
   const [error, setError] = useState("");
   const [kind, setKind] = useState<ExpenseKind>("agreed");
   const fields = expenseFields(kind, m);
+  const limits = expenseLimits(kind, { proposalsLeft, giveBackMax }, m);
   const form = useRef<HTMLFormElement>(null);
 
   async function submit(confirmDuplicate: boolean) {
@@ -40,6 +53,11 @@ export function ExpensePanel({ fund, agreedExpense }: { fund: string; agreedExpe
     const units = parsePesos(amount, locale);
     if (units === null || units > MAX_PESOS) {
       setError(units === null ? m.errors.amountFormat : m.errors.amountTooBig(formatPesos(MAX_PESOS, locale)));
+      return;
+    }
+    // The agent gives back no more than what counts as contributed, to the wei: more isn't sent, and the panel says why.
+    if (limits.giveBackMax !== null && giveBackMax !== null && units > giveBackMax) {
+      setError(limits.giveBackMax);
       return;
     }
     sending.current = true;
@@ -96,9 +114,11 @@ export function ExpensePanel({ fund, agreedExpense }: { fund: string; agreedExpe
           {m.expense.giveBack}
         </label>
       </fieldset>
+      {limits.quota !== null && <p className="text-sm text-muted">{limits.quota}</p>}
       <label className="grid gap-1">
         <span className="font-semibold">{fields.amountLabel}</span>
         <input className={`${FIELD} money`} name="amount" required inputMode="decimal" autoComplete="off" placeholder={m.expense.amountPlaceholder} />
+        {limits.giveBackMax !== null && <span className="text-sm text-muted">{limits.giveBackMax}</span>}
       </label>
       <label className="grid gap-1">
         <span className="font-semibold">{fields.noteLabel}</span>

@@ -3,7 +3,7 @@ import { type Address, type Hash, getAddress, isAddressEqual } from "viem";
 import { type BlockClock, blockTime, weekAt } from "./chain-time";
 import type { ExpenseStatus } from "./db/schema";
 import { ProposalAction } from "./fund-abi";
-import { formatPesos, formatUsdt, upToCentavo } from "./format";
+import { formatPercent, formatPesos, formatUsdt, upToCentavo } from "./format";
 import type { Messages } from "./i18n/messages";
 import { sameName } from "./same-name";
 
@@ -91,6 +91,7 @@ export function buildTimeline({
   conversionHold = null,
   summaries = [],
   currencyBalance,
+  feeBps = 0,
   viewerIsMember,
   now,
   m,
@@ -113,7 +114,7 @@ export function buildTimeline({
   giveBacks?: ReadonlySet<bigint>;
   /**
    * By the Conversion's `${transactionHash}:${logIndex}`, what it got under or over what its USDT was credited and
-   * whose it was (conversionLoss, conversion-loss design).
+   * whose it was (conversionLoss, conversion-loss design). Version 1 only: version 2 credits what each conversion got.
    */
   conversions?: ReadonlyMap<string, ConversionDifference>;
   expenses: readonly TimelineExpense[];
@@ -127,8 +128,10 @@ export function buildTimeline({
   conversionHold?: ConversionHold | null;
   /** The agent's summary of each week that closed (spec, 9.4): the contract's week, and when the agent wrote it. */
   summaries?: readonly { week: number; at: Date }[];
-  /** The wARS the fund holds now: a payment over it can't be executed yet. */
+  /** What the fund can pay now (v2: without the fee set aside): a payment or a give-back over it can't be executed yet. */
   currencyBalance: bigint;
+  /** A version 2 fund's fee, in basis points (FundV2.feeBps), for the weekly FeePaid; 0 in version 1, which has none. */
+  feeBps?: number;
   viewerIsMember: boolean;
   now: Date;
   /** The page's dictionary: its sentences, and `m.locale` for the amounts. */
@@ -165,6 +168,13 @@ export function buildTimeline({
         const { dollarIn, currencyOut } = event.args;
         const usdt = formatUsdt(dollarIn, m.locale);
         const pesos = formatPesos(currencyOut, m.locale);
+        if ("member" in event.args) {
+          // Version 2 converts each member's own pending dollars and credits what they gave: whose they were, never a
+          // difference to cover. `currencyOut` is that member's part of the swap, before the fee.
+          const text = t.convertedFor(usdt, pesos, who(event.args.member));
+          items.push({ ...base, actor: { kind: "agent" }, text, detail: t.convertedDetail });
+          break;
+        }
         const found = conversions.get(`${event.transactionHash}:${event.logIndex}`);
         const size = found === undefined ? 0n : found.difference < 0n ? -found.difference : found.difference;
         let text = t.converted(usdt, pesos);
@@ -206,8 +216,10 @@ export function buildTimeline({
           if (state.executed) tail = t.proposal.approved;
           else if (state.deadline <= nowSeconds) tail = hasVotes ? t.proposal.expiredWithVotes : t.proposal.expiredWithoutVotes;
           else if (hasVotes) {
-            // The vote that completed the count couldn't execute it then (castVote): the fund may still be short.
-            const short = action === ProposalAction.Pay && amount > currencyBalance ? amount - currencyBalance : 0n;
+            // The vote that completed the count couldn't execute it then (castVote): the fund may still be short of what
+            // it pays out, a payment or a version 2 give-back.
+            const paysOut = action === ProposalAction.Pay || action === ProposalAction.GiveBack;
+            const short = paysOut && amount > currencyBalance ? amount - currencyBalance : 0n;
             if (short > 0n) tail = t.proposal.short(formatPesos(upToCentavo(short), m.locale));
             else {
               tail = t.proposal.needsCarryingOut;
@@ -242,6 +254,17 @@ export function buildTimeline({
         const id = paidProposal(events, event);
         const paid = id !== undefined && giveBacks.has(id) ? t.givenBack : t.paid;
         items.push({ ...base, actor: { kind: "group" }, text: paid(formatPesos(amount, m.locale), who(member)) });
+        break;
+      }
+      case "ContributionGivenBack": {
+        // Version 2's GiveBack, which the contract takes off what the member contributed: told as version 1's give-back.
+        const { member, amount } = event.args;
+        items.push({ ...base, actor: { kind: "group" }, text: t.givenBack(formatPesos(amount, m.locale), who(member)) });
+        break;
+      }
+      case "FeePaid": {
+        const percent = formatPercent(feeBps, m.locale);
+        items.push({ ...base, actor: { kind: "agent" }, text: t.feePaid(formatPesos(event.args.amount, m.locale), percent), detail: t.feePaidDetail(percent) });
         break;
       }
       case "MemberAdded": {
@@ -306,6 +329,7 @@ export function buildTimeline({
       waiting: t.expense.waiting(what),
       blocked: t.expense.blocked(what),
       rejected: t.expense.rejected(what),
+      quota: t.expense.quota(what),
     };
     const sentence = text[expense.status];
     if (sentence === undefined) continue; // reimbursed or proposed: the chain tells it
@@ -414,6 +438,8 @@ function proposalText(
       return t.setVotesRequired(Number(amount), agreedExpense);
     case ProposalAction.SetAgent:
       return t.setAgent;
+    case ProposalAction.GiveBack:
+      return t.giveBack(formatPesos(amount, m.locale), who(a), note);
     default:
       return t.close;
   }

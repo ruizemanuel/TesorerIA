@@ -312,8 +312,14 @@ export const es = {
       `Pasé a pesos los ${usdt} que entraron: ${pesos}, ${diff} menos de lo que valían al aportarlos. ${who === null ? "Esa diferencia la ponen quienes los aportaron." : `Esa diferencia la pone ${who}.`}`,
     convertedMore: (usdt: string, pesos: string, diff: string, who: string | null) =>
       `Pasé a pesos los ${usdt} que entraron: ${pesos}, ${diff} más de lo que valían al aportarlos. ${who === null ? "Esa diferencia les queda a favor a quienes los aportaron." : `Esa diferencia le queda a favor a ${who}.`}`,
+    /** A version 2 conversion, which names whose dollars they were (`who`): `pesos` is what they gave, before the fee. */
+    convertedFor: (usdt: string, pesos: string, who: string) => `Pasé a pesos los ${usdt} de ${who}: ${pesos}.`,
     // Plain words, no jargon (spec, 9): the exchange and the price feed stay out of what people read.
     convertedDetail: "Los cambié a pesos y revisé que el precio no se alejara más de 2 % del precio de referencia del dólar, como dicen mis reglas.",
+    /** The fee a version 2 fund sets aside from each contribution, sent once a week: `percent` is the fund's, as formatPercent writes it. */
+    feePaid: (pesos: string, percent: string) =>
+      `Pasé ${pesos} de la comisión del ${percent} a TesorerIA, para cubrir lo que cuestan las operaciones del fondo.`,
+    feePaidDetail: (percent: string) => `De cada aporte, el ${percent} cubre lo que cuestan las operaciones del fondo. Lo junto y lo mando una vez por semana.`,
     reimbursed: (amount: string, who: string, expense: string) => `Le devolví ${amount} a ${who} por ${expense}.`,
     reimbursedLeftThisWeek: (left: string) => `Quedan ${left} del tope de esta semana.`,
     reimbursedLeftThatWeek: (left: string) => `Quedaban ${left} del tope de esa semana.`,
@@ -375,6 +381,8 @@ export const es = {
       waiting: (what: string) => `Guardé ${what}: lo devuelvo cuando el fondo tenga los pesos.`,
       blocked: (what: string) => `No pude procesar ${what}. Lo vuelvo a intentar en un rato.`,
       rejected: (what: string) => `No puedo devolver ${what}.`,
+      /** A proposal the agent has none of this week's left for: it makes it when the fund's next week starts. */
+      quota: (what: string) => `Guardé ${what}: lo propongo cuando empiece la semana que viene.`,
     },
     /** The viewer's own operations on their way. */
     onItsWay: {
@@ -546,6 +554,8 @@ export const es = {
     /** Under the USDT field: that it covers this week's contribution, or what it comes to. */
     covers: (pesos: string) => `Cubre los ${pesos}, al precio de ahora.`,
     worth: (pesos: string) => `Son unos ${pesos} al precio de ahora.`,
+    /** Under a version 2 fund's amount: the fee it includes, `percent` as formatPercent writes it. */
+    feeNote: (percent: string) => `Incluye el ${percent} que cubre lo que cuestan las operaciones del fondo: lo demás cuenta como tu aporte.`,
   },
   /** Cargar un gasto (spec, 9, pantalla 6). */
   expense: {
@@ -571,6 +581,11 @@ export const es = {
     giveBackNotePlaceholder: "Deposité en otro fondo",
     giveBackSubmit: "Pedir la devolución",
     giveBackProposed: "El agente propuso devolvértelo y ahora lo vota el grupo.",
+    /** In a version 2 fund, with a give-back chosen: the most it can ask, down to the centavo. It is also what an amount over it says. */
+    giveBackMax: (amount: string) => `Podés pedir hasta ${amount}, lo que cuenta como aportado.`,
+    /** In a version 2 fund, with another expense or a give-back chosen: how many of the agent's proposals of the week are left. */
+    proposalsLeft: (left: number) => (left === 1 ? "Te queda 1 pedido que se vota esta semana." : `Te quedan ${left} pedidos que se votan esta semana.`),
+    noProposalsLeft: "Ya usaste los pedidos que se votan de esta semana: si lo cargás, el agente lo propone cuando empiece la próxima.",
   },
   /** What happened to an expense a member loaded, by its status: the panel and the agent's card say the same. */
   outcome: {
@@ -580,6 +595,8 @@ export const es = {
     rejected: "El agente no puede devolver este gasto.",
     blocked: "No se pudo procesar ahora. El agente lo vuelve a intentar en un rato.",
     sending: "El agente ya lo mandó. En un rato aparece en los movimientos.",
+    /** The agent has none of this week's proposals left: it proposes it when the fund's next week starts. */
+    quota: "Ya se usaron los pedidos que se votan de esta semana: el agente lo propone cuando empiece la próxima.",
     /** Anything else: the expense is saved and the agent hasn't looked yet. */
     new: "El agente está ocupado: lo procesa en unos minutos.",
   },

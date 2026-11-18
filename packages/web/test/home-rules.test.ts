@@ -1,3 +1,4 @@
+import { USDT, WARS } from "@tesoreria/agent";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { type Address, getAddress } from "viem";
@@ -25,6 +26,12 @@ function view(): FundView {
     agreedExpense: "la cancha",
     closed: false,
     balance: 120_000n * WARS_UNIT,
+    version: 1,
+    currency: WARS,
+    dollar: USDT,
+    feeBps: 0,
+    balanceCap: 450_000n * WARS_UNIT,
+    counted: 120_000n * WARS_UNIT,
     weeklyFee: 10_000n * WARS_UNIT,
     weeklyCap: 60_000n * WARS_UNIT,
     spentThisWeek: 45_000n * WARS_UNIT,

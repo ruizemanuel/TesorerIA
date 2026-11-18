@@ -633,6 +633,98 @@ describe("buildTimeline: what a conversion got under or over its USDT's credit (
   });
 });
 
+describe("buildTimeline: a version 2 fund", () => {
+  const ars = (text: string) => text.replaceAll("ARS ", `ARS${NBSP}`).replaceAll(" USDT", `${NBSP}USDT`);
+  /** "0,25 %" and "0.25%", as each language writes the fee: the Spanish one doesn't break before its sign. */
+  const percent = (text: string) => text.replaceAll(" %", `${NBSP}%`);
+  const v2 = (change: Partial<Parameters<typeof buildTimeline>[0]> = {}) => timeline({ feeBps: 25, ...change });
+  const giveBack = (amount: bigint) =>
+    event("ProposalCreated", { id: 3n, action: 8, a: CARO, b: zeroAddress, amount, proposer: AGENT, note: "deposité en otro fondo" }, BLOCK - 300n, 30);
+
+  it("tells a v2 conversion with whose dollars they were", () => {
+    const conversion = event(
+      "Conversion",
+      { member: ANA, dollarIn: 6_300_000n, currencyOut: 801_234n * 10n ** 16n, credited: 799_231n * 10n ** 16n },
+      BLOCK - 500n,
+    );
+    const [said] = v2({ events: [conversion] });
+    // 6,30 USDT, written as every USDT amount in Movimientos is (formatUsdt): "6,3 USDT", like "10,5 USDT".
+    expect(said).toMatchObject({ actor: { kind: "agent" }, text: $("Pasé a pesos los 6,3 USDT de Ana: $ 8.012,34.") });
+    expect(said?.detail).toBe(es.timeline.convertedDetail);
+    expect(v2({ events: [conversion], m: en })[0]?.text).toBe(ars("I converted Ana's 6.3 USDT to ARS 8,012.34."));
+    // Never the v1 sentences of what a conversion got under or over its credit: v2 credits what the conversion got.
+    const key = `${conversion.transactionHash}:${conversion.logIndex}`;
+    const loss = new Map([[key, { difference: 195n * 10n ** 16n, members: [ANA] }]]);
+    expect(v2({ events: [conversion], conversions: loss })[0]?.text).toBe($("Pasé a pesos los 6,3 USDT de Ana: $ 8.012,34."));
+  });
+
+  it("tells a GiveBack proposal and its ContributionGivenBack like a v1 give-back", () => {
+    const events = [
+      giveBack(10_000n * WARS),
+      event("ContributionGivenBack", { member: CARO, amount: 10_000n * WARS }, BLOCK - 100n, 31),
+      { ...event("ProposalExecuted", { id: 3n }, BLOCK - 100n, 31), logIndex: 1 },
+    ];
+    const executed = new Map([[3n, { votes: 2, executed: true, deadline: CLOCK.timestamp + 86_400n, voted: true }]]);
+    expect(v2({ events, proposals: executed }).map((i) => [i.actor.kind, i.text])).toEqual([
+      ["group", $("El fondo le devolvió $ 10.000 de su aporte a Caro: la propuesta se aprobó.")],
+      ["agent", $("Propuse devolverle $ 10.000 de su aporte a Caro (deposité en otro fondo). Se aprobó.")],
+    ]);
+    expect(v2({ events, proposals: executed, m: en }).map((i) => i.text)).toEqual([
+      ars("The fund gave Caro back ARS 10,000 of their contribution: the proposal was approved."),
+      ars("I proposed giving Caro back ARS 10,000 of their contribution (“deposité en otro fondo”). It was approved."),
+    ]);
+  });
+
+  it("says the fund is short for a GiveBack instead of offering to carry it out", () => {
+    const ready = { votes: 2, executed: false, deadline: CLOCK.timestamp + 86_400n, voted: true };
+    const at = (currencyBalance: bigint) => v2({ events: [giveBack(30_000n * WARS)], proposals: new Map([[3n, ready]]), currencyBalance })[0];
+    const short = at(20_000n * WARS);
+    expect(short?.text).toBe(
+      $("Propuse devolverle $ 30.000 de su aporte a Caro (deposité en otro fondo). Tiene los votos, pero al fondo le faltan $ 10.000 para pagarlo."),
+    );
+    expect(short?.action).toBeUndefined();
+    expect(at(30_000n * WARS)).toMatchObject({
+      text: $("Propuse devolverle $ 30.000 de su aporte a Caro (deposité en otro fondo). Tiene los votos: falta ejecutarla."),
+      action: { kind: "execute", proposalId: 3n, canExecute: true },
+    });
+  });
+
+  it("tells the weekly fee sent", () => {
+    const [sent] = v2({ events: [event("FeePaid", { amount: 200n * WARS + 5n * 10n ** 16n }, BLOCK - 200n)] });
+    expect(sent).toMatchObject({
+      actor: { kind: "agent" },
+      text: percent($("Pasé $ 200,05 de la comisión del 0,25 % a TesorerIA, para cubrir lo que cuestan las operaciones del fondo.")),
+      detail: percent("De cada aporte, el 0,25 % cubre lo que cuestan las operaciones del fondo. Lo junto y lo mando una vez por semana."),
+      action: { kind: "receipt", tx: pad(toHex(Number((BLOCK - 200n) % 100_000n)), { size: 32 }) },
+    });
+    const [english] = v2({ events: [event("FeePaid", { amount: 200n * WARS + 5n * 10n ** 16n }, BLOCK - 200n)], m: en });
+    expect(english?.text).toBe(ars("I sent ARS 200.05 of the 0.25% fee to TesorerIA, to cover what the fund's operations cost."));
+    expect(english?.detail).toBe("0.25% of each contribution covers what the fund's operations cost. I collect it and send it once a week.");
+  });
+
+  it("leaves out a v2 RemainderDistributed of dust", () => {
+    // FundV2._split leaves under a wei per member of the currency and of the dollar nobody had pending.
+    const items = v2({
+      events: [
+        event("RemainderDistributed", { currencyBalance: 2n, dollarBalance: 1n }, BLOCK - 200n),
+        event("RemainderDistributed", { currencyBalance: 0n, dollarBalance: 300n * USDT_UNIT }, BLOCK - 100n),
+      ],
+    });
+    expect(items.map((i) => i.text)).toEqual(["Se repartió lo que llegó después del cierre."]);
+  });
+
+  it("tells an expense waiting for next week's proposals", () => {
+    const at = new Date(NOW.getTime() - 60_000);
+    const expense = { id: "q", by: "Ana", amount: 45_000n * WARS, note: "la cancha del jueves", status: "quota" as const, createdAt: at };
+    expect(v2({ expenses: [expense] }).map((i) => [i.actor, i.text, i.pending ?? false])).toEqual([
+      [{ kind: "agent" }, $("Guardé el gasto de $ 45.000 que cargó Ana (la cancha del jueves): lo propongo cuando empiece la semana que viene."), false],
+    ]);
+    expect(v2({ expenses: [expense], m: en })[0]?.text).toBe(
+      ars("I've saved the ARS 45,000 expense that Ana added (“la cancha del jueves”): I'll propose it when next week starts."),
+    );
+  });
+});
+
 describe("buildTimeline: asking to join a live fund (spec, 9.4)", () => {
   const LUCAS = getAddress("0x000000000000000000000000000000000000aaa4");
   const ASKED = new Date(NOW.getTime() - 3_600_000);
