@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { type Hex, type Log, decodeFunctionData, encodeAbiParameters, encodeEventTopics, pad } from "viem";
 import { describe, expect, it } from "vitest";
-import { AGENT_ADDRESS, FUND_FACTORY, IDENTITY_REGISTRY } from "../src/chain";
+import { AGENT_ADDRESS, FUND_FACTORY, FUND_FACTORY_V2, IDENTITY_REGISTRY } from "../src/chain";
 import {
   AGENT_IMAGE,
   AGENT_URI,
@@ -54,6 +54,18 @@ describe("the ERC-8004 registration", () => {
     expect(file.description).toContain("At the close of each week it writes the group a summary of who owes what and what happened");
     expect(file.services).toEqual([{ name: "web", endpoint: "https://tesoreria.finance" }]);
     expect(file.active).toBe(true);
+  });
+
+  it("names both factories, says new funds are created in FundFactoryV2 in wARS with a 0.25% fee, and promises no other currency", () => {
+    const { description } = agentRegistration();
+    expect(description).toContain(`FundFactory ${FUND_FACTORY}`);
+    expect(description).toContain(`FundFactoryV2 ${FUND_FACTORY_V2}`);
+    expect(description).toContain("New funds are created in FundFactoryV2, today in wARS, with a 0.25% fee that pays for gas");
+    // wARS's limits, and the other currencies' set per currency.
+    expect(description).toContain("100,000 wARS per reimbursement and 150,000 wARS a day per fund");
+    expect(description).toContain("limits in other currencies are set per currency");
+    // The web doesn't offer them yet: none is named as one a group can pick.
+    for (const symbol of ["wBRL", "wMXN", "wCOP", "wPEN", "wCLP"]) expect(description).not.toContain(symbol);
   });
 
   it("shows the agent's avatar as its image, a square PNG served from this repo on GitHub next to the file", () => {

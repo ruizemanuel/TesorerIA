@@ -1,6 +1,6 @@
 import { type Address, type Hex, type Log, encodeFunctionData, formatUnits, isAddressEqual, parseAbi, parseEventLogs } from "viem";
-import { AGENT_ADDRESS, CELO_CHAIN_ID, FUND_FACTORY, IDENTITY_REGISTRY, WARS } from "./chain";
-import { currencyOf } from "./currencies";
+import { AGENT_ADDRESS, CELO_CHAIN_ID, FUND_FACTORY, FUND_FACTORY_V2, IDENTITY_REGISTRY, WARS } from "./chain";
+import { FEE_BPS, currencyOf } from "./currencies";
 import { LIMITS } from "./limits";
 
 export const identityRegistryAbi = parseAbi([
@@ -36,7 +36,7 @@ function amount(value: bigint, decimals: number): string {
 
 /** The ERC-8004 registration file (registration-v1): who the agent is, what it does and its limits. */
 export function agentRegistration() {
-  // The file still describes the funds in wARS with USDT, the only ones that existed when it was written.
+  // The web creates funds in wARS with USDT only, so the file says so: it names no other currency until the web offers it.
   const wars = currencyOf(WARS);
   if (wars === undefined) throw new Error("wARS is not in CURRENCIES");
   return {
@@ -48,10 +48,11 @@ export function agentRegistration() {
       "up to a weekly cap, and turns every other payment into a proposal the members vote on. " +
       "At the close of each week it writes the group a summary of who owes what and what happened, for a member " +
       "to share in the group's chat. A contract " +
-      `deployed by FundFactory ${FUND_FACTORY} enforces its limits: it can only pay members, never above the ` +
-      "weekly cap, and it can't change the rules. Its own code adds more: at most " +
+      `deployed by FundFactory ${FUND_FACTORY} or FundFactoryV2 ${FUND_FACTORY_V2} enforces its limits: it can only ` +
+      "pay members, never above the weekly cap, and it can't change the rules. New funds are created in " +
+      `FundFactoryV2, today in wARS, with a ${FEE_BPS / 100}% fee that pays for gas. Its own code adds more: at most ` +
       `${amount(wars.limits.reimbursement, wars.decimals)} wARS per reimbursement and ` +
-      `${amount(wars.limits.dailyReimbursed, wars.decimals)} wARS a day per fund, ` +
+      `${amount(wars.limits.dailyReimbursed, wars.decimals)} wARS a day per fund (limits in other currencies are set per currency), ` +
       `${amount(LIMITS.maxConversionDollar, 0)} USDT per conversion and ` +
       `${amount(LIMITS.maxDailyConvertedDollar, 0)} USDT a day, and ${LIMITS.maxDailyTransactions} transactions a ` +
       `day per fund. Its wallet, ${AGENT_ADDRESS}, pays gas in USDT and tags every transaction with ` +
