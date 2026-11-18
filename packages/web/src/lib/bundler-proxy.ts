@@ -1,4 +1,4 @@
-import { FUND_FACTORY, FUND_FACTORY_V2, USDT, WARS, shortMessage } from "@tesoreria/agent";
+import { FUND_FACTORY, FUND_FACTORY_V2, type FundVersion, USDT, WARS, currencyOf, fundV2Abi, shortMessage } from "@tesoreria/agent";
 import { ATTRIBUTION_SUFFIX, SAFE_P256_VERIFIERS, SAFE_WEBAUTHN_SHARED_SIGNER } from "@tesoreria/wallet";
 import { and, eq, isNotNull } from "drizzle-orm";
 import {
@@ -188,10 +188,17 @@ export function keyChangeCallKey(callData: string): Hex | null {
   return verifiers === BigInt(SAFE_P256_VERIFIERS) ? concat([numberToHex(x, { size: 32 }), numberToHex(y, { size: 32 })]) : null;
 }
 
+/**
+ * A live fund the person is a member of, with what decides which of its calls and tokens are sponsored: the contract it
+ * runs (`version`), the token it keeps its money in (`currency`) and the dollar it takes in, if it takes one. A v1 fund's
+ * are wARS and USDT, which its functions (`contributeWars`, `contributeUsdt`) are named after.
+ */
+export type LiveFund = { address: Address; version: FundVersion; currency: Address; dollar: Address | null };
+
 /** Who may be sponsored, and for which funds. */
 export type Sponsorship = {
   /** The live funds the person is a member of. */
-  liveFunds: Address[];
+  liveFunds: LiveFund[];
   /**
    * The createFund call (its factory and its calldata) of each draft they created that is being created right now
    * (`deploying`), exactly as deployCall built it (`frozenCreateFunds`): the only createFunds theirs to send.
@@ -204,30 +211,53 @@ export type Sponsorship = {
   joinRequests: { fund: Address; account: Address }[];
 };
 
-/** What a live fund's member calls on it (spec, 9): contribute, and vote and execute. */
+/** What a live v1 fund's member calls on it (spec, 9): contribute, in wARS or USDT, and vote and execute. */
 const FUND_CALLS = new Set(["contributeWars", "contributeUsdt", "vote", "execute"]);
+/** What a live v2 fund's member calls on it: contribute, in its currency or its dollar, and vote and execute. */
+const FUND_V2_CALLS = new Set(["contribute", "contributeDollar", "vote", "execute"]);
 
-/** Whether a member of the live funds `isLive` knows may make this call: approve one for wARS or USDT, or call it. */
-function memberCall({ to, data }: OperationCall, isLive: (address: Address) => boolean): boolean {
-  if (isAddressEqual(to, WARS) || isAddressEqual(to, USDT)) {
-    const decoded = decodeExactly(erc20Abi, data);
-    return decoded?.functionName === "approve" && isLive(decoded.args[0]);
+/** Whether a contribution to `fund` pulls `token`: a v1 fund's wARS and USDT, a v2 fund's currency and its dollar, if it has one. */
+function takesToken(fund: LiveFund, token: Address): boolean {
+  if (fund.version === 1) return isAddressEqual(token, WARS) || isAddressEqual(token, USDT);
+  return isAddressEqual(token, fund.currency) || (fund.dollar !== null && isAddressEqual(token, fund.dollar));
+}
+
+/** Whether `data` is one of the functions a member calls on `fund`, decoded as the fund's version has them: a v1 call on a v2 fund, or the other way around, decodes to nothing. */
+function isFundCall(data: Hex, fund: LiveFund): boolean {
+  if (fund.version === 1) {
+    const decoded = decodeExactly(memberFundAbi, data);
+    return decoded !== null && FUND_CALLS.has(decoded.functionName);
   }
-  if (!isLive(to)) return false;
-  const decoded = decodeExactly(memberFundAbi, data);
-  return decoded !== null && FUND_CALLS.has(decoded.functionName);
+  const decoded = decodeExactly(fundV2Abi, data);
+  if (decoded === null || !FUND_V2_CALLS.has(decoded.functionName)) return false;
+  return decoded.functionName !== "contributeDollar" || fund.dollar !== null;
 }
 
 /**
- * Pasar a pesos (spec, 6): one `transfer` of the member's own wARS, to any address and for more than nothing. Alone:
- * in a batch, the other calls would ride on it unchecked. The destination isn't checked: this decides what the
- * paymaster pays for, and the browser checks the address for the person (`cashOutProblem`).
+ * Whether a member of the live funds `liveFunds` may make this call: approve one of them a token it takes, or call it
+ * with what its version has (`isFundCall`). A fund's own tokens and functions only: the bundler would pay the gas of a
+ * call that reverts there (contributeWars on a v2 fund, say) all the same.
  */
-function isCashOut(calls: OperationCall[]): boolean {
+function memberCall({ to, data }: OperationCall, liveFunds: LiveFund[]): boolean {
+  const fund = liveFunds.find((live) => isAddressEqual(live.address, to));
+  if (fund !== undefined) return isFundCall(data, fund);
+  const decoded = decodeExactly(erc20Abi, data);
+  if (decoded?.functionName !== "approve") return false;
+  const spender = liveFunds.find((live) => isAddressEqual(live.address, decoded.args[0]));
+  return spender !== undefined && takesToken(spender, to);
+}
+
+/**
+ * Pasar a pesos (spec, 6): one `transfer` of the member's own tokens, to any address and for more than nothing. Alone:
+ * in a batch, the other calls would ride on it unchecked. The destination isn't checked: this decides what the
+ * paymaster pays for, and the browser checks the address for the person (`cashOutProblem`). The token it transfers,
+ * which `checkCalls` holds to the currency of one of the person's live funds, or null if the calls aren't that.
+ */
+function cashOutToken(calls: OperationCall[]): Address | null {
   const [only] = calls;
-  if (calls.length !== 1 || only === undefined || !isAddressEqual(only.to, WARS)) return false;
+  if (calls.length !== 1 || only === undefined) return null;
   const decoded = decodeExactly(erc20Abi, only.data);
-  return decoded?.functionName === "transfer" && decoded.args[1] > 0n;
+  return decoded?.functionName === "transfer" && decoded.args[1] > 0n ? only.to : null;
 }
 
 /**
@@ -237,7 +267,8 @@ function isCashOut(calls: OperationCall[]): boolean {
  */
 function isAddMember(calls: OperationCall[], { liveFunds, joinRequests }: Sponsorship): boolean {
   const [only] = calls;
-  if (calls.length !== 1 || only === undefined || !liveFunds.some((fund) => isAddressEqual(fund, only.to))) return false;
+  if (calls.length !== 1 || only === undefined || !liveFunds.some((fund) => isAddressEqual(fund.address, only.to))) return false;
+  // Both versions have it with the same signature: one decoding, whichever contract the fund runs.
   const decoded = decodeExactly(memberFundAbi, only.data);
   if (decoded?.functionName !== "propose") return false;
   const [action, a, b, amount, note] = decoded.args;
@@ -255,10 +286,12 @@ function isAddMember(calls: OperationCall[], { liveFunds, joinRequests }: Sponso
  * - createFund, alone, on a factory, from the creator of a fund being created, and only with the exact target and
  *   calldata deployCall built for that frozen draft (`createFundCalls`): its members in order, its votes, the server's
  *   agent;
- * - approve(fund, x) on wARS or USDT, and contributeWars, contributeUsdt, vote and execute on the fund, for a
- *   live fund the person is a member of.
- * - one transfer of the person's own wARS, alone, to any address and for more than nothing, for a member of any live
- *   fund: Pasar a pesos (isCashOut).
+ * - for a live fund the person is a member of, its own version's (`memberCall`): on a v1 fund, approve(fund, x) on wARS
+ *   or USDT, and contributeWars, contributeUsdt, vote and execute; on a v2 fund, approve(fund, x) on its currency or its
+ *   dollar (if it has one), and contribute, contributeDollar (if it has a dollar), vote and execute. Never a call of one
+ *   version on a fund of the other, nor an approve of a token that isn't that fund's.
+ * - one transfer of one of the person's own tokens, alone, to any address and for more than nothing, and only of the
+ *   currency of one of their live funds: Pasar a pesos (`cashOutToken`).
  * - one propose alone, adding an account with an open request to join one of the person's live funds: Proponer
  *   sumarlo (isAddMember, spec 9.4).
  * `createsFund` says which: it gets the larger gas ceiling.
@@ -277,12 +310,13 @@ export function checkCalls(
     if (createFundCalls.some(isFrozen)) return { ok: true, createsFund: true };
     return refuse("Only the createFund of a draft you are creating, exactly as it was frozen, is sponsored on the factory");
   }
-  if (isCashOut(calls)) {
-    return liveFunds.length > 0 ? { ok: true, createsFund: false } : refuse("Only a live fund's member is sponsored to pass their wARS out");
+  const passed = cashOutToken(calls);
+  if (passed !== null) {
+    const isCurrency = liveFunds.some((fund) => isAddressEqual(fund.currency, passed));
+    return isCurrency ? { ok: true, createsFund: false } : refuse("Only the currency of one of your live funds is sponsored to pass out");
   }
   if (isAddMember(calls, sponsorship)) return { ok: true, createsFund: false };
-  const isLive = (address: Address) => liveFunds.some((fund) => isAddressEqual(fund, address));
-  const refused = calls.find((call) => !memberCall(call, isLive));
+  const refused = calls.find((call) => !memberCall(call, liveFunds));
   if (refused !== undefined) return refuse(`Call not sponsored: ${refused.data.slice(0, 10)} on ${refused.to}`);
   return { ok: true, createsFund: false };
 }
@@ -345,12 +379,13 @@ function operationNonce(userOp: unknown): bigint | undefined {
 }
 
 /**
- * The live funds `userId` is a member of, the open requests to join them (sponsoredJoinRequests), and the createFund
- * of each draft they created that is being created, naming `agent()`, which is called only if there's one.
+ * The live funds `userId` is a member of, each with its version and currency (and the dollar the agent's table gives
+ * that currency, which the web always creates a fund with), the open requests to join them (sponsoredJoinRequests), and
+ * the createFund of each draft they created that is being created, naming `agent()`, which is called only if there's one.
  */
 async function sponsorshipOf(db: Db, userId: string, agent: () => Address): Promise<Sponsorship> {
   const live = await db
-    .select({ address: funds.address })
+    .select({ address: funds.address, version: funds.version, currency: funds.currency })
     .from(memberships)
     .innerJoin(funds, eq(funds.id, memberships.fundId))
     .where(and(eq(memberships.userId, userId), eq(funds.status, "live"), isNotNull(funds.address)));
@@ -362,7 +397,11 @@ async function sponsorshipOf(db: Db, userId: string, agent: () => Address): Prom
     console.error(`No createFund is sponsored for now: ${shortMessage(error)}`);
     createFundCalls = [];
   }
-  return { liveFunds: live.map((row) => getAddress(row.address!)), createFundCalls, joinRequests: await sponsoredJoinRequests(db, userId) };
+  const liveFunds = live.map(({ address, version, currency }): LiveFund => {
+    const token = getAddress(currency);
+    return { address: getAddress(address!), version, currency: token, dollar: currencyOf(token)?.dollar?.token ?? null };
+  });
+  return { liveFunds, createFundCalls, joinRequests: await sponsoredJoinRequests(db, userId) };
 }
 
 /**

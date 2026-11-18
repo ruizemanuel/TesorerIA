@@ -1,4 +1,4 @@
-import { FUND_FACTORY, FUND_FACTORY_V2, USDT, WARS, fundFactoryAbi } from "@tesoreria/agent";
+import { CURRENCIES, FUND_FACTORY, FUND_FACTORY_V2, type FundVersion, USDT, WARS, fundFactoryAbi, fundFactoryV2Abi, fundV2Abi } from "@tesoreria/agent";
 import { ATTRIBUTION_SUFFIX, type Call, SAFE_P256_VERIFIERS, SAFE_WEBAUTHN_SHARED_SIGNER, keyChangeCallData, safeKeyOf } from "@tesoreria/wallet";
 import { createFakePasskey } from "@tesoreria/wallet/testing";
 import { eq, sql } from "drizzle-orm";
@@ -8,6 +8,7 @@ import { entryPoint07Address } from "viem/account-abstraction";
 import { describe, expect, it, vi } from "vitest";
 import {
   type BundlerRequest,
+  type LiveFund,
   MAX_CREATE_FUND_GAS,
   MAX_FEE_MULTIPLE,
   MAX_OPERATION_GAS,
@@ -42,6 +43,16 @@ import { MULTI_SEND, MULTI_SEND_CALL_ONLY, execute, multiSend, multiSendAbi, pac
 const ME = getAddress("0x2F8218c7cF6d822091EDe24Db9c46B0324c21A6F");
 const OTHER = getAddress("0x6BE3c1eB63A4edbc6C23c281F93F81B14eF3a671");
 const FUND = getAddress("0x00000000000000000000000000000000000F00D5");
+const FUND_V2 = getAddress("0x00000000000000000000000000000000000F00D6");
+const FUND_BRL = getAddress("0x00000000000000000000000000000000000F00D7");
+/** wBRL: a currency the table gives no dollar. */
+const WBRL = CURRENCIES.find((currency) => currency.symbol === "wBRL")!.token;
+/** A live v1 fund: wARS, and USDT as its dollar. */
+const V1_FUND: LiveFund = { address: FUND, version: 1, currency: WARS, dollar: USDT };
+/** A live v2 fund in wARS, which takes USDT in too. */
+const V2_FUND: LiveFund = { address: FUND_V2, version: 2, currency: WARS, dollar: USDT };
+/** A live v2 fund in wBRL, which has no dollar. */
+const BRL_FUND: LiveFund = { address: FUND_BRL, version: 2, currency: WBRL, dollar: null };
 const CELO = numberToHex(42220);
 const POLICY = "sp_server";
 /** The new createFund nonces the paymaster signs in a day among everyone: CREATE_FUND_DAILY_LIMIT's default. */
@@ -81,11 +92,11 @@ function changed(call: Call, change: Partial<ReturnType<typeof createFundParams>
  * A draft `creatorId` made, with three more people (so 2 and 3 votes both make a valid fund), frozen by deployCall
  * with 2 votes and AGENT: the createFund it handed the creator to sign.
  */
-async function frozenDraft(db: Db, creatorId: string, name: string) {
+async function frozenDraft(db: Db, creatorId: string, name: string, version: FundVersion = 1) {
   const created = await createDraft(db, creatorId, { name, agreedExpense: "la cancha", weeklyFee: 10_000n * WARS_UNIT, weeklyCap: 60_000n * WARS_UNIT }, es);
   if (!created.ok) throw new Error(created.error);
   for (const person of ["Beto", "Caro", "Dani"]) await joinFund(db, (await addUser(db, person)).id, created.inviteCode, es);
-  const deploy = await deployCall(db, { fundId: created.id, userId: creatorId, votesRequired: 2, agent: AGENT, m: es });
+  const deploy = await deployCall(db, { fundId: created.id, userId: creatorId, votesRequired: 2, agent: AGENT, version, m: es });
   if (!deploy.ok) throw new Error(deploy.error);
   return { fundId: created.id, call: deploy.call as Call };
 }
@@ -216,7 +227,7 @@ describe("keyChangeCallKey", () => {
 
 describe("checkCalls", () => {
   const creating = createFundCall();
-  const member = { liveFunds: [FUND], createFundCalls: [], joinRequests: [] };
+  const member = { liveFunds: [V1_FUND], createFundCalls: [], joinRequests: [] };
   const creator = { liveFunds: [], createFundCalls: [frozen(creating)], joinRequests: [] };
   const fundCall = (to: Address, data: Hex, value = 0n): OperationCall => ({ to, value, data });
 
@@ -243,8 +254,91 @@ describe("checkCalls", () => {
     for (const [why, calls] of Object.entries(cases)) expect(checkCalls(calls, member), why).toMatchObject({ ok: false, status: 403 });
   });
 
+  const approve = (token: Address, spender: Address, amount = 10n ** 18n) =>
+    fundCall(token, encodeFunctionData({ abi: erc20Abi, functionName: "approve", args: [spender, amount] }));
+  const v2Call = (fund: Address, functionName: "contribute" | "contributeDollar", amount = 10n ** 18n) =>
+    fundCall(fund, encodeFunctionData({ abi: fundV2Abi, functionName, args: [amount] }));
+  const allowed = { ok: true, createsFund: false };
+
+  it("sponsors approve of a v2 fund's currency and dollar to it, and contribute and contributeDollar on it", () => {
+    const sponsorship = { ...member, liveFunds: [V2_FUND, BRL_FUND] };
+    const contributions: Record<string, OperationCall[]> = {
+      "wARS, the currency of a v2 fund": [approve(WARS, FUND_V2), v2Call(FUND_V2, "contribute")],
+      "USDT, the dollar of a v2 fund": [approve(USDT, FUND_V2, 10n ** 6n), v2Call(FUND_V2, "contributeDollar", 10n ** 6n)],
+      "wBRL, the currency of a v2 fund with no dollar": [approve(WBRL, FUND_BRL), v2Call(FUND_BRL, "contribute")],
+      "an approve of the currency alone": [approve(WARS, FUND_V2)],
+      "an approve of the dollar alone": [approve(USDT, FUND_V2)],
+      "a contribute alone": [v2Call(FUND_V2, "contribute")],
+      "a contributeDollar alone": [v2Call(FUND_V2, "contributeDollar")],
+      "both contributions in one operation": [approve(WARS, FUND_V2), v2Call(FUND_V2, "contribute"), approve(USDT, FUND_V2), v2Call(FUND_V2, "contributeDollar")],
+      "a contribution to each fund": [approve(WARS, FUND_V2), v2Call(FUND_V2, "contribute"), approve(WBRL, FUND_BRL), v2Call(FUND_BRL, "contribute")],
+      "a vote": asRead(voteCalls({ fund: FUND_BRL, proposalId: 3n, completes: false })),
+      "a vote and its execution": asRead(voteCalls({ fund: FUND_V2, proposalId: 3n, completes: true })),
+    };
+    for (const [why, calls] of Object.entries(contributions)) expect(checkCalls(calls, sponsorship), why).toEqual(allowed);
+  });
+
+  it("refuses contributeWars and contributeUsdt on a v2 fund, and contribute on a v1 fund", () => {
+    const sponsorship = { ...member, liveFunds: [V1_FUND, V2_FUND] };
+    const [, contributeWars] = asRead(contribute(FUND_V2)) as [OperationCall, OperationCall];
+    const [, contributeUsdt] = asRead(contribute(FUND_V2, "usdt")) as [OperationCall, OperationCall];
+    const cases: Record<string, OperationCall[]> = {
+      "contributeWars on a v2 fund": asRead(contribute(FUND_V2)),
+      "contributeUsdt on a v2 fund": asRead(contribute(FUND_V2, "usdt")),
+      "contributeWars alone on a v2 fund": [contributeWars],
+      "contributeUsdt alone on a v2 fund": [contributeUsdt],
+      "contribute on a v1 fund": [approve(WARS, FUND), v2Call(FUND, "contribute")],
+      "contribute alone on a v1 fund": [v2Call(FUND, "contribute")],
+      "contributeDollar on a v1 fund": [approve(USDT, FUND), v2Call(FUND, "contributeDollar")],
+    };
+    for (const [why, calls] of Object.entries(cases)) expect(checkCalls(calls, sponsorship), why).toMatchObject({ ok: false, status: 403 });
+    // Each version's own calls still go through, side by side.
+    expect(checkCalls(asRead(contribute(FUND, "usdt")), sponsorship)).toEqual(allowed);
+    expect(checkCalls([approve(WARS, FUND_V2), v2Call(FUND_V2, "contribute")], sponsorship)).toEqual(allowed);
+  });
+
+  it("refuses approving USDT to a v2 fund without a dollar, and approving a token that is neither", () => {
+    const sponsorship = { ...member, liveFunds: [V1_FUND, V2_FUND, BRL_FUND] };
+    const cases: Record<string, OperationCall[]> = {
+      "USDT to a v2 fund without a dollar": [approve(USDT, FUND_BRL)],
+      "contributeDollar on a v2 fund without a dollar": [v2Call(FUND_BRL, "contributeDollar")],
+      "wARS to a v2 fund in wBRL": [approve(WARS, FUND_BRL)],
+      "wBRL to a v2 fund in wARS": [approve(WBRL, FUND_V2)],
+      "wBRL to a v1 fund": [approve(WBRL, FUND)],
+      "another token to a v2 fund": [approve(OTHER, FUND_V2)],
+      "a token that is neither, in a batch with a contribution": [approve(OTHER, FUND_V2), v2Call(FUND_V2, "contribute")],
+      "an approve to someone who isn't a fund of theirs": [approve(WARS, OTHER)],
+      "an approve to a v2 fund they aren't live in": [approve(WARS, getAddress("0x00000000000000000000000000000000000F00D8"))],
+    };
+    for (const [why, calls] of Object.entries(cases)) expect(checkCalls(calls, sponsorship), why).toMatchObject({ ok: false, status: 403 });
+    // The right tokens, but to a v2 fund they're not a live member of.
+    for (const token of [WARS, USDT]) expect(checkCalls([approve(token, FUND_V2)], { ...member, liveFunds: [BRL_FUND] }), token).toMatchObject({ ok: false, status: 403 });
+  });
+
   const transfer = (token: Address, to: Address, amount: bigint) =>
     fundCall(token, encodeFunctionData({ abi: erc20Abi, functionName: "transfer", args: [to, amount] }));
+
+  it("passes to pesos only the currency of one of the member's live funds", () => {
+    const brl = { ...member, liveFunds: [BRL_FUND] };
+    const both = { ...member, liveFunds: [V1_FUND, BRL_FUND] };
+    expect(checkCalls([transfer(WBRL, OTHER, 1n)], brl)).toEqual(allowed);
+    expect(checkCalls([transfer(WARS, OTHER, 1n)], both)).toEqual(allowed);
+    expect(checkCalls([transfer(WBRL, OTHER, 1n)], both)).toEqual(allowed);
+    expect(checkCalls([transfer(WARS, OTHER, 1n)], { ...member, liveFunds: [V2_FUND] })).toEqual(allowed);
+    const cases: Record<string, [OperationCall[], Sponsorship]> = {
+      "wARS from a member of a fund in wBRL only": [[transfer(WARS, OTHER, 1n)], brl],
+      "wBRL from a member of a fund in wARS only": [[transfer(WBRL, OTHER, 1n)], member],
+      "USDT, the dollar of their v2 fund, which isn't its currency": [[transfer(USDT, OTHER, 1n)], { ...member, liveFunds: [V2_FUND] }],
+      "a token that isn't a currency of theirs": [[transfer(OTHER, OTHER, 1n)], both],
+      "the fund itself as the token": [[transfer(FUND_BRL, OTHER, 1n)], both],
+      "wBRL in a batch with a contribution": [[transfer(WBRL, OTHER, 1n), approve(WARS, FUND), v2Call(FUND_BRL, "contribute")], both],
+      "wBRL of nothing": [[transfer(WBRL, OTHER, 0n)], both],
+      "wBRL from someone with no live fund": [[transfer(WBRL, OTHER, 1n)], creator],
+    };
+    for (const [why, [calls, sponsorship]] of Object.entries(cases)) {
+      expect(checkCalls(calls, sponsorship), why).toMatchObject({ ok: false, status: 403 });
+    }
+  });
 
   it("lets a live fund's member pass their own wARS to any address, alone: Pasar a pesos (spec, 6)", () => {
     expect(checkCalls(asRead(cashOutCalls({ to: OTHER, amount: 10n ** 18n })), member)).toEqual({ ok: true, createsFund: false });
@@ -269,7 +363,7 @@ describe("checkCalls", () => {
   });
 
   const LUCAS = getAddress("0x000000000000000000000000000000000000aaa4");
-  const asked = { liveFunds: [FUND], createFundCalls: [], joinRequests: [{ fund: FUND, account: LUCAS }] };
+  const asked = { liveFunds: [V1_FUND], createFundCalls: [], joinRequests: [{ fund: FUND, account: LUCAS }] };
   const propose = (action: number, a: Address, b: Address = zeroAddress, amount = 0n, note = "") =>
     fundCall(FUND, encodeFunctionData({ abi: memberFundAbi, functionName: "propose", args: [action, a, b, amount, note] }));
 
@@ -314,8 +408,8 @@ describe("checkCalls", () => {
 
   it("lets only the creator of a fund being created send createFund, alone, and says it's one", () => {
     expect(checkCalls(asRead([creating]), creator)).toEqual({ ok: true, createsFund: true });
-    expect(checkCalls(asRead([creating]), { ...creator, liveFunds: [FUND] })).toEqual({ ok: true, createsFund: true });
-    expect(checkCalls(asRead([creating, ...contribute(FUND)]), { ...creator, liveFunds: [FUND] })).toMatchObject({ ok: false, status: 403 });
+    expect(checkCalls(asRead([creating]), { ...creator, liveFunds: [V1_FUND] })).toEqual({ ok: true, createsFund: true });
+    expect(checkCalls(asRead([creating, ...contribute(FUND)]), { ...creator, liveFunds: [V1_FUND] })).toMatchObject({ ok: false, status: 403 });
     expect(checkCalls(asRead([creating, creating]), creator)).toMatchObject({ ok: false, status: 403 });
     expect(checkCalls(asRead([{ ...creating, to: OTHER }]), creator)).toMatchObject({ ok: false, status: 403 });
     expect(checkCalls(asRead(contribute(FUND)), creator)).toMatchObject({ ok: false, status: 403 });
@@ -776,6 +870,70 @@ describe("authorizeBundlerRequest", () => {
       }
       for (const answer of await answers(db, ana, [changed(futbol.call, { name: "Asado" })])) expect(answer).toMatchObject(refused);
       for (const answer of await answers(db, ana, [futbol.call, asado.call])) expect(answer).toMatchObject({ ok: false, status: 403 });
+    });
+
+    it("sponsors a frozen v2 createFund only on FundFactoryV2", async () => {
+      const db = await testDb();
+      const ana = await addUser(db, "Ana");
+      const { call } = await frozenDraft(db, ana.id, "Fútbol", 2);
+      expect(call.to).toBe(FUND_FACTORY_V2);
+      for (const answer of await answers(db, ana, [call])) expect(answer).toMatchObject(allowed);
+      // The same bytes to the v1 factory, to any other address, and with one term of the v2 fund changed.
+      for (const to of [FUND_FACTORY, OTHER]) {
+        for (const answer of await answers(db, ana, [{ ...call, to }])) expect(answer, to).toMatchObject({ ok: false, status: 403 });
+      }
+      const decoded = decodeFunctionData({ abi: fundFactoryV2Abi, data: call.data! });
+      if (decoded.functionName !== "createFund") throw new Error(`Not a createFund: ${decoded.functionName}`);
+      const [terms] = decoded.args;
+      const withTerms = (change: Partial<typeof terms>): Call => ({
+        to: FUND_FACTORY_V2,
+        data: encodeFunctionData({ abi: fundFactoryV2Abi, functionName: "createFund", args: [{ ...terms, ...change }] }),
+      });
+      for (const change of [{ feeBps: terms.feeBps + 1 }, { dollar: zeroAddress }, { currency: WBRL }, { pool: OTHER }]) {
+        for (const answer of await answers(db, ana, [withTerms(change)])) expect(answer, JSON.stringify(change)).toMatchObject(refused);
+      }
+    });
+  });
+
+  describe("each live fund's own calls, by the version and currency its row has", () => {
+    it("sponsors a v1 fund's, a v2 fund's in wARS (with its dollar) and a v2 fund's in wBRL (with none), each its own and no other's", async () => {
+      const db = await testDb();
+      const ana = await addUser(db, "Ana");
+      const beto = await addUser(db, "Beto"); // a member of the v1 fund only
+      await addLiveFund(db, { creatorId: ana.id, address: FUND, members: [ana.id, beto.id] });
+      await addLiveFund(db, { creatorId: ana.id, address: FUND_V2, members: [ana.id], version: 2 });
+      await addLiveFund(db, { creatorId: ana.id, address: FUND_BRL, members: [ana.id], version: 2, currency: WBRL });
+      const ask = (person: typeof ana, calls: Call[]) =>
+        authorizeBundlerRequest(db, asUser(person), request("pm_getPaymasterData", sponsored(person.account, {}, MAX_OPERATION_GAS, safeCallData(calls))), POLICY, price, agent, DAILY_LIMIT);
+      const approve = (token: Address, spender: Address): Call => ({ to: token, data: encodeFunctionData({ abi: erc20Abi, functionName: "approve", args: [spender, 1n] }) });
+      const v2 = (fund: Address, functionName: "contribute" | "contributeDollar"): Call => ({ to: fund, data: encodeFunctionData({ abi: fundV2Abi, functionName, args: [1n] }) });
+      const pass = (token: Address): Call => ({ to: token, data: encodeFunctionData({ abi: erc20Abi, functionName: "transfer", args: [OTHER, 1n] }) });
+
+      const sponsoredCalls: Record<string, Call[]> = {
+        "contributeWars on the v1 fund": contribute(FUND),
+        "contributeUsdt on the v1 fund": contribute(FUND, "usdt"),
+        "contribute on the v2 fund in wARS": [approve(WARS, FUND_V2), v2(FUND_V2, "contribute")],
+        "contributeDollar on the v2 fund in wARS": [approve(USDT, FUND_V2), v2(FUND_V2, "contributeDollar")],
+        "contribute on the v2 fund in wBRL": [approve(WBRL, FUND_BRL), v2(FUND_BRL, "contribute")],
+        "a vote and its execution on the v2 fund in wBRL": voteCalls({ fund: FUND_BRL, proposalId: 0n, completes: true }),
+        "a pass of wBRL": [pass(WBRL)],
+        "a pass of wARS": [pass(WARS)],
+      };
+      for (const [why, calls] of Object.entries(sponsoredCalls)) expect(await ask(ana, calls), why).toMatchObject({ ok: true });
+
+      const refusedCalls: Record<string, Call[]> = {
+        "contributeWars on the v2 fund in wARS": contribute(FUND_V2),
+        "contributeUsdt on the v2 fund in wBRL": contribute(FUND_BRL, "usdt"),
+        "contribute on the v1 fund": [approve(WARS, FUND), v2(FUND, "contribute")],
+        "contributeDollar on the v2 fund in wBRL, which has no dollar": [approve(USDT, FUND_BRL), v2(FUND_BRL, "contributeDollar")],
+        "wARS approved to the v2 fund in wBRL": [approve(WARS, FUND_BRL)],
+        "a pass of USDT": [pass(USDT)],
+      };
+      for (const [why, calls] of Object.entries(refusedCalls)) expect(await ask(ana, calls), why).toMatchObject({ ok: false, status: 403 });
+      // Beto is in the v1 fund only: its wARS may be passed, wBRL isn't a currency of any fund of his.
+      expect(await ask(beto, [pass(WARS)])).toMatchObject({ ok: true });
+      expect(await ask(beto, [pass(WBRL)])).toMatchObject({ ok: false, status: 403 });
+      expect(await ask(beto, [approve(WARS, FUND_V2), v2(FUND_V2, "contribute")])).toMatchObject({ ok: false, status: 403 });
     });
   });
 

@@ -1,4 +1,4 @@
-import { AGENT_ADDRESS, FUND_FACTORY } from "@tesoreria/agent";
+import { AGENT_ADDRESS, FUND_FACTORY, USDT, WARS as WARS_TOKEN, fundV2Abi } from "@tesoreria/agent";
 import { ATTRIBUTION_SUFFIX, type Call, createMemberAccount, createPimlicoBundlerClient, keyChangeCallData, sendKeyChange } from "@tesoreria/wallet";
 import { createFakePasskey } from "@tesoreria/wallet/testing";
 import {
@@ -9,6 +9,8 @@ import {
   custom,
   decodeFunctionData,
   encodeAbiParameters,
+  encodeFunctionData,
+  erc20Abi,
   getAddress,
   http,
   isAddress,
@@ -127,16 +129,26 @@ describe("the requests viem really sends for a sponsored operation", () => {
     if (!deploy.ok) throw new Error(deploy.error);
     const fund = randomAccount();
     await addLiveFund(db, { creatorId: ana.id, address: fund, members: [ana.id] });
+    const fundV2 = randomAccount();
+    await addLiveFund(db, { creatorId: ana.id, address: fundV2, members: [ana.id], version: 2 });
     const user = { id: ana.id, account: account.address, keyChangeKey: null };
 
     const forwarded: Forwarded[] = [];
     const bundler = createPimlicoBundlerClient({ client, transport: gate(db, user, forwarded), sponsorshipPolicyId: "set by the server" });
 
-    // Every call shape the web sends: deploy-form's createFund, Aportar's two, and VoteButton's two (lib/vote.ts).
+    // A v2 fund's contributions: approve its currency or its dollar to it, and contribute or contributeDollar.
+    const v2Contribution = (token: Address, functionName: "contribute" | "contributeDollar", amount: bigint): Call[] => [
+      { to: token, data: encodeFunctionData({ abi: erc20Abi, functionName: "approve", args: [fundV2, amount] }) },
+      { to: fundV2, data: encodeFunctionData({ abi: fundV2Abi, functionName, args: [amount] }) },
+    ];
+    // Every call shape the web sends: deploy-form's createFund, Aportar's two on each version, and VoteButton's two (lib/vote.ts).
     const shapes: Record<string, Call[]> = {
       createFund: [deploy.call],
       "contribute wARS": contributeCalls({ fund, token: "wars", amount: 10_000n * WARS }),
       "contribute USDT": contributeCalls({ fund, token: "usdt", amount: 10_000_000n }),
+      "contribute to a v2 fund": v2Contribution(WARS_TOKEN, "contribute", 10_000n * WARS),
+      "contributeDollar to a v2 fund": v2Contribution(USDT, "contributeDollar", 10_000_000n),
+      "vote on a v2 fund": voteCalls({ fund: fundV2, proposalId: 0n, completes: false }),
       vote: voteCalls({ fund, proposalId: 0n, completes: false }),
       "vote and execute": voteCalls({ fund, proposalId: 0n, completes: true }),
     };

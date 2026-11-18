@@ -37,10 +37,16 @@ export async function addUser(db: Db, name: string, account: Address = randomAcc
   return user!;
 }
 
-/** A live fund with these members, in this order: the spec's defaults (4). */
+/** A live fund with these members, in this order: the spec's defaults (4). A v1 fund in wARS unless `version` and `currency` say otherwise. */
 export async function addLiveFund(
   db: Db,
-  { creatorId, address, members }: { creatorId: string; address: Address; members: string[] },
+  {
+    creatorId,
+    address,
+    members,
+    version,
+    currency,
+  }: { creatorId: string; address: Address; members: string[]; version?: 1 | 2; currency?: Address },
 ) {
   const [fund] = await db
     .insert(funds)
@@ -56,6 +62,8 @@ export async function addLiveFund(
       status: "live",
       address,
       createdBlock: 79_700_000n,
+      ...(version === undefined ? {} : { version }),
+      ...(currency === undefined ? {} : { currency }),
     })
     .returning();
   for (const [i, userId] of members.entries()) {
