@@ -38,17 +38,18 @@ function clip(note: string): string {
 }
 
 /**
- * Less than half a centavo of wARS: what a screen in centavos can't show. The fund's balance is shown rounded, so an
- * expense of what the screen said the fund holds can be up to this much more than it does.
+ * Less than half a centavo of the fund's currency (each one in the table has 18 decimals): what a screen in centavos
+ * can't show. The fund's balance is shown rounded, so an expense of what the screen said the fund holds can be up to
+ * this much more than it does.
  */
-const WARS_SPECK = 5n * 10n ** 15n;
+const CURRENCY_SPECK = 5n * 10n ** 15n;
 
 /**
  * What to pay for an expense of `amount`: what the fund holds instead, when it holds something and is short by less
- * than WARS_SPECK. Paying the amount as entered would fail on chain for a difference nobody can see.
+ * than CURRENCY_SPECK. Paying the amount as entered would fail on chain for a difference nobody can see.
  */
 function payable(amount: bigint, held: bigint): bigint {
-  return held > 0n && amount > held && amount - held < WARS_SPECK ? held : amount;
+  return held > 0n && amount > held && amount - held < CURRENCY_SPECK ? held : amount;
 }
 
 /**
@@ -63,7 +64,7 @@ const ENTRY_MARGIN_BLOCKS = 300n;
  * what it pays: Pay, to the same member, the same amount, with the same note, proposed by the agent, from about the
  * block the expense was entered in (`now` and the snapshot's block place it, at a block a second). An identical
  * expense entered later is another one, and gets its own proposal. "The same amount" takes in what the fund held
- * then (`payable`), up to WARS_SPECK less: the fund may hold more by the retry. Amounts are entered in centavos, so
+ * then (`payable`), up to CURRENCY_SPECK less: the fund may hold more by the retry. Amounts are entered in centavos, so
  * another expense's is at least a centavo away.
  */
 function earlierProposal(
@@ -79,7 +80,7 @@ function earlierProposal(
       isAddressEqual(e.args.proposer, fund.agent) &&
       isAddressEqual(e.args.a, member) &&
       e.args.amount <= amount &&
-      amount - e.args.amount < WARS_SPECK &&
+      amount - e.args.amount < CURRENCY_SPECK &&
       e.args.note === note,
   );
 }

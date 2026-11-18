@@ -38,7 +38,7 @@ export const MIN_POOL_HISTORY = 21_600n;
 
 const UNIT = 10n ** 18n;
 
-/** Chainlink's USD / ARS on Base updates about once a day: 26 hours, as `MAX_REFERENCE_AGE` in convert.ts. */
+/** Chainlink's USD / ARS on Base updates about once a day: 26 hours. */
 const ARS_MAX_AGE = 93_600n;
 /** BRL / USD and COP / USD on Celo have a 240 s heartbeat: 10 minutes. */
 const FAST_MAX_AGE = 600n;

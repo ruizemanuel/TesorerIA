@@ -58,6 +58,22 @@ export function fundSnapshotV2(change: Partial<FundSnapshot> = {}): FundSnapshot
 }
 
 /**
+ * The version 2 fund of `fundSnapshotV2` where each member (in the order of `MEMBERS`) has the given dollars pending:
+ * the fund holds them as its dollar balance too, as the contract does. Dollars sent straight to the fund go in
+ * `change.dollarBalance`, over that.
+ */
+export function fundSnapshotWithPending(pending: readonly bigint[], change: Partial<FundSnapshot> = {}): FundSnapshot {
+  const total = pending.reduce((sum, amount) => sum + amount, 0n);
+  return fundSnapshotV2({
+    pendingDollar: pending,
+    pendingValue: pending.map(() => 0n),
+    totalPendingDollar: total,
+    dollarBalance: total,
+    ...change,
+  });
+}
+
+/**
  * A version 2 fund in one of the table's currencies, with no dollar and that currency's balance cap (the table has a
  * dollar for wARS only, and a fund may go without one); the balances are the wARS fund's, as plain numbers. One thing
  * changed per test.

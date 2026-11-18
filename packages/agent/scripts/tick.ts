@@ -6,7 +6,8 @@
 // Reads AGENT_PRIVATE_KEY, and optionally CELO_RPC_URL and BASE_RPC_URL (never printed), from packages/agent/.env.local.
 import { createPublicClient, formatUnits, http } from "viem";
 import { base, celo } from "viem/chains";
-import { BLOCKSCOUT_API } from "../src/chain";
+import { BLOCKSCOUT_API, WARS } from "../src/chain";
+import { currencyOf } from "../src/currencies";
 import { shortMessage } from "../src/errors";
 import { blockscoutLogReader, rpcLogReader } from "../src/events";
 import { runHeartbeat } from "../src/run";
@@ -39,11 +40,12 @@ async function main(): Promise<number> {
     logs: blockscoutLogReader({ apiUrl: BLOCKSCOUT_API, rpc: rpcLogReader(celoClient) }),
     agent: signer.address,
   });
-  const { usdArs, usdtUsd } = await chain.references();
+  // wARS's references: its USD / ARS on Base and USDT / USD on Celo, the ones its funds are converted against.
+  const { currencyUsd, dollarUsd } = await chain.references(currencyOf(WARS)!);
   const age = (updatedAt: bigint) => `${(Number(unixNow() - updatedAt) / 3_600).toFixed(1)} h old`;
   console.log(
-    `Chainlink: USD / ARS ${formatUnits(usdArs.answer, usdArs.decimals)} (${age(usdArs.updatedAt)}), ` +
-      `USDT / USD ${formatUnits(usdtUsd.answer, usdtUsd.decimals)} (${age(usdtUsd.updatedAt)})`,
+    `Chainlink: USD / ARS ${formatUnits(currencyUsd.answer, currencyUsd.decimals)} (${age(currencyUsd.updatedAt)}), ` +
+      `USDT / USD ${formatUnits(dollarUsd.answer, dollarUsd.decimals)} (${age(dollarUsd.updatedAt)})`,
   );
   console.log(`The agent holds ${formatUnits(await chain.gasBalance(), 6)} USDT for gas.`);
   console.log(`FundFactory has created ${(await chain.funds()).length} fund(s).`);

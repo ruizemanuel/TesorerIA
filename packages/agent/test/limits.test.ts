@@ -1,6 +1,6 @@
 import { type Address, decodeFunctionData, zeroAddress } from "viem";
 import { describe, expect, it } from "vitest";
-import { fundAbi } from "../src/abi";
+import { fundAbi, fundV2Abi } from "../src/abi";
 import { USDT } from "../src/chain";
 import {
   type DailyActivity,
@@ -23,6 +23,7 @@ import {
   converted,
   fundSnapshot,
   fundSnapshotV2,
+  fundSnapshotWithPending,
   fundSnapshotWithoutDollar,
   proposed,
   ref,
@@ -72,6 +73,69 @@ describe("authorize", () => {
       functionName: "propose",
       args: [0, MEMBER, zeroAddress, 5n * WARS_UNIT, "Pelotas"],
     });
+  });
+
+  it("encodes FundV2's convert with each member and amount", () => {
+    const fund = fundSnapshotWithPending([3n * USDT_UNIT, 2n * USDT_UNIT, 0n]);
+    // The members come out as the contract lists them, whatever the case they were given in.
+    const members = [MEMBERS[0] as Address, (MEMBERS[1] as Address).toLowerCase() as Address];
+    const tx = authorize(
+      { kind: "convert", dollarAmount: 5n * USDT_UNIT, minCurrencyOut: 8_000n * WARS_UNIT, members, amounts: [3n * USDT_UNIT, 2n * USDT_UNIT] },
+      fund,
+      QUIET_DAY,
+      AGENT,
+    );
+    expect(tx.to).toBe(FUND);
+    expect(decodeFunctionData({ abi: fundV2Abi, data: tx.data })).toEqual({
+      functionName: "convert",
+      args: [[MEMBERS[0], MEMBERS[1]], [3n * USDT_UNIT, 2n * USDT_UNIT], 8_000n * WARS_UNIT],
+    });
+  });
+
+  it("refuses to convert more than a member has pending, or for someone who isn't a member", () => {
+    const fund = fundSnapshotWithPending([3n * USDT_UNIT, 2n * USDT_UNIT, 0n], { dollarBalance: 300n * USDT_UNIT });
+    const [ana, beto, caro] = MEMBERS as [Address, Address, Address];
+    const convert = (members: Address[], amounts: bigint[], dollarAmount = amounts.reduce((sum, a) => sum + a, 0n)) => () =>
+      authorize({ kind: "convert", dollarAmount, minCurrencyOut: 1n, members, amounts }, fund, QUIET_DAY, AGENT);
+
+    expect(convert([ana, beto], [3n * USDT_UNIT, 2n * USDT_UNIT])).not.toThrow();
+    expect(convert([ana, beto], [3n * USDT_UNIT + 1n, 2n * USDT_UNIT])).toThrow(LimitError);
+    expect(convert([ana, beto], [3n * USDT_UNIT + 1n, 2n * USDT_UNIT])).toThrow("more than");
+    // Dollars sent straight to the fund (the 300 USDT balance) are nobody's pending.
+    expect(convert([caro], [1n])).toThrow("more than");
+    expect(convert([OUTSIDER], [1n])).toThrow("is not a member");
+    // The sum is the amount the action says, and the lists line up.
+    expect(convert([ana, beto], [3n * USDT_UNIT, 2n * USDT_UNIT], 4n * USDT_UNIT)).toThrow("add up");
+    expect(convert([ana], [3n * USDT_UNIT, 2n * USDT_UNIT])).toThrow("same number");
+    expect(convert([], [], 1n)).toThrow("names no member");
+    // The contract rejects a member twice, and a zero amount.
+    expect(convert([ana, ana], [1n * USDT_UNIT, 1n * USDT_UNIT])).toThrow("twice");
+    expect(convert([ana, beto], [3n * USDT_UNIT, 0n], 3n * USDT_UNIT)).toThrow("Nothing to convert");
+    // A v2 conversion without the lists, and a v1 one with them, are not what the contract takes.
+    expect(() => authorize({ kind: "convert", dollarAmount: 5n * USDT_UNIT, minCurrencyOut: 1n }, fund, QUIET_DAY, AGENT)).toThrow(
+      "names no member",
+    );
+    const v1 = fundSnapshot({ dollarBalance: 20n * USDT_UNIT });
+    expect(() =>
+      authorize({ kind: "convert", dollarAmount: 5n * USDT_UNIT, minCurrencyOut: 1n, members: [ana], amounts: [5n * USDT_UNIT] }, v1, QUIET_DAY, AGENT),
+    ).toThrow("version 1");
+  });
+
+  it("holds the per-conversion and daily limits in a v2 convert too", () => {
+    const fund = fundSnapshotWithPending([600n * USDT_UNIT, 600n * USDT_UNIT, 0n]);
+    const [ana, beto] = MEMBERS as [Address, Address, Address];
+    const convert = (amounts: bigint[], today = QUIET_DAY) => () =>
+      authorize(
+        { kind: "convert", dollarAmount: amounts.reduce((sum, a) => sum + a, 0n), minCurrencyOut: 1n, members: [ana, beto].slice(0, amounts.length), amounts },
+        fund,
+        today,
+        AGENT,
+      );
+    expect(convert([400n * USDT_UNIT, 100n * USDT_UNIT])).not.toThrow();
+    expect(convert([400n * USDT_UNIT, 100n * USDT_UNIT + 1n])).toThrow("per-conversion limit");
+    const after600 = { ...QUIET_DAY, convertedDollar: 600n * USDT_UNIT };
+    expect(convert([400n * USDT_UNIT], after600)).not.toThrow();
+    expect(convert([400n * USDT_UNIT, 1n], after600)).toThrow("daily conversion limit");
   });
 
   it("never pays or proposes to pay an address the contract doesn't list as a member", () => {

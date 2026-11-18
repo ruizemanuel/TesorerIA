@@ -1,6 +1,6 @@
 import { type Address, type Hash, formatUnits, isAddressEqual } from "viem";
 import { MIN_CONVERSION_USDT, type SkipCode, decideConversion, planConversion } from "./convert";
-import { servedProblem } from "./currencies";
+import { type Currency, servedProblem } from "./currencies";
 import { shortMessage } from "./errors";
 import type { FundEvent } from "./events";
 import { type Expense, decideExpense } from "./expense";
@@ -21,8 +21,10 @@ export type ChainView = {
   fund(ref: FundRef): Promise<FundSnapshot>;
   /** The fund's whole history, up to `toBlock`. */
   events(fund: Address, toBlock: bigint): Promise<FundEvent[]>;
-  references(): Promise<References>;
-  quote(fund: Address, dollarAmount: bigint): Promise<ConversionQuote>;
+  /** The price references for converting into `currency`: its own feed and USDT / USD. */
+  references(currency: Currency): Promise<References>;
+  /** What converting `dollarAmount` of the fund's dollar would give, in the fund's currency. */
+  quote(fund: FundSnapshot, dollarAmount: bigint): Promise<ConversionQuote>;
   /** Waits for a transaction to be mined. */
   receipt(hash: Hash): Promise<"success" | "reverted">;
 };
@@ -132,12 +134,14 @@ async function history(ctx: AgentContext, fund: FundSnapshot) {
 
 /**
  * The periodic run (spec, 8.3): converts the USDT waiting in each open fund this agent runs and serves (a v2 fund
- * that doesn't match the table is left alone, with no entry). A fund that fails to load becomes a "blocked" entry
- * and the others go on.
+ * that doesn't match the table is left alone, with no entry). In version 2 that's the USDT members have pending, in
+ * one transaction for all of them; what was sent straight to the fund is nobody's and stays. A fund that fails to
+ * load becomes a "blocked" entry and the others go on.
  */
 export async function runHeartbeat(ctx: AgentContext): Promise<Decision[]> {
   const decisions: Decision[] = [];
-  let references: References | undefined;
+  // Each currency's references, read once per heartbeat for every fund in it.
+  const references = new Map<Currency["symbol"], References>();
   let funds: FundRef[];
   try {
     funds = await ctx.chain.funds();
@@ -152,7 +156,8 @@ export async function runHeartbeat(ctx: AgentContext): Promise<Decision[]> {
       if (fund.closed || !isAddressEqual(fund.agent, ctx.signer.address)) continue;
       // Anyone can deploy a fund that names this agent: one that doesn't match the table costs no history read either.
       if (servedProblem(fund) !== null) continue;
-      if (fund.dollarBalance < MIN_CONVERSION_USDT) continue;
+      // What's waiting to be converted: in version 2 only the members' pending dollars (the balance has what was sent directly).
+      if ((fund.version === 2 ? fund.totalPendingDollar : fund.dollarBalance) < MIN_CONVERSION_USDT) continue;
       const { today } = await history(ctx, fund);
       const plan = planConversion(fund, today);
       if (plan.kind === "none") continue;
@@ -160,16 +165,23 @@ export async function runHeartbeat(ctx: AgentContext): Promise<Decision[]> {
         decisions.push({ fund: address, kind: "skip", code: plan.code, reason: plan.reason });
         continue;
       }
-      references ??= await ctx.chain.references();
-      const quote = await ctx.chain.quote(address, plan.dollarAmount);
-      const decision = decideConversion({ quote, references, now: ctx.now() });
+      const currency = fundCurrency(fund);
+      let prices = references.get(currency.symbol);
+      if (prices === undefined) {
+        prices = await ctx.chain.references(currency);
+        references.set(currency.symbol, prices);
+      }
+      const quote = await ctx.chain.quote(fund, plan.dollarAmount);
+      const decision = decideConversion({ quote, references: prices, currency, now: ctx.now() });
       if (decision.kind === "skip") {
         decisions.push({ fund: address, kind: "skip", code: decision.code, reason: decision.reason });
         continue;
       }
       const { dollarAmount, minCurrencyOut } = decision;
       const reason = `Convert ${formatUnits(dollarAmount, 6)} USDT to at least ${inCurrency(fund, minCurrencyOut)}`;
-      decisions.push(await act(ctx, fund, today, { kind: "convert", dollarAmount, minCurrencyOut }, reason));
+      // A version 2 plan says whose dollars; a version 1 one has no members to name.
+      const members = plan.members === undefined || plan.amounts === undefined ? {} : { members: plan.members, amounts: plan.amounts };
+      decisions.push(await act(ctx, fund, today, { kind: "convert", dollarAmount, minCurrencyOut, ...members }, reason));
     } catch (error) {
       decisions.push({ fund: address, kind: "blocked", reason: `Could not run the fund: ${shortMessage(error)}` });
     }

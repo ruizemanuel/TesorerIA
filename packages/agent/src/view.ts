@@ -16,7 +16,7 @@ function oldestBlock(factories: readonly Factory[]): bigint {
 }
 
 /**
- * The real ChainView: Celo for the funds and the pool, Base for Chainlink's USD / ARS, and `logs` for the funds'
+ * The real ChainView: Celo for the funds and the pool, Base or Celo for each currency's Chainlink feed, and `logs` for the funds'
  * histories (Blockscout plus the node on mainnet; the node alone on a fork). It serves the funds of every factory.
  */
 export function createChainView({
@@ -40,7 +40,7 @@ export function createChainView({
     funds: () => listFunds(celo, factories),
     fund: (ref) => readFund(celo, ref),
     events: (fund, toBlock) => readFundEvents(logs, fund, fromBlock, toBlock),
-    references: () => readReferences({ base, celo }),
+    references: (currency) => readReferences({ base, celo }, currency),
     quote: (fund, dollarAmount) => quoteConversion(celo, fund, dollarAmount),
     receipt: async (hash) => (await celo.waitForTransactionReceipt({ hash })).status,
   };

@@ -1,5 +1,5 @@
 import { type Address, type Hash, type Hex, encodeFunctionData, isAddressEqual, zeroAddress } from "viem";
-import { Action, fundAbi } from "./abi";
+import { Action, fundAbi, fundV2Abi } from "./abi";
 import { type Currency, currencyOf } from "./currencies";
 import type { FundEvent } from "./events";
 import type { FundSnapshot } from "./fund";
@@ -47,9 +47,12 @@ export function dailyActivity(events: readonly FundEvent[], agent: Address, sinc
   return { reimbursed, convertedDollar, transactions: transactions.size };
 }
 
-/** Something the agent can do in a fund. */
+/**
+ * Something the agent can do in a fund. A version 2 `convert` also names the members whose pending dollars it takes
+ * and how much of each (`amounts` adds up to `dollarAmount`); a version 1 one names none.
+ */
 export type AgentAction =
-  | { kind: "convert"; dollarAmount: bigint; minCurrencyOut: bigint }
+  | { kind: "convert"; dollarAmount: bigint; minCurrencyOut: bigint; members?: readonly Address[]; amounts?: readonly bigint[] }
   | { kind: "reimburse"; member: Address; amount: bigint; ref: Hex }
   | { kind: "propose-payment"; member: Address; amount: bigint; note: string };
 
@@ -87,6 +90,37 @@ function listedMember(fund: FundSnapshot, address: Address): Address {
 }
 
 /**
+ * The members and amounts of a version 2 conversion as the contract takes them: each member listed (as the contract
+ * lists them), once, with a positive amount that is at most what they have pending, and the amounts adding up to
+ * `dollarAmount`. Throws a LimitError when something doesn't hold.
+ */
+function conversionParts(
+  fund: FundSnapshot,
+  dollarAmount: bigint,
+  members: readonly Address[] | undefined,
+  amounts: readonly bigint[] | undefined,
+): { members: Address[]; amounts: bigint[] } {
+  if (members === undefined || amounts === undefined || members.length === 0) {
+    throw new LimitError("A conversion in a version 2 fund names no member");
+  }
+  if (members.length !== amounts.length) throw new LimitError("A conversion needs the same number of members and amounts");
+  const listed: Address[] = [];
+  for (const [i, address] of members.entries()) {
+    const member = listedMember(fund, address);
+    const amount = amounts[i] ?? 0n;
+    if (amount <= 0n) throw new LimitError("Nothing to convert");
+    if (listed.includes(member)) throw new LimitError(`${member} is in the conversion twice`);
+    const pending = fund.pendingDollar[fund.members.indexOf(member)] ?? 0n;
+    if (amount > pending) throw new LimitError(`The conversion takes more than ${member} has pending (${pending})`);
+    listed.push(member);
+  }
+  if (amounts.reduce((sum, amount) => sum + amount, 0n) !== dollarAmount) {
+    throw new LimitError("The members' amounts don't add up to the amount to convert");
+  }
+  return { members: listed, amounts: [...amounts] };
+}
+
+/**
  * The only way to turn an action into a transaction: checks it against the fund's state and the agent's
  * limits, and encodes it. Throws LimitError when something doesn't hold.
  */
@@ -103,18 +137,24 @@ export function authorize(
   }
   switch (action.kind) {
     case "convert": {
-      const { dollarAmount, minCurrencyOut } = action;
+      const { dollarAmount, minCurrencyOut, members, amounts } = action;
       if (dollarAmount <= 0n || minCurrencyOut <= 0n) throw new LimitError("Nothing to convert");
-      if (dollarAmount > fund.dollarBalance) throw new LimitError("The fund doesn't hold that much USDT");
+      // Version 2 converts what members have pending, which `conversionParts` checks one by one; version 1, what the fund holds.
+      const parts = fund.version === 2 ? conversionParts(fund, dollarAmount, members, amounts) : undefined;
+      if (parts === undefined) {
+        if (members !== undefined || amounts !== undefined) throw new LimitError("A conversion in a version 1 fund names no members");
+        if (dollarAmount > fund.dollarBalance) throw new LimitError("The fund doesn't hold that much USDT");
+      }
       const { perConversion, perDay } = conversionLimits(fund);
       if (dollarAmount > perConversion) throw new LimitError("Above the agent's per-conversion limit");
       if (today.convertedDollar + dollarAmount > perDay) {
         throw new LimitError("Above the agent's daily conversion limit");
       }
-      return {
-        to: fund.address,
-        data: encodeFunctionData({ abi: fundAbi, functionName: "convert", args: [dollarAmount, minCurrencyOut] }),
-      };
+      const data =
+        parts === undefined
+          ? encodeFunctionData({ abi: fundAbi, functionName: "convert", args: [dollarAmount, minCurrencyOut] })
+          : encodeFunctionData({ abi: fundV2Abi, functionName: "convert", args: [parts.members, parts.amounts, minCurrencyOut] });
+      return { to: fund.address, data };
     }
     case "reimburse": {
       const member = listedMember(fund, action.member);

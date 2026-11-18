@@ -1,9 +1,10 @@
 import { type Address, type Hash, decodeFunctionData, getAddress, pad } from "viem";
 import { describe, expect, it } from "vitest";
-import { fundAbi } from "../src/abi";
+import { fundAbi, fundV2Abi } from "../src/abi";
+import { WARS } from "../src/chain";
+import { type Currency, currencyOf, servedProblem } from "../src/currencies";
 import type { FundEvent } from "../src/events";
 import type { Expense } from "../src/expense";
-import { servedProblem } from "../src/currencies";
 import type { FundRef, FundSnapshot } from "../src/fund";
 import type { ConversionQuote, References } from "../src/market";
 import { type AgentContext, type ChainView, MIN_GAS_USDT, handleExpense, runHeartbeat } from "../src/run";
@@ -16,8 +17,10 @@ import {
   OUTSIDER,
   USDT_UNIT,
   WARS_UNIT,
+  converted,
   fundSnapshot,
   fundSnapshotV2,
+  fundSnapshotWithPending,
   fundSnapshotWithoutDollar,
   proposed,
   ref,
@@ -27,8 +30,8 @@ import {
 const NOW = 1_791_561_510n;
 const HASH: Hash = pad("0x7a", { size: 32 });
 const REFERENCES: References = {
-  usdArs: { answer: 160_790_320_000n, decimals: 8, updatedAt: 1_791_555_995n },
-  usdtUsd: { answer: 99_913_512n, decimals: 8, updatedAt: 1_791_561_336n },
+  currencyUsd: { answer: 160_790_320_000n, decimals: 8, updatedAt: 1_791_555_995n },
+  dollarUsd: { answer: 99_913_512n, decimals: 8, updatedAt: 1_791_561_336n },
 };
 const QUOTE: ConversionQuote = {
   dollarAmount: 300n * USDT_UNIT,
@@ -37,6 +40,7 @@ const QUOTE: ConversionQuote = {
   poolCurrency: 106_669_036_955_606_543_270_134_078n,
 };
 const MEMBER = MEMBERS[1] as Address;
+const WARS_CURRENCY = currencyOf(WARS) as Currency;
 
 /** A chain with the given funds and histories; everything else as on 2026-10-09. */
 function fakeChain(
@@ -119,6 +123,70 @@ describe("runHeartbeat", () => {
     });
   });
 
+  it("converts a v2 fund's pending dollars in one transaction", async () => {
+    const { signer, sent } = fakeSigner();
+    const [ana, beto] = MEMBERS as [Address, Address, Address];
+    // 100 + 200 USDT pending (and 50 more sent straight to the fund, which is nobody's and stays put).
+    const fund = fundSnapshotWithPending([100n * USDT_UNIT, 200n * USDT_UNIT, 0n], { dollarBalance: 350n * USDT_UNIT });
+    const quoted: [FundSnapshot, bigint][] = [];
+    const chain: ChainView = { ...fakeChain([fund]), quote: async (f, dollarAmount) => (quoted.push([f, dollarAmount]), { ...QUOTE, dollarAmount }) };
+    const decisions = await runHeartbeat(context(chain, signer));
+    const minCurrencyOut = (QUOTE.quotedCurrency * 9_950n) / 10_000n;
+    const action = {
+      kind: "convert",
+      dollarAmount: 300n * USDT_UNIT,
+      minCurrencyOut,
+      members: [ana, beto],
+      amounts: [100n * USDT_UNIT, 200n * USDT_UNIT],
+    };
+    expect(decisions).toEqual([
+      { fund: FUND, kind: "convert", reason: "Convert 300 USDT to at least 479832 wARS", action, tx: HASH, status: "success" },
+    ]);
+    expect(quoted).toEqual([[fund, 300n * USDT_UNIT]]);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]?.to).toBe(FUND);
+    expect(decodeFunctionData({ abi: fundV2Abi, data: sent[0]?.data ?? "0x" })).toEqual({
+      functionName: "convert",
+      args: [[ana, beto], [100n * USDT_UNIT, 200n * USDT_UNIT], minCurrencyOut],
+    });
+  });
+
+  it("leaves a v2 fund's dollars alone unless members have them pending", async () => {
+    const { signer, sent } = fakeSigner();
+    const funds = [
+      // Dollars sent straight to the fund, however many, belong to nobody.
+      fundSnapshotV2({ dollarBalance: 300n * USDT_UNIT }),
+      fundSnapshotWithPending([2n * USDT_UNIT, 2n * USDT_UNIT, 0n], { address: SECOND_FUND }),
+    ];
+    const historiesRead: Address[] = [];
+    const chain = fakeChain(funds);
+    const watched: ChainView = { ...chain, events: async (fund, toBlock) => (historiesRead.push(fund), chain.events(fund, toBlock)) };
+    expect(await runHeartbeat(context(watched, signer))).toEqual([]);
+    expect(sent).toEqual([]);
+    expect(historiesRead).toEqual([]);
+  });
+
+  it("keeps a v2 fund's skips and limits: what a day leaves under 5 USDT is a daily-limit skip", async () => {
+    const { signer, sent } = fakeSigner();
+    const events = [converted(998n * USDT_UNIT, BLOCK - 10n, 8)];
+    const chain = fakeChain([fundSnapshotWithPending([100n * USDT_UNIT, 100n * USDT_UNIT, 0n])], { events });
+    expect(await runHeartbeat(context(chain, signer))).toEqual([
+      { fund: FUND, kind: "skip", code: "daily-limit", reason: "The agent reached its daily conversion limit for this fund" },
+    ]);
+    expect(sent).toEqual([]);
+  });
+
+  it("reads each currency's references once per heartbeat, for the funds that use it", async () => {
+    const { signer, sent } = fakeSigner();
+    const funds = [fundSnapshot({ dollarBalance: 300n * USDT_UNIT }), fundSnapshotWithPending([300n * USDT_UNIT, 0n, 0n], { address: SECOND_FUND })];
+    const asked: Currency[] = [];
+    const chain: ChainView = { ...fakeChain(funds), references: async (currency) => (asked.push(currency), REFERENCES) };
+    const decisions = await runHeartbeat(context(chain, signer));
+    expect(decisions.map((d) => d.kind)).toEqual(["convert", "convert"]);
+    expect(asked).toEqual([WARS_CURRENCY]);
+    expect(sent).toHaveLength(2);
+  });
+
   it("leaves alone funds with less than 5 USDT, closed funds and other agents' funds", async () => {
     const { signer, sent } = fakeSigner();
     const funds = [
@@ -186,7 +254,7 @@ describe("runHeartbeat", () => {
 
   it("logs why it waits when Chainlink is stale, and sends nothing", async () => {
     const { signer, sent } = fakeSigner();
-    const stale = { ...REFERENCES, usdArs: { ...REFERENCES.usdArs, updatedAt: NOW - 30n * 3_600n } };
+    const stale = { ...REFERENCES, currencyUsd: { ...REFERENCES.currencyUsd, updatedAt: NOW - 30n * 3_600n } };
     const chain = fakeChain([fundSnapshot({ dollarBalance: 300n * USDT_UNIT })], { references: stale });
     expect(await runHeartbeat(context(chain, signer))).toEqual([
       { fund: FUND, kind: "skip", code: "price-reference", reason: "Chainlink's USD / ARS is 30.0 hours old (26 at most)" },

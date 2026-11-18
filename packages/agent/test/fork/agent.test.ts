@@ -18,7 +18,9 @@ import { celo } from "viem/chains";
 import { beforeAll, describe, expect, it } from "vitest";
 import { fundFactoryAbi } from "../../src/abi";
 import { FUND_FACTORY, POOL, USDT, WARS } from "../../src/chain";
+import { type Currency, currencyOf } from "../../src/currencies";
 import { rpcLogReader } from "../../src/events";
+import { readFund } from "../../src/fund";
 import { type ContractReader, quoteConversion, readReferences } from "../../src/market";
 import { type AgentContext, handleExpense, runHeartbeat } from "../../src/run";
 import { createChainView } from "../../src/view";
@@ -78,10 +80,10 @@ async function baseAgreeingWithThePool(): Promise<ContractReader> {
       readContract: async ({ functionName }: { functionName: string }) =>
         functionName === "decimals" ? 8 : [1n, answer, updatedAt, updatedAt, 1n],
     }) as unknown as ContractReader;
-  const { usdtUsd } = await readReferences({ base: answering(1n, 0n), celo: publicClient });
-  const { quotedCurrency } = await quoteConversion(publicClient, fund, 1_000_000n);
-  // For 1 USDT, Chainlink's wARS are 100 × usdArs × usdtUsd (8 decimals each): pick usdArs to match the pool.
-  return answering(quotedCurrency / (100n * usdtUsd.answer), BigInt(Math.floor(Date.now() / 1000)));
+  const { dollarUsd } = await readReferences({ base: answering(1n, 0n), celo: publicClient }, currencyOf(WARS) as Currency);
+  const { quotedCurrency } = await quoteConversion(publicClient, await readFund(publicClient, { address: fund, version: 1 }), 1_000_000n);
+  // For 1 USDT, Chainlink's wARS are 100 × currencyUsd × dollarUsd (8 decimals each): pick currencyUsd to match the pool.
+  return answering(quotedCurrency / (100n * dollarUsd.answer), BigInt(Math.floor(Date.now() / 1000)));
 }
 
 beforeAll(async () => {
