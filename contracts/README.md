@@ -6,7 +6,7 @@
 
 Everything else (other payments, member changes, the weekly cap, quorum, replacing or firing the agent, closing the fund) needs N-of-M member votes, with N always below M so one lost passkey can't lock the fund; the total cap is fixed when the fund is created. The agent can propose these actions but never votes. Once the fund is closed, anyone can call `distributeRemainder` to split, by the same rule, whatever reaches it later. `FundFactory` deploys one `Fund` per group.
 
-Version 2 (`FundV2` and `FundFactoryV2`, deployed at `0x1337a61CF7fDeF412E04894FE705d4341878d4d3`) sits next to them: see [Version 2](#version-2), which starts with its known risks.
+Version 2 (`FundV2` and `FundFactoryV2`, the factory deployed at `0x1337a61CF7fDeF412E04894FE705d4341878d4d3`) sits next to them: see [Version 2](#version-2), which starts with its known risks.
 
 ## Run the tests
 
@@ -63,8 +63,9 @@ The 20 forge-lint warnings in `src/` were also reviewed and left as they are. Ev
 What can still go wrong with a version 2 fund, before the rest. Each one is argued in the item of [the checklist](#pashov-checklist-1) it names.
 
 - **A stolen agent key, while the pool's price is held for 30 minutes.** On top of `weeklyCap` a week and up to 2% per conversion, an attacker who also holds the pool's price for 30 minutes can lose the group all the dollars pending at that moment. `balanceCap`, fixed when the fund is created, is the ceiling on that loss (the app proposes 450,000 wARS, about US$300). Items 5 and 7.
-- **The tokens have to be standard.** `_split` and the close assume that the currency and the dollar are plain ERC-20s: no rebasing down, no fee charged to the sender, no issuer taking tokens out of the fund. They are today, but both are upgradeable: if one stopped being, the fund couldn't close. Item 10.
-- **Dust after the close.** The split rounds down and leaves a few wei, and anyone can call `distributeRemainder` again at their own gas cost, moving nothing: those calls are noise. Item 12.
+- **A blocklisted member or fund blocks the exits.** Celo's USDT has a blocklist, and wARS has a compliance role (off today). Payouts are pushed, so if a member who is owed something gets blocklisted, closing and removing that member revert for everyone until the group votes `ReplaceMember` to another address of theirs; after the close, `distributeRemainder` stays blocked until the blocklist is lifted. If the fund itself were blocklisted, its balance of that token would freeze, and the close with it. There is no admin to rescue it, by design. Item 9, the checklist's one FAIL. Version 1 has the same risk (item 9 of [its checklist](#pashov-checklist)).
+- **The tokens have to be standard.** `_split` and the close assume that the currency and the dollar are plain ERC-20s: no rebasing down, no fee charged to the sender, no issuer taking tokens out of the fund. They are today, but both are upgradeable: if one stopped being, the fund couldn't close, and almost nothing would work. Item 10.
+- **Dust after the close.** The split rounds down and leaves a few wei, and anyone can call `distributeRemainder` again at their own gas cost, possibly moving nothing: those calls are noise. Item 12.
 - **The pool may not keep 30 minutes of history.** The real pool stores 1,200 observations, at most one per block, so a price that changes in every block of about a second leaves only about 20 minutes, and `observe` reverts (`OLD`) until it has more. The calls that read the TWAP stop meanwhile (item 5 lists them), but votes, payments and exits don't: a denial of service, not a loss. The deploy script checked that each dollar pool serves the 30 minutes and keeps at least 6 hours of history, which doesn't rule this out. Version 1 has the same risk (item 5 of [its checklist](#pashov-checklist)). Anyone can enlarge a pool's buffer with `increaseObservationCardinalityNext`; whether to do it for TesorerIA's pool is still open.
 
 ### What changes from v1

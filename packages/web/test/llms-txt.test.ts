@@ -217,7 +217,7 @@ describe("/llms.txt: the site for an agent that reads it (llmstxt.org)", () => {
     expect(v2).toContain("at what the conversion really got");
     expect(v2).toContain("`credited` in `Conversion`");
     // Version 1's rule (credited at once, at the TWAP) is not told for version 2.
-    expect(v2).not.toContain("`creditedWars`");
+    expect(v2).not.toContain("credited to the member at once");
   });
 
   it("lists v2's own functions and reads, and propose's actions with 8 GiveBack", async () => {
@@ -247,10 +247,23 @@ describe("/llms.txt: the site for an agent that reads it (llmstxt.org)", () => {
     expect(v2).toContain("0 Pay, 1 AddMember, 2 RemoveMember, 3 ReplaceMember, 4 SetWeeklyCap, 5 SetVotesRequired, 6 SetAgent, 7 Close, 8 GiveBack.");
     expect(v2).toContain("an ERC-20 `approve`");
     expect(v2).toContain("`convert` is the agent's: it swaps several members' dollars in one swap");
+    // The share before the fee is `currencyOut`, and what's credited is that minus the fee.
+    expect(v2).toContain("(that's `currencyOut` in their `Conversion`: their part of the swap, not the whole swap), takes the fee off it and credits the rest (`credited`)");
+    expect(v2).toContain("The agent calls `convert`, `reimburseAgreedExpense` and `propose`, and sends `payFee` once a week");
     expect(v2).toContain("`GiveBack` pays a member back part of what they contributed, by vote, and lowers their `contributed` by as much");
     expect(v2).toContain("at most 10 proposals a week");
     expect(v2).toContain("560 bytes");
     expect(v2).toContain("`weeklyCap` can't exceed `balanceCap`");
+  });
+
+  it("says what version 2 lacks of version 1's, and which of its event arguments are named differently", async () => {
+    const v2 = section(await GET().text(), "## Version 2");
+    expect(v2).toContain("version 2 has no `contributeWars`, `contributeUsdt`, `balanceInWars` or `quoteUsdtInWars`");
+    expect(v2).toContain("its `convert` is not version 1's `convert(uint256,uint256)`");
+    expect(v2).toContain("`Contribution` has `credited` where version 1's has `creditedWars`");
+    expect(v2).toContain("`MemberRemoved` has `currencyReturned` and `dollarReturned` (version 1: `warsReturned`, `usdtReturned`)");
+    expect(v2).toContain("`FundClosed` and `RemainderDistributed` have `currencyBalance` and `dollarBalance` (version 1: `warsBalance`, `usdtBalance`)");
+    expect(v2).toContain("`currencyOut` is that member's share of the swap");
   });
 
   it("says a version 2 fund takes any wFIAT as its currency, and which one the web creates today", async () => {

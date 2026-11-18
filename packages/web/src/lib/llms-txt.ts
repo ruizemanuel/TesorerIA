@@ -168,16 +168,16 @@ ${functions.reads.join("\n")}
 
 ## Version 2
 
-A version 2 fund (\`FundV2\`, deployed by the [FundFactoryV2](${address(FUND_FACTORY_V2)})) is what new funds are: the web creates them. What is not said here works as in the sections above.
+A version 2 fund (\`FundV2\`, deployed by the [FundFactoryV2](${address(FUND_FACTORY_V2)})) is what new funds are: the web creates them. What is not said here works as in the sections above, except that version 2 has no \`contributeWars\`, \`contributeUsdt\`, \`balanceInWars\` or \`quoteUsdtInWars\` (it has \`contribute\`, \`contributeDollar\`, \`balanceInCurrency\` and \`quoteDollar\` instead), and its \`convert\` is not version 1's \`convert(uint256,uint256)\`.
 
 - **Any currency.** A fund's currency is a parameter of \`createFund\`: any wFIAT, with or without a dollar and the Uniswap v3 pool of the two. Read them with \`currency()\`, \`dollar()\` and \`pool()\`. A fund without a dollar takes only its currency. Version 2 funds can use any wFIAT, and the web creates them in wARS with USDT today.
 - **USDT is pending until it is converted.** A USDT contribution is not credited when it arrives: it stays pending, in \`pendingDollar(address)\` (the sum is \`totalPendingDollar()\`), until the agent converts it. Then each member is credited at what the conversion really got, net of the fee: that's \`credited\` in \`Conversion\`, which comes once per member. \`Contribution\` carries \`credited\` = 0 for USDT. A member voted out gets their pending USDT back, and a replacement account takes it over.
-- **Conversion.** \`convert\` is the agent's: it swaps several members' dollars in one swap, with the same floor as version 1 (its minimum can't be more than ${MAX_DEVIATION_PERCENT} % below the TWAP quote of the whole amount), and credits each member \`received * amount / total\`, rounded down. A swap that doesn't take all the dollars reverts.
+- **Conversion.** \`convert\` is the agent's: it swaps several members' dollars in one swap, with the same floor as version 1 (its minimum can't be more than ${MAX_DEVIATION_PERCENT} % below the TWAP quote of the whole amount), and gives each member the share \`received * amount / total\`, rounded down (that's \`currencyOut\` in their \`Conversion\`: their part of the swap, not the whole swap), takes the fee off it and credits the rest (\`credited\`). A swap that doesn't take all the dollars reverts.
 - **The fee.** New funds keep ${FEE_BPS / 100} % for gas: each fund has a \`feeBps\`, fixed when it's created (the contract allows up to ${MAX_FEE_PERCENT} %; the web sets ${FEE_BPS / 100} %), and sets that share aside, in its currency, from every contribution and every converted share. What is set aside is \`feeOwed\`; \`contributed\` counts what is left; \`availableCurrency()\` is what the fund can pay or split, its balance of the currency minus \`feeOwed\`. And anyone can call \`payFee\` to send \`feeOwed\` to the [fee recipient](${address(FEE_RECIPIENT)}), with the fund open or closed.
 - **\`GiveBack\`.** \`GiveBack\` pays a member back part of what they contributed, by vote, and lowers their \`contributed\` by as much, so their share if they leave or the fund closes is right.
 - **Limits.** Each member, and the agent, can make at most ${MAX_PROPOSALS_PER_WEEK} proposals a week, counted from zero again each week (\`proposalsInWeek\`), with notes of at most ${MAX_NOTE_BYTES} bytes. \`weeklyCap\` can't exceed \`balanceCap\`, which counts the available currency and the pending dollars, at the TWAP.
 
-Members call \`contribute\`, \`contributeDollar\`, \`propose\` and \`vote\`, and a contribution needs an ERC-20 \`approve\` of the fund first. The agent calls \`convert\`, \`reimburseAgreedExpense\` and \`propose\`. Anyone can call \`execute\` once a proposal has the votes it needs. What version 2 adds or changes:
+Members call \`contribute\`, \`contributeDollar\`, \`propose\` and \`vote\`, and a contribution needs an ERC-20 \`approve\` of the fund first. The agent calls \`convert\`, \`reimburseAgreedExpense\` and \`propose\`, and sends \`payFee\` once a week. Anyone can call \`execute\` once a proposal has the votes it needs. What version 2 adds or changes:
 
 ${functionsV2.calls.join("\n")}
 
@@ -189,7 +189,7 @@ ${functionsV2.reads.join("\n")}
     .map(([name, value]) => `${value} ${name}`)
     .join(", ")}.
 
-Its events keep version 1's, except \`Conversion(member, dollarIn, currencyOut, credited)\`, and add \`ContributionGivenBack(member, amount)\` and \`FeePaid(amount)\`.
+Its events keep version 1's types, so the same decoders read them, but some arguments have other names: \`Contribution\` has \`credited\` where version 1's has \`creditedWars\`, \`MemberRemoved\` has \`currencyReturned\` and \`dollarReturned\` (version 1: \`warsReturned\`, \`usdtReturned\`), and \`FundClosed\` and \`RemainderDistributed\` have \`currencyBalance\` and \`dollarBalance\` (version 1: \`warsBalance\`, \`usdtBalance\`). \`Conversion\` is the one that differs: \`Conversion(member, dollarIn, currencyOut, credited)\` comes once per member, and \`currencyOut\` is that member's share of the swap. New are \`ContributionGivenBack(member, amount)\` and \`FeePaid(amount)\`.
 
 ## Errors
 
