@@ -16,10 +16,10 @@ const REFERENCES: References = {
   usdtUsd: { answer: 99_913_512n, decimals: 8, updatedAt: 1_791_561_336n },
 };
 const QUOTE: ConversionQuote = {
-  usdtAmount: 300n * USDT_UNIT,
-  quotedWars: 482_243_292_884_944_290_611_892n,
-  twapWars: 482_300_000_000_000_000_000_000n,
-  poolWars: 106_669_036_955_606_543_270_134_078n,
+  dollarAmount: 300n * USDT_UNIT,
+  quotedCurrency: 482_243_292_884_944_290_611_892n,
+  twapCurrency: 482_300_000_000_000_000_000_000n,
+  poolCurrency: 106_669_036_955_606_543_270_134_078n,
 };
 const MEMBER = MEMBERS[1] as Address;
 
@@ -45,7 +45,7 @@ function fakeChain(
     },
     events: async () => events,
     references: async () => references,
-    quote: async (_fund, usdtAmount) => ({ ...QUOTE, usdtAmount }),
+    quote: async (_fund, dollarAmount) => ({ ...QUOTE, dollarAmount }),
     receipt: async () => {
       if (receiptError) throw receiptError;
       return "success";
@@ -83,15 +83,15 @@ const SECOND_FUND = getAddress("0x00000000000000000000000000000000000f00d2");
 describe("runHeartbeat", () => {
   it("converts the USDT waiting in a fund, near the quote", async () => {
     const { signer, sent } = fakeSigner();
-    const fund = fundSnapshot({ usdtBalance: 300n * USDT_UNIT });
+    const fund = fundSnapshot({ dollarBalance: 300n * USDT_UNIT });
     const decisions = await runHeartbeat(context(fakeChain([fund]), signer));
-    const minWarsOut = (QUOTE.quotedWars * 9_950n) / 10_000n;
+    const minCurrencyOut = (QUOTE.quotedCurrency * 9_950n) / 10_000n;
     expect(decisions).toEqual([
       {
         fund: FUND,
         kind: "convert",
         reason: "Convert 300 USDT to at least 479832 wARS",
-        action: { kind: "convert", usdtAmount: 300n * USDT_UNIT, minWarsOut },
+        action: { kind: "convert", dollarAmount: 300n * USDT_UNIT, minCurrencyOut },
         tx: HASH,
         status: "success",
       },
@@ -100,16 +100,16 @@ describe("runHeartbeat", () => {
     expect(sent[0]?.to).toBe(FUND);
     expect(decodeFunctionData({ abi: fundAbi, data: sent[0]?.data ?? "0x" })).toEqual({
       functionName: "convert",
-      args: [300n * USDT_UNIT, minWarsOut],
+      args: [300n * USDT_UNIT, minCurrencyOut],
     });
   });
 
   it("leaves alone funds with less than 5 USDT, closed funds and other agents' funds", async () => {
     const { signer, sent } = fakeSigner();
     const funds = [
-      fundSnapshot({ usdtBalance: 4n * USDT_UNIT }),
-      fundSnapshot({ address: SECOND_FUND, usdtBalance: 300n * USDT_UNIT, closed: true }),
-      fundSnapshot({ address: OUTSIDER, usdtBalance: 300n * USDT_UNIT, agent: OUTSIDER }),
+      fundSnapshot({ dollarBalance: 4n * USDT_UNIT }),
+      fundSnapshot({ address: SECOND_FUND, dollarBalance: 300n * USDT_UNIT, closed: true }),
+      fundSnapshot({ address: OUTSIDER, dollarBalance: 300n * USDT_UNIT, agent: OUTSIDER }),
     ];
     const historiesRead: Address[] = [];
     const chain = fakeChain(funds);
@@ -135,7 +135,7 @@ describe("runHeartbeat", () => {
   it("hands over each hash as soon as it is sent, before the receipt", async () => {
     const { signer } = fakeSigner();
     const handed: unknown[] = [];
-    const chain = fakeChain([fundSnapshot({ usdtBalance: 300n * USDT_UNIT })], { receiptError: new Error("timed out") });
+    const chain = fakeChain([fundSnapshot({ dollarBalance: 300n * USDT_UNIT })], { receiptError: new Error("timed out") });
     const ctx: AgentContext = { ...context(chain, signer), onSent: async (sent) => void handed.push(sent) };
     const [decision] = await runHeartbeat(ctx);
     expect(handed).toEqual([{ fund: FUND, action: decision?.action, tx: HASH }]);
@@ -152,7 +152,7 @@ describe("runHeartbeat", () => {
 
   it("says in the reason when the hash couldn't be recorded, and still reads the receipt", async () => {
     const { signer, sent } = fakeSigner();
-    const chain = fakeChain([fundSnapshot({ usdtBalance: 300n * USDT_UNIT })]);
+    const chain = fakeChain([fundSnapshot({ dollarBalance: 300n * USDT_UNIT })]);
     const ctx: AgentContext = {
       ...context(chain, signer),
       onSent: async () => {
@@ -172,7 +172,7 @@ describe("runHeartbeat", () => {
   it("logs why it waits when Chainlink is stale, and sends nothing", async () => {
     const { signer, sent } = fakeSigner();
     const stale = { ...REFERENCES, usdArs: { ...REFERENCES.usdArs, updatedAt: NOW - 30n * 3_600n } };
-    const chain = fakeChain([fundSnapshot({ usdtBalance: 300n * USDT_UNIT })], { references: stale });
+    const chain = fakeChain([fundSnapshot({ dollarBalance: 300n * USDT_UNIT })], { references: stale });
     expect(await runHeartbeat(context(chain, signer))).toEqual([
       { fund: FUND, kind: "skip", code: "price-reference", reason: "Chainlink's USD / ARS is 30.0 hours old (26 at most)" },
     ]);
@@ -181,7 +181,7 @@ describe("runHeartbeat", () => {
 
   it("on a dry run, decides and estimates but sends nothing", async () => {
     const { signer, sent } = fakeSigner();
-    const chain = fakeChain([fundSnapshot({ usdtBalance: 300n * USDT_UNIT })]);
+    const chain = fakeChain([fundSnapshot({ dollarBalance: 300n * USDT_UNIT })]);
     const [decision] = await runHeartbeat(context(chain, signer, false));
     expect(decision).toMatchObject({ kind: "convert", reason: expect.stringContaining("(dry run: not sent)") });
     expect(decision?.tx).toBeUndefined();
@@ -190,7 +190,7 @@ describe("runHeartbeat", () => {
 
   it("goes on with the next fund when one can't be read", async () => {
     const { signer, sent } = fakeSigner();
-    const funds = [fundSnapshot({ usdtBalance: 300n * USDT_UNIT }), fundSnapshot({ address: SECOND_FUND, usdtBalance: 300n * USDT_UNIT })];
+    const funds = [fundSnapshot({ dollarBalance: 300n * USDT_UNIT }), fundSnapshot({ address: SECOND_FUND, dollarBalance: 300n * USDT_UNIT })];
     const decisions = await runHeartbeat(context(fakeChain(funds, { failing: [FUND] }), signer));
     expect(decisions.map((d) => [d.fund, d.kind])).toEqual([
       [FUND, "blocked"],
@@ -202,7 +202,7 @@ describe("runHeartbeat", () => {
 
   it("keeps the hash of a sent transaction whose receipt it couldn't read", async () => {
     const { signer, sent } = fakeSigner();
-    const chain = fakeChain([fundSnapshot({ usdtBalance: 300n * USDT_UNIT })], { receiptError: new Error("timed out") });
+    const chain = fakeChain([fundSnapshot({ dollarBalance: 300n * USDT_UNIT })], { receiptError: new Error("timed out") });
     const [decision] = await runHeartbeat(context(chain, signer));
     expect(decision).toMatchObject({
       kind: "convert",
@@ -214,7 +214,7 @@ describe("runHeartbeat", () => {
   });
 
   it("sends nothing when the agent is short of gas or the transaction would fail", async () => {
-    const fund = fundSnapshot({ usdtBalance: 300n * USDT_UNIT });
+    const fund = fundSnapshot({ dollarBalance: 300n * USDT_UNIT });
     const poor = fakeSigner();
     const [lowGas] = await runHeartbeat(context(fakeChain([fund], { gas: MIN_GAS_USDT - 1n }), poor.signer));
     expect(lowGas).toMatchObject({ kind: "blocked", reason: "The agent holds 0.049999 USDT for gas, under 0.05" });

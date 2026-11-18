@@ -189,7 +189,7 @@ export async function loadFundScreen(
     canAddMembers: snapshot.members.length < MAX_MEMBERS,
     conversionHold: hold,
     summaries: summaryRows.map((row) => ({ week: row.week, at: row.createdAt })),
-    warsBalance: snapshot.warsBalance,
+    currencyBalance: snapshot.currencyBalance,
     viewerIsMember: !publicView && viewerIsMember,
     now: new Date(Number(clock.timestamp) * 1000),
     m,
@@ -236,7 +236,7 @@ export function loadPublicFundScreen(address: Address, locale: Locale): Promise<
  * checksummed: the agent's come from viem's decoding, and this one from getAddress.
  */
 async function conversionHold(db: Db, snapshot: FundSnapshot): Promise<ConversionHold | null> {
-  if (snapshot.usdtBalance < MIN_CONVERSION_USDT) return null;
+  if (snapshot.dollarBalance < MIN_CONVERSION_USDT) return null;
   const [latest] = await db
     .select({ kind: decisions.kind, code: decisions.code, status: decisions.status, createdAt: decisions.createdAt })
     .from(decisions)
@@ -251,7 +251,7 @@ async function conversionHold(db: Db, snapshot: FundSnapshot): Promise<Conversio
     .limit(1);
   if (latest === undefined) return null;
   const held = latest.kind === "skip" || latest.kind === "blocked" || (latest.kind === "convert" && latest.status === "reverted");
-  return held ? { usdt: snapshot.usdtBalance, code: latest.kind === "skip" ? latest.code : null, at: latest.createdAt } : null;
+  return held ? { usdt: snapshot.dollarBalance, code: latest.kind === "skip" ? latest.code : null, at: latest.createdAt } : null;
 }
 
 /** Each proposal's state now: votes, executed, deadline, and whether `viewer` voted. */

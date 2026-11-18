@@ -90,7 +90,7 @@ export function buildTimeline({
   canAddMembers = false,
   conversionHold = null,
   summaries = [],
-  warsBalance,
+  currencyBalance,
   viewerIsMember,
   now,
   m,
@@ -128,7 +128,7 @@ export function buildTimeline({
   /** The agent's summary of each week that closed (spec, 9.4): the contract's week, and when the agent wrote it. */
   summaries?: readonly { week: number; at: Date }[];
   /** The wARS the fund holds now: a payment over it can't be executed yet. */
-  warsBalance: bigint;
+  currencyBalance: bigint;
   viewerIsMember: boolean;
   now: Date;
   /** The page's dictionary: its sentences, and `m.locale` for the amounts. */
@@ -162,9 +162,9 @@ export function buildTimeline({
         break;
       }
       case "Conversion": {
-        const { usdtIn, warsOut } = event.args;
-        const usdt = formatUsdt(usdtIn, m.locale);
-        const pesos = formatPesos(warsOut, m.locale);
+        const { dollarIn, currencyOut } = event.args;
+        const usdt = formatUsdt(dollarIn, m.locale);
+        const pesos = formatPesos(currencyOut, m.locale);
         const found = conversions.get(`${event.transactionHash}:${event.logIndex}`);
         const size = found === undefined ? 0n : found.difference < 0n ? -found.difference : found.difference;
         let text = t.converted(usdt, pesos);
@@ -207,7 +207,7 @@ export function buildTimeline({
           else if (state.deadline <= nowSeconds) tail = hasVotes ? t.proposal.expiredWithVotes : t.proposal.expiredWithoutVotes;
           else if (hasVotes) {
             // The vote that completed the count couldn't execute it then (castVote): the fund may still be short.
-            const short = action === ProposalAction.Pay && amount > warsBalance ? amount - warsBalance : 0n;
+            const short = action === ProposalAction.Pay && amount > currencyBalance ? amount - currencyBalance : 0n;
             if (short > 0n) tail = t.proposal.short(formatPesos(upToCentavo(short), m.locale));
             else {
               tail = t.proposal.needsCarryingOut;
@@ -271,7 +271,7 @@ export function buildTimeline({
       case "RemainderDistributed": {
         // Rounding dust after closing, which anyone can "distribute" over and over (spec, 7.3).
         const dust = BigInt(memberCount);
-        if (event.args.warsBalance < dust && event.args.usdtBalance < dust) break;
+        if (event.args.currencyBalance < dust && event.args.dollarBalance < dust) break;
         items.push({ ...base, actor: { kind: "group" }, text: t.remainderDistributed });
         break;
       }

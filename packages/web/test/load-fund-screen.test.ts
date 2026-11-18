@@ -87,7 +87,7 @@ function chainFund(change: Partial<FundSnapshot>) {
   agent.readFund.mockImplementation(async () => {
     const fund = snapshot(change);
     const contributed = fund.members.map((member) =>
-      history.reduce((sum, e) => (e.eventName === "Contribution" && isAddressEqual(e.args.member, member) ? sum + e.args.creditedWars : sum), 0n),
+      history.reduce((sum, e) => (e.eventName === "Contribution" && isAddressEqual(e.args.member, member) ? sum + e.args.credited : sum), 0n),
     );
     const proposalCount = BigInt(history.filter((e) => e.eventName === "ProposalCreated").length);
     return { ...fund, contributed, totalContributed: contributed.reduce((sum, c) => sum + c, 0n), proposalCount, ...change };
@@ -95,7 +95,7 @@ function chainFund(change: Partial<FundSnapshot>) {
 }
 
 const paidByBeto = () =>
-  event("Contribution", { member: getAddress(beto.account), token: WARS_TOKEN, amount: 10_000n * WARS, creditedWars: 10_000n * WARS }, BLOCK - 100n);
+  event("Contribution", { member: getAddress(beto.account), token: WARS_TOKEN, amount: 10_000n * WARS, credited: 10_000n * WARS }, BLOCK - 100n);
 const texts = (screen: NonNullable<Awaited<ReturnType<typeof loadFundScreen>>>) => screen.timeline.map((item) => item.text);
 
 beforeAll(async () => {
@@ -370,9 +370,9 @@ describe("loadFundScreen: what converting USDT lost (conversion-loss design)", (
     const caroAccount = getAddress(caro.account);
     // By week 2 Caro put in 20.000 in wARS and 6 USDT credited at 10.000, which the agent converted into 9.940.
     setHistory([
-      event("Contribution", { member: caroAccount, token: WARS_TOKEN, amount: 20_000n * WARS, creditedWars: 20_000n * WARS }, BLOCK - 500n),
-      event("Contribution", { member: caroAccount, token: USDT, amount: 6n * USDT_UNIT, creditedWars: 10_000n * WARS }, BLOCK - 400n),
-      event("Conversion", { usdtIn: 6n * USDT_UNIT, warsOut: 9_940n * WARS }, BLOCK - 390n),
+      event("Contribution", { member: caroAccount, token: WARS_TOKEN, amount: 20_000n * WARS, credited: 20_000n * WARS }, BLOCK - 500n),
+      event("Contribution", { member: caroAccount, token: USDT, amount: 6n * USDT_UNIT, credited: 10_000n * WARS }, BLOCK - 400n),
+      event("Conversion", { dollarIn: 6n * USDT_UNIT, currencyOut: 9_940n * WARS }, BLOCK - 390n),
     ]);
     const screen = (await loadFundScreen(address, asViewer(caro)))!;
     expect(screen.view.rows[2]?.owed).toBe(60n * WARS);
@@ -390,7 +390,7 @@ describe("loadFundScreen: a contribution given back (spec, 7.3)", () => {
     const tx = (n: number) => pad(toHex(n), { size: 32 });
     // By week 2 Caro put in 35.000, 10.000 of them by mistake, and proposal 0 gave those back: Caro owes 5.000.
     setHistory([
-      event("Contribution", { member: caroAccount, token: WARS_TOKEN, amount: 35_000n * WARS, creditedWars: 35_000n * WARS }, BLOCK - 500n),
+      event("Contribution", { member: caroAccount, token: WARS_TOKEN, amount: 35_000n * WARS, credited: 35_000n * WARS }, BLOCK - 500n),
       event("ProposalCreated", { id: 0n, action: 0, a: caroAccount, b: zeroAddress, amount: 10_000n * WARS, proposer: AGENT, note: "deposité en otro fondo" }, BLOCK - 400n, 77),
       event("Payment", { member: caroAccount, amount: 10_000n * WARS }, BLOCK - 300n, 78),
       { ...event("ProposalExecuted", { id: 0n }, BLOCK - 300n, 78), logIndex: 1 },
@@ -451,7 +451,7 @@ describe("loadFundScreen: read-your-writes", () => {
 
 it("says once why the agent hasn't converted the USDT waiting, from its latest decision on the fund (F8)", async () => {
   const address = await liveFund();
-  chainFund({ address, members: [ana, beto, caro].map((p) => getAddress(p.account)), usdtBalance: 5n * USDT_UNIT });
+  chainFund({ address, members: [ana, beto, caro].map((p) => getAddress(p.account)), dollarBalance: 5n * USDT_UNIT });
   const decide = (kind: string, code: string | null, minutesAgo: number, status: string | null = null) =>
     db.insert(decisions).values({ fund: address, kind, code, reason: "for the log", status, createdAt: new Date(Date.now() - minutesAgo * 60_000) });
   const holds = async () => texts((await loadFundScreen(address, asViewer(ana)))!).filter((text) => text.startsWith("Todavía no pasé a pesos"));
@@ -466,13 +466,13 @@ it("says once why the agent hasn't converted the USDT waiting, from its latest d
   expect(await holds()).toEqual([]);
 
   await decide("skip", "price-reference", 0);
-  chainFund({ address, members: [ana, beto, caro].map((p) => getAddress(p.account)), usdtBalance: 4n * USDT_UNIT });
+  chainFund({ address, members: [ana, beto, caro].map((p) => getAddress(p.account)), dollarBalance: 4n * USDT_UNIT });
   expect(await holds()).toEqual([]); // under 5 USDT the agent leaves it, and has nothing to explain
 });
 
 it("gives no reason from a decision over half an hour old: it may be about other USDT, and the agent decides again soon", async () => {
   const address = await liveFund();
-  chainFund({ address, members: [ana, beto, caro].map((p) => getAddress(p.account)), usdtBalance: 6_230_000n });
+  chainFund({ address, members: [ana, beto, caro].map((p) => getAddress(p.account)), dollarBalance: 6_230_000n });
   const blocked = (minutesAgo: number) =>
     db.insert(decisions).values({ fund: address, kind: "blocked", reason: "Could not run the fund: RPC Request failed.", createdAt: new Date(Date.now() - minutesAgo * 60_000) });
   const holds = async () => texts((await loadFundScreen(address, asViewer(ana)))!).filter((text) => text.startsWith("Todavía no pasé a pesos"));
@@ -488,7 +488,7 @@ it("gives no reason from a decision over half an hour old: it may be about other
 
 it("explains the USDT waiting only with the agent's conversion decisions on this fund", async () => {
   const address = await liveFund();
-  chainFund({ address, members: [ana, beto, caro].map((p) => getAddress(p.account)), usdtBalance: 5n * USDT_UNIT });
+  chainFund({ address, members: [ana, beto, caro].map((p) => getAddress(p.account)), dollarBalance: 5n * USDT_UNIT });
   const holds = async () => texts((await loadFundScreen(address, asViewer(ana)))!).filter((text) => text.startsWith("Todavía no pasé a pesos"));
 
   await db.insert(decisions).values({ fund: randomAccount(), kind: "skip", code: "price-gap", reason: "another fund's" });

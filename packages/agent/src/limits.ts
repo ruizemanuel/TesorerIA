@@ -28,31 +28,31 @@ export const DAY_BLOCKS = 86_400n;
 export const MAX_NOTE_LENGTH = 140;
 
 /** What the agent did in a fund over the last day, from the fund's events. */
-export type DailyActivity = { reimbursedWars: bigint; convertedUsdt: bigint; transactions: number };
+export type DailyActivity = { reimbursed: bigint; convertedDollar: bigint; transactions: number };
 
 /** Sums the fund's agent activity in the blocks after `sinceBlock`. */
 export function dailyActivity(events: readonly FundEvent[], agent: Address, sinceBlock: bigint): DailyActivity {
-  let reimbursedWars = 0n;
-  let convertedUsdt = 0n;
+  let reimbursed = 0n;
+  let convertedDollar = 0n;
   const transactions = new Set<Hash>();
   for (const event of events) {
     if (event.blockNumber <= sinceBlock) continue;
     if (event.eventName === "Reimbursement") {
-      reimbursedWars += event.args.amount;
+      reimbursed += event.args.amount;
       transactions.add(event.transactionHash);
     } else if (event.eventName === "Conversion") {
-      convertedUsdt += event.args.usdtIn;
+      convertedDollar += event.args.dollarIn;
       transactions.add(event.transactionHash);
     } else if (event.eventName === "ProposalCreated" && isAddressEqual(event.args.proposer, agent)) {
       transactions.add(event.transactionHash);
     }
   }
-  return { reimbursedWars, convertedUsdt, transactions: transactions.size };
+  return { reimbursed, convertedDollar, transactions: transactions.size };
 }
 
 /** Something the agent can do in a fund. */
 export type AgentAction =
-  | { kind: "convert"; usdtAmount: bigint; minWarsOut: bigint }
+  | { kind: "convert"; dollarAmount: bigint; minCurrencyOut: bigint }
   | { kind: "reimburse"; member: Address; amount: bigint; ref: Hex }
   | { kind: "propose-payment"; member: Address; amount: bigint; note: string };
 
@@ -85,16 +85,16 @@ export function authorize(
   }
   switch (action.kind) {
     case "convert": {
-      const { usdtAmount, minWarsOut } = action;
-      if (usdtAmount <= 0n || minWarsOut <= 0n) throw new LimitError("Nothing to convert");
-      if (usdtAmount > fund.usdtBalance) throw new LimitError("The fund doesn't hold that much USDT");
-      if (usdtAmount > LIMITS.maxConversionUsdt) throw new LimitError("Above the agent's per-conversion limit");
-      if (today.convertedUsdt + usdtAmount > LIMITS.maxDailyConvertedUsdt) {
+      const { dollarAmount, minCurrencyOut } = action;
+      if (dollarAmount <= 0n || minCurrencyOut <= 0n) throw new LimitError("Nothing to convert");
+      if (dollarAmount > fund.dollarBalance) throw new LimitError("The fund doesn't hold that much USDT");
+      if (dollarAmount > LIMITS.maxConversionUsdt) throw new LimitError("Above the agent's per-conversion limit");
+      if (today.convertedDollar + dollarAmount > LIMITS.maxDailyConvertedUsdt) {
         throw new LimitError("Above the agent's daily conversion limit");
       }
       return {
         to: fund.address,
-        data: encodeFunctionData({ abi: fundAbi, functionName: "convert", args: [usdtAmount, minWarsOut] }),
+        data: encodeFunctionData({ abi: fundAbi, functionName: "convert", args: [dollarAmount, minCurrencyOut] }),
       };
     }
     case "reimburse": {
@@ -102,11 +102,11 @@ export function authorize(
       const { amount, ref } = action;
       if (amount <= 0n) throw new LimitError("Nothing to reimburse");
       if (amount > LIMITS.maxReimbursementWars) throw new LimitError("Above the agent's per-reimbursement limit");
-      if (today.reimbursedWars + amount > LIMITS.maxDailyReimbursedWars) {
+      if (today.reimbursed + amount > LIMITS.maxDailyReimbursedWars) {
         throw new LimitError("Above the agent's daily reimbursement limit");
       }
       if (fund.spentThisWeek + amount > fund.weeklyCap) throw new LimitError("Above what's left of this week's cap");
-      if (amount > fund.warsBalance) throw new LimitError("The fund doesn't hold that much wARS");
+      if (amount > fund.currencyBalance) throw new LimitError("The fund doesn't hold that much wARS");
       return {
         to: fund.address,
         data: encodeFunctionData({ abi: fundAbi, functionName: "reimburseAgreedExpense", args: [member, amount, ref] }),

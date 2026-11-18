@@ -211,15 +211,15 @@ describe("runAgent", () => {
   it("proposes what isn't the agreed expense, and waits for the pesos when the fund is short", async () => {
     const { db, ana, fund } = await setup();
     const other = await load(db, ana, fund.id, { clientKey: "k2", kind: "other", note: "la pelota nueva" });
-    let warsBalance = 10_000n * WARS;
-    const { makeContext } = fakeAgent({ snapshot: () => snapshot({ warsBalance }) });
+    let currencyBalance = 10_000n * WARS;
+    const { makeContext } = fakeAgent({ snapshot: () => snapshot({ currencyBalance }) });
     await runAgent(db, makeContext, { expenseId: other.id, txStatus: always("success"), inFlight: idle });
     expect(await statusOf(db, other.id)).toMatchObject({ status: "proposed", sentAction: "propose-payment" });
 
     const short = await load(db, ana, fund.id, { clientKey: "k3" });
     await runAgent(db, makeContext, { expenseId: short.id, txStatus: always("success"), inFlight: idle });
     expect((await statusOf(db, short.id)).status).toBe("waiting");
-    warsBalance = 90_000n * WARS; // a contribution arrived
+    currencyBalance = 90_000n * WARS; // a contribution arrived
     await runAgent(db, makeContext, { txStatus: always("success"), inFlight: idle });
     expect((await statusOf(db, short.id)).status).toBe("reimbursed");
   });
@@ -256,7 +256,7 @@ describe("runAgent", () => {
   it("handles the expense it was called for once per run, even when it stays in the queue", async () => {
     const { db, ana, fund } = await setup();
     const { id } = await load(db, ana, fund.id);
-    const { makeContext } = fakeAgent({ snapshot: () => snapshot({ warsBalance: 10_000n * WARS }) });
+    const { makeContext } = fakeAgent({ snapshot: () => snapshot({ currencyBalance: 10_000n * WARS }) });
     const run = await runAgent(db, makeContext, { expenseId: id, txStatus: always("success"), inFlight: idle });
     expect(run).toMatchObject({ ran: true, decisions: [{ kind: "wait" }] });
     expect((await statusOf(db, id)).status).toBe("waiting");
@@ -322,7 +322,7 @@ describe("runAgent", () => {
 
   it("takes an expense loaded while the agent was busy on the next run, however many wait before it", async () => {
     const { db, ana, fund } = await setup();
-    const { makeContext } = fakeAgent({ snapshot: () => snapshot({ warsBalance: 1_000n * WARS }) });
+    const { makeContext } = fakeAgent({ snapshot: () => snapshot({ currencyBalance: 1_000n * WARS }) });
     // Eleven earlier expenses, waiting for pesos the fund doesn't have: more than one run takes.
     const stuck: string[] = [];
     for (let i = 0n; i < 11n; i++) {

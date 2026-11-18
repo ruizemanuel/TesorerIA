@@ -21,7 +21,7 @@ export type ChainView = {
   /** The fund's whole history, up to `toBlock`. */
   events(fund: Address, toBlock: bigint): Promise<FundEvent[]>;
   references(): Promise<References>;
-  quote(fund: Address, usdtAmount: bigint): Promise<ConversionQuote>;
+  quote(fund: Address, dollarAmount: bigint): Promise<ConversionQuote>;
   /** Waits for a transaction to be mined. */
   receipt(hash: Hash): Promise<"success" | "reverted">;
 };
@@ -145,7 +145,7 @@ export async function runHeartbeat(ctx: AgentContext): Promise<Decision[]> {
       // The snapshot first: a closed fund, another agent's, or one with nothing to convert costs no history read.
       const fund = await ctx.chain.fund(address);
       if (fund.closed || !isAddressEqual(fund.agent, ctx.signer.address)) continue;
-      if (fund.usdtBalance < MIN_CONVERSION_USDT) continue;
+      if (fund.dollarBalance < MIN_CONVERSION_USDT) continue;
       const { today } = await history(ctx, fund);
       const plan = planConversion(fund, today);
       if (plan.kind === "none") continue;
@@ -154,15 +154,15 @@ export async function runHeartbeat(ctx: AgentContext): Promise<Decision[]> {
         continue;
       }
       references ??= await ctx.chain.references();
-      const quote = await ctx.chain.quote(address, plan.usdtAmount);
+      const quote = await ctx.chain.quote(address, plan.dollarAmount);
       const decision = decideConversion({ quote, references, now: ctx.now() });
       if (decision.kind === "skip") {
         decisions.push({ fund: address, kind: "skip", code: decision.code, reason: decision.reason });
         continue;
       }
-      const { usdtAmount, minWarsOut } = decision;
-      const reason = `Convert ${formatUnits(usdtAmount, 6)} USDT to at least ${wholeWars(minWarsOut)} wARS`;
-      decisions.push(await act(ctx, fund, today, { kind: "convert", usdtAmount, minWarsOut }, reason));
+      const { dollarAmount, minCurrencyOut } = decision;
+      const reason = `Convert ${formatUnits(dollarAmount, 6)} USDT to at least ${wholeWars(minCurrencyOut)} wARS`;
+      decisions.push(await act(ctx, fund, today, { kind: "convert", dollarAmount, minCurrencyOut }, reason));
     } catch (error) {
       decisions.push({ fund: address, kind: "blocked", reason: `Could not run the fund: ${shortMessage(error)}` });
     }

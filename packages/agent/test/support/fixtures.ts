@@ -30,8 +30,8 @@ export function fundSnapshot(change: Partial<FundSnapshot> = {}): FundSnapshot {
     startTime: 1_791_000_000n,
     week: 2n,
     spentThisWeek: 0n,
-    warsBalance: 90_000n * WARS_UNIT,
-    usdtBalance: 0n,
+    currencyBalance: 90_000n * WARS_UNIT,
+    dollarBalance: 0n,
     ...change,
   };
 }
@@ -48,8 +48,8 @@ export function reimbursed(member: Address, amount: bigint, refHex: Hex, block =
   return { eventName: "Reimbursement", args: { member, amount, ref: refHex, week: 2n }, ...position(block, tx) };
 }
 
-export function converted(usdtIn: bigint, block = BLOCK - 10n, tx = 2): FundEvent {
-  return { eventName: "Conversion", args: { usdtIn, warsOut: usdtIn * 1_600n * 10n ** 12n }, ...position(block, tx) };
+export function converted(dollarIn: bigint, block = BLOCK - 10n, tx = 2): FundEvent {
+  return { eventName: "Conversion", args: { dollarIn, currencyOut: dollarIn * 1_600n * 10n ** 12n }, ...position(block, tx) };
 }
 
 export function proposed(

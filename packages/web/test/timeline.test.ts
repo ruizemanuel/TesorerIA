@@ -29,7 +29,7 @@ function timeline(change: Partial<Parameters<typeof buildTimeline>[0]> = {}) {
     expenses: [],
     pending: [],
     conversionHold: null,
-    warsBalance: 90_000n * WARS,
+    currencyBalance: 90_000n * WARS,
     viewerIsMember: true,
     now: NOW,
     m: es,
@@ -43,9 +43,9 @@ describe("buildTimeline", () => {
   it("tells contributions, a conversion and a reimbursement in Spanish, newest first, the agent in first person", () => {
     const items = timeline({
       events: [
-        event("Contribution", { member: BETO, token: USDT, amount: 10n * USDT_UNIT, creditedWars: 16_070n * WARS }, BLOCK - 600n),
-        event("Conversion", { usdtIn: 10n * USDT_UNIT, warsOut: 16_050n * WARS }, BLOCK - 500n),
-        event("Contribution", { member: ANA, token: WARS_TOKEN, amount: 10_000n * WARS, creditedWars: 10_000n * WARS }, BLOCK - 400n),
+        event("Contribution", { member: BETO, token: USDT, amount: 10n * USDT_UNIT, credited: 16_070n * WARS }, BLOCK - 600n),
+        event("Conversion", { dollarIn: 10n * USDT_UNIT, currencyOut: 16_050n * WARS }, BLOCK - 500n),
+        event("Contribution", { member: ANA, token: WARS_TOKEN, amount: 10_000n * WARS, credited: 10_000n * WARS }, BLOCK - 400n),
         event("Reimbursement", { member: ANA, amount: 45_000n * WARS, ref: pad("0x01", { size: 32 }), week: 2n }, BLOCK - 300n),
       ],
     });
@@ -61,7 +61,7 @@ describe("buildTimeline", () => {
   });
 
   it("explains the conversion in plain words, without naming the exchange or the price feed (spec, 9)", () => {
-    const [conversion] = timeline({ events: [event("Conversion", { usdtIn: 10n * USDT_UNIT, warsOut: 16_050n * WARS }, BLOCK - 500n)] });
+    const [conversion] = timeline({ events: [event("Conversion", { dollarIn: 10n * USDT_UNIT, currencyOut: 16_050n * WARS }, BLOCK - 500n)] });
     expect(conversion?.detail).toBeTruthy();
     expect(conversion?.detail).not.toMatch(/\b(uniswap|chainlink|oracle|pool|gas|hash|wallet|blockchain|token)\b/i);
   });
@@ -129,15 +129,15 @@ describe("buildTimeline", () => {
     const executing = { userOpHash: "0x01", kind: "execute" as const, amount: null, token: null, createdAt: NOW };
     expect(at({ pending: [executing] })?.action).toMatchObject({ kind: "execute", canExecute: false });
 
-    const short = at({ warsBalance: 20_000n * WARS });
+    const short = at({ currencyBalance: 20_000n * WARS });
     expect(short?.text).toBe($("Propuse pagarle $ 30.000 a Caro por la pelota nueva. Tiene los votos, pero al fondo le faltan $ 10.000 para pagarlo."));
     expect(short?.action).toBeUndefined();
     // What's missing goes up to the next centavo: rounded to the nearest, three tenths of one read "$ 0" (the barbecue
     // fund's proposal #2, 3/11), and half a centavo less than what's needed would read as enough.
-    expect(at({ warsBalance: 30_000n * WARS - 3_062_119_460_088_820n })?.text).toBe(
+    expect(at({ currencyBalance: 30_000n * WARS - 3_062_119_460_088_820n })?.text).toBe(
       $("Propuse pagarle $ 30.000 a Caro por la pelota nueva. Tiene los votos, pero al fondo le faltan $ 0,01 para pagarlo."),
     );
-    expect(at({ warsBalance: 20_000n * WARS - WARS / 1_000n })?.text).toContain($("le faltan $ 10.000,01 para pagarlo"));
+    expect(at({ currencyBalance: 20_000n * WARS - WARS / 1_000n })?.text).toContain($("le faltan $ 10.000,01 para pagarlo"));
 
     expect(at({}, { ...ready, deadline: CLOCK.timestamp - 1n })).toMatchObject({
       text: $("Propuse pagarle $ 30.000 a Caro por la pelota nueva. Venció sin ejecutarse."),
@@ -167,7 +167,7 @@ describe("buildTimeline", () => {
       events: [
         event("Payment", { member: CARO, amount: 30_000n * WARS }, BLOCK - 300n),
         event("MemberAdded", { member: "0x000000000000000000000000000000000000dEaD" }, BLOCK - 200n),
-        event("FundClosed", { warsBalance: 1n, usdtBalance: 0n }, BLOCK - 100n),
+        event("FundClosed", { currencyBalance: 1n, dollarBalance: 0n }, BLOCK - 100n),
       ],
     });
     expect(items.map((i) => [i.actor.kind, i.text])).toEqual([
@@ -204,8 +204,8 @@ describe("buildTimeline", () => {
   it("leaves out a RemainderDistributed that moved only rounding dust (spec, 7.3)", () => {
     const items = timeline({
       events: [
-        event("RemainderDistributed", { warsBalance: 2n, usdtBalance: 0n }, BLOCK - 200n),
-        event("RemainderDistributed", { warsBalance: 5_000n * WARS, usdtBalance: 0n }, BLOCK - 100n),
+        event("RemainderDistributed", { currencyBalance: 2n, dollarBalance: 0n }, BLOCK - 200n),
+        event("RemainderDistributed", { currencyBalance: 5_000n * WARS, dollarBalance: 0n }, BLOCK - 100n),
       ],
     });
     expect(items.map((i) => i.text)).toEqual(["Se repartió lo que llegó después del cierre."]);
@@ -299,10 +299,10 @@ describe("buildTimeline: the other sentences, in Spanish", () => {
       timeline({ events, proposals })[0]?.text;
     const stranger = "0x000000000000000000000000000000000000dEaD";
 
-    expect(at([event("MemberRemoved", { member: stranger, warsReturned: 0n, usdtReturned: 0n }, BLOCK - 100n)])).toBe(
+    expect(at([event("MemberRemoved", { member: stranger, currencyReturned: 0n, dollarReturned: 0n }, BLOCK - 100n)])).toBe(
       "Alguien dejó el fondo y se llevó su parte.",
     );
-    expect(at([event("Contribution", { member: stranger, token: WARS_TOKEN, amount: 10_000n * WARS, creditedWars: 10_000n * WARS }, BLOCK - 100n)])).toBe(
+    expect(at([event("Contribution", { member: stranger, token: WARS_TOKEN, amount: 10_000n * WARS, credited: 10_000n * WARS }, BLOCK - 100n)])).toBe(
       $("Alguien aportó $ 10.000."),
     );
     expect(proposed(6, zeroAddress, 0n, stranger).text).toBe("Alguien propuso cambiar el agente. Lleva 1 de 2 votos.");
@@ -319,7 +319,7 @@ describe("buildTimeline: the other sentences, in Spanish", () => {
   it("tells a member leaving or switching account, a cap or the votes changing, and a new agent", () => {
     const items = timeline({
       events: [
-        event("MemberRemoved", { member: CARO, warsReturned: 0n, usdtReturned: 0n }, BLOCK - 600n),
+        event("MemberRemoved", { member: CARO, currencyReturned: 0n, dollarReturned: 0n }, BLOCK - 600n),
         event("MemberReplaced", { oldMember: BETO, newMember: ANA }, BLOCK - 500n),
         event("WeeklyCapChanged", { cap: 80_000n * WARS }, BLOCK - 400n),
         event("VotesRequiredChanged", { votes: 3 }, BLOCK - 300n),
@@ -351,9 +351,9 @@ describe("buildTimeline in English", () => {
   it("says each movement in English, with amounts as ARS, newest first, the agent in first person", () => {
     const items = english({
       events: [
-        event("Contribution", { member: BETO, token: USDT, amount: 10n * USDT_UNIT, creditedWars: 16_070n * WARS }, BLOCK - 600n),
-        event("Conversion", { usdtIn: 10n * USDT_UNIT, warsOut: 16_050n * WARS }, BLOCK - 500n),
-        event("Contribution", { member: ANA, token: WARS_TOKEN, amount: 10_000n * WARS, creditedWars: 10_000n * WARS }, BLOCK - 400n),
+        event("Contribution", { member: BETO, token: USDT, amount: 10n * USDT_UNIT, credited: 16_070n * WARS }, BLOCK - 600n),
+        event("Conversion", { dollarIn: 10n * USDT_UNIT, currencyOut: 16_050n * WARS }, BLOCK - 500n),
+        event("Contribution", { member: ANA, token: WARS_TOKEN, amount: 10_000n * WARS, credited: 10_000n * WARS }, BLOCK - 400n),
         event("Reimbursement", { member: ANA, amount: 45_000n * WARS, ref: pad("0x01", { size: 32 }), week: 2n }, BLOCK - 300n),
       ],
     });
@@ -370,8 +370,8 @@ describe("buildTimeline in English", () => {
   it("writes amounts the English way, with the point for decimals", () => {
     const items = english({
       events: [
-        event("Contribution", { member: BETO, token: USDT, amount: 10_500_000n, creditedWars: 16_070n * WARS }, BLOCK - 200n),
-        event("Conversion", { usdtIn: 10_500_000n, warsOut: 16_050n * WARS + 37n * 10n ** 16n }, BLOCK - 100n),
+        event("Contribution", { member: BETO, token: USDT, amount: 10_500_000n, credited: 16_070n * WARS }, BLOCK - 200n),
+        event("Conversion", { dollarIn: 10_500_000n, currencyOut: 16_050n * WARS + 37n * 10n ** 16n }, BLOCK - 100n),
       ],
     });
     expect(items.map((i) => i.text)).toEqual([
@@ -381,7 +381,7 @@ describe("buildTimeline in English", () => {
   });
 
   it("explains the conversion in plain words, without naming the exchange or the price feed (spec, 9)", () => {
-    const [conversion] = english({ events: [event("Conversion", { usdtIn: 10n * USDT_UNIT, warsOut: 16_050n * WARS }, BLOCK - 500n)] });
+    const [conversion] = english({ events: [event("Conversion", { dollarIn: 10n * USDT_UNIT, currencyOut: 16_050n * WARS }, BLOCK - 500n)] });
     expect(conversion?.detail).toBe(
       "I converted them and checked that the price was within 2 % of the dollar's reference price, as my rules say.",
     );
@@ -456,7 +456,7 @@ describe("buildTimeline in English", () => {
       text: ars(`${head} It has the votes: it still needs to be carried out.`),
       action: { kind: "execute", proposalId: 0n, canExecute: true },
     });
-    expect(stand(ready, { warsBalance: 20_000n * WARS }).text).toBe(ars(`${head} It has the votes, but the fund needs ARS 10,000 more to pay it.`));
+    expect(stand(ready, { currencyBalance: 20_000n * WARS }).text).toBe(ars(`${head} It has the votes, but the fund needs ARS 10,000 more to pay it.`));
     expect(stand({ ...ready, executed: true }).text).toBe(ars(`${head} It was approved.`));
     expect(stand({ ...ready, deadline: CLOCK.timestamp - 1n }).text).toBe(ars(`${head} It expired without being carried out.`));
     expect(stand({ ...open, deadline: CLOCK.timestamp - 1n }).text).toBe(ars(`${head} It expired without the votes it needed.`));
@@ -469,11 +469,11 @@ describe("buildTimeline in English", () => {
         event("MemberAdded", { member: ANA }, BLOCK - 800n),
         event("MemberAdded", { member: "0x000000000000000000000000000000000000dEaD" }, BLOCK - 700n),
         event("MemberReplaced", { oldMember: BETO, newMember: ANA }, BLOCK - 600n),
-        event("MemberRemoved", { member: CARO, warsReturned: 0n, usdtReturned: 0n }, BLOCK - 500n),
+        event("MemberRemoved", { member: CARO, currencyReturned: 0n, dollarReturned: 0n }, BLOCK - 500n),
         event("WeeklyCapChanged", { cap: 80_000n * WARS }, BLOCK - 400n),
         event("VotesRequiredChanged", { votes: 3 }, BLOCK - 300n),
         event("AgentChanged", { agent: BETO }, BLOCK - 200n),
-        event("FundClosed", { warsBalance: 1n, usdtBalance: 0n }, BLOCK - 100n),
+        event("FundClosed", { currencyBalance: 1n, dollarBalance: 0n }, BLOCK - 100n),
       ],
     });
     expect(items.map((i) => [i.actor.kind, i.text])).toEqual([
@@ -492,15 +492,15 @@ describe("buildTimeline in English", () => {
   it("leaves out a RemainderDistributed that moved only rounding dust, and says the one that didn't", () => {
     const items = english({
       events: [
-        event("RemainderDistributed", { warsBalance: 2n, usdtBalance: 0n }, BLOCK - 200n),
-        event("RemainderDistributed", { warsBalance: 5_000n * WARS, usdtBalance: 0n }, BLOCK - 100n),
+        event("RemainderDistributed", { currencyBalance: 2n, dollarBalance: 0n }, BLOCK - 200n),
+        event("RemainderDistributed", { currencyBalance: 5_000n * WARS, dollarBalance: 0n }, BLOCK - 100n),
       ],
     });
     expect(items.map((i) => i.text)).toEqual(["What arrived after the fund closed was split among the members."]);
   });
 
   it("says a name it doesn't have as 'someone', capitalized where it starts the sentence", () => {
-    const [removed] = english({ events: [event("MemberRemoved", { member: zeroAddress, warsReturned: 0n, usdtReturned: 0n }, BLOCK - 100n)] });
+    const [removed] = english({ events: [event("MemberRemoved", { member: zeroAddress, currencyReturned: 0n, dollarReturned: 0n }, BLOCK - 100n)] });
     expect(removed?.text).toBe("Someone left the fund and took their share.");
     const [paidBack] = english({
       events: [event("Reimbursement", { member: zeroAddress, amount: 45_000n * WARS, ref: pad("0x01", { size: 32 }), week: 2n }, BLOCK - 100n)],
@@ -516,19 +516,19 @@ describe("buildTimeline in English", () => {
     const at = (events: Parameters<typeof buildTimeline>[0]["events"], proposals: Parameters<typeof buildTimeline>[0]["proposals"] = new Map()) =>
       english({ names: written, events, proposals })[0]?.text;
 
-    expect(at([event("Contribution", { member: ANA, token: WARS_TOKEN, amount: 10_000n * WARS, creditedWars: 10_000n * WARS }, BLOCK - 100n)])).toBe(
+    expect(at([event("Contribution", { member: ANA, token: WARS_TOKEN, amount: 10_000n * WARS, credited: 10_000n * WARS }, BLOCK - 100n)])).toBe(
       ars("juan contributed ARS 10,000."),
     );
     expect(at([proposal(6, zeroAddress, 0n, ANA)], new Map([[0n, open]]))).toBe("juan proposed changing the agent. It has 1 of 2 votes.");
     expect(at([event("MemberAdded", { member: ANA }, BLOCK - 100n)])).toBe("juan joined the fund.");
-    expect(at([event("MemberRemoved", { member: BETO, warsReturned: 0n, usdtReturned: 0n }, BLOCK - 100n)])).toBe(
+    expect(at([event("MemberRemoved", { member: BETO, currencyReturned: 0n, dollarReturned: 0n }, BLOCK - 100n)])).toBe(
       "constructor left the fund and took their share.",
     );
     expect(at([event("MemberReplaced", { oldMember: ANA, newMember: BETO }, BLOCK - 100n)])).toBe("constructor switched accounts.");
 
     // The stand-ins, for an address nobody named, still open the sentence capitalized.
     const stranger = "0x000000000000000000000000000000000000dEaD";
-    expect(at([event("Contribution", { member: stranger, token: WARS_TOKEN, amount: 10_000n * WARS, creditedWars: 10_000n * WARS }, BLOCK - 100n)])).toBe(
+    expect(at([event("Contribution", { member: stranger, token: WARS_TOKEN, amount: 10_000n * WARS, credited: 10_000n * WARS }, BLOCK - 100n)])).toBe(
       ars("Someone contributed ARS 10,000."),
     );
     expect(at([proposal(6, zeroAddress, 0n, stranger)], new Map([[0n, open]]))).toBe("Someone proposed changing the agent. It has 1 of 2 votes.");
@@ -595,7 +595,7 @@ describe("buildTimeline in English", () => {
 });
 
 describe("buildTimeline: what a conversion got under or over its USDT's credit (conversion-loss design)", () => {
-  const conv = event("Conversion", { usdtIn: 10n * USDT_UNIT, warsOut: 16_050n * WARS }, BLOCK - 500n);
+  const conv = event("Conversion", { dollarIn: 10n * USDT_UNIT, currencyOut: 16_050n * WARS }, BLOCK - 500n);
   const key = `${conv.transactionHash}:${conv.logIndex}`;
   const said = (difference: bigint, members: Address[], m = es) => timeline({ events: [conv], conversions: new Map([[key, { difference, members }]]), m })[0]?.text;
   const ars = (text: string) => text.replaceAll("ARS ", `ARS${NBSP}`).replaceAll(" USDT", `${NBSP}USDT`);

@@ -116,9 +116,9 @@ export type ConversionLoss = {
  * member whose USDT it was covers the difference and the fund holds what it says was put in.
  *
  * USDT is fungible, so conversions take the USDT contributions in order of arrival (the agent converts the whole balance
- * at once, so this is what happened but for its caps). Every USDT of a conversion is worth the same, `warsOut / usdtIn`,
+ * at once, so this is what happened but for its caps). Every USDT of a conversion is worth the same, `currencyOut / dollarIn`,
  * whatever it was credited at. USDT that came in without `contributeUsdt` has no one to charge. A replaced member's loss
- * and USDT still waiting move to the new account; a member who leaves takes their loss with them, `usdtReturned` comes
+ * and USDT still waiting move to the new account; a member who leaves takes their loss with them, `dollarReturned` comes
  * out of the USDT waiting in proportion, without charging anyone, and what they left waiting is no one's.
  */
 export function conversionLoss(events: readonly FundEvent[]): ConversionLoss {
@@ -129,7 +129,7 @@ export function conversionLoss(events: readonly FundEvent[]): ConversionLoss {
     switch (event.eventName) {
       case "Contribution":
         if (isAddressEqual(event.args.token, USDT)) {
-          queue.push({ member: getAddress(event.args.member), usdt: event.args.amount, credited: event.args.creditedWars });
+          queue.push({ member: getAddress(event.args.member), usdt: event.args.amount, credited: event.args.credited });
         }
         break;
       case "MemberReplaced": {
@@ -144,7 +144,7 @@ export function conversionLoss(events: readonly FundEvent[]): ConversionLoss {
       case "MemberRemoved": {
         const gone = getAddress(event.args.member);
         const waiting = queue.reduce((sum, tranche) => sum + tranche.usdt, 0n);
-        const returned = event.args.usdtReturned;
+        const returned = event.args.dollarReturned;
         if (returned >= waiting) {
           queue.length = 0;
         } else if (returned > 0n) {
@@ -171,15 +171,15 @@ export function conversionLoss(events: readonly FundEvent[]): ConversionLoss {
         break;
       }
       case "Conversion": {
-        const { usdtIn, warsOut } = event.args;
-        let left = usdtIn;
+        const { dollarIn, currencyOut } = event.args;
+        let left = dollarIn;
         let difference = 0n;
         const members: Address[] = [];
         while (left > 0n && queue.length > 0) {
           const head = queue[0]!;
           const take = head.usdt < left ? head.usdt : left;
           const credited = (head.credited * take) / head.usdt;
-          const worth = (warsOut * take) / usdtIn;
+          const worth = (currencyOut * take) / dollarIn;
           head.usdt -= take;
           head.credited -= credited;
           left -= take;
@@ -198,7 +198,7 @@ export function conversionLoss(events: readonly FundEvent[]): ConversionLoss {
 }
 
 /** A member's part if the fund closed now. */
-export type CloseShare = { member: Address; contributed: bigint; wars: bigint; usdt: bigint };
+export type CloseShare = { member: Address; contributed: bigint; currency: bigint; dollar: bigint };
 
 /**
  * What each member would get if the fund closed now, split like `Fund._split` does: in proportion to what
@@ -213,8 +213,8 @@ export function closeShares(fund: FundSnapshot): { shares: CloseShare[]; spread:
     return {
       member,
       contributed,
-      wars: total === 0n ? fund.warsBalance / n : (fund.warsBalance * contributed) / total,
-      usdt: total === 0n ? fund.usdtBalance / n : (fund.usdtBalance * contributed) / total,
+      currency: total === 0n ? fund.currencyBalance / n : (fund.currencyBalance * contributed) / total,
+      dollar: total === 0n ? fund.dollarBalance / n : (fund.dollarBalance * contributed) / total,
     };
   });
   const amounts = shares.map((s) => s.contributed);
@@ -239,7 +239,7 @@ export type WeekSummaryFacts = {
   balance: bigint;
   /** Every member at `block`, in the contract's order, with what they owed when the week closed (memberDues). */
   dues: { member: Address; owed: bigint }[];
-  /** The week's Contribution.creditedWars, added up. */
+  /** The week's Contribution.credited, added up. */
   contributed: bigint;
   reimbursements: { member: Address; amount: bigint }[];
   /** Each payment the group approved, with its proposal's note, and whether it gave a contribution back (spec, 7.3). */
@@ -292,7 +292,7 @@ export function weekSummary({
   for (const event of week) {
     switch (event.eventName) {
       case "Contribution":
-        contributed += event.args.creditedWars;
+        contributed += event.args.credited;
         break;
       case "Reimbursement":
         reimbursements.push({ member: getAddress(event.args.member), amount: event.args.amount });

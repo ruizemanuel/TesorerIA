@@ -6,7 +6,7 @@ import type { FundEvent } from "../src/events";
 import { AGENT, BLOCK, MEMBERS, OUTSIDER, WARS_UNIT, fundSnapshot, proposed, ref, reimbursed } from "./support/fixtures";
 
 const MEMBER = MEMBERS[1] as Address;
-const QUIET_DAY = { reimbursedWars: 0n, convertedUsdt: 0n, transactions: 0 };
+const QUIET_DAY = { reimbursed: 0n, convertedDollar: 0n, transactions: 0 };
 const NOW = 1_791_561_510n;
 /** Entered an hour ago: about 3,600 blocks before BLOCK, the snapshot's. */
 const PITCH: Expense = { member: MEMBER, amount: 45_000n * WARS_UNIT, kind: "agreed", ref: ref(7), note: "Cancha del jueves", enteredAt: NOW - 3_600n };
@@ -54,10 +54,10 @@ describe("decideExpense", () => {
   });
 
   it("proposes what's above the agent's own limits, even under the fund's cap", () => {
-    const bigCap = { weeklyCap: 1_000_000n * WARS_UNIT, warsBalance: 1_000_000n * WARS_UNIT };
+    const bigCap = { weeklyCap: 1_000_000n * WARS_UNIT, currencyBalance: 1_000_000n * WARS_UNIT };
     const overOne = decide({ ...PITCH, amount: LIMITS.maxReimbursementWars + 1n }, bigCap);
     expect(overOne).toMatchObject({ kind: "propose-payment", reason: "It's above the agent's per-reimbursement limit" });
-    const busy = { ...QUIET_DAY, reimbursedWars: LIMITS.maxDailyReimbursedWars - 1n };
+    const busy = { ...QUIET_DAY, reimbursed: LIMITS.maxDailyReimbursedWars - 1n };
     expect(decide(PITCH, bigCap, [], busy)).toMatchObject({
       kind: "propose-payment",
       reason: "It's above the agent's daily reimbursement limit",
@@ -79,7 +79,7 @@ describe("decideExpense", () => {
   });
 
   it("waits when the fund doesn't hold enough wARS yet (its USDT may still be converting)", () => {
-    expect(decide(PITCH, { warsBalance: 44_999n * WARS_UNIT })).toEqual({
+    expect(decide(PITCH, { currencyBalance: 44_999n * WARS_UNIT })).toEqual({
       kind: "wait",
       reason: "The fund doesn't hold enough wARS yet",
     });
@@ -116,7 +116,7 @@ describe("decideExpense", () => {
     // The barbecue fund on 3/11: its screen said $ 50.013,31, a member entered that, and the fund held 50.013,3069…
     const HELD = 50_013_306_937_880_539_911_180n;
     const ALL: Expense = { ...PITCH, kind: "other", amount: 50_013_310_000_000_000_000_000n, note: "carne+bebida" };
-    const WIDE = { weeklyCap: 1_000_000n * WARS_UNIT, warsBalance: HELD };
+    const WIDE = { weeklyCap: 1_000_000n * WARS_UNIT, currencyBalance: HELD };
 
     it("proposes what the fund holds, so the proposal can be paid", () => {
       expect(decide(ALL, WIDE)).toMatchObject({ kind: "propose-payment", amount: HELD });
@@ -125,19 +125,19 @@ describe("decideExpense", () => {
     it("pays the agreed expense back with what the fund holds, instead of waiting", () => {
       const pitch = { ...PITCH, amount: 45_000n * WARS_UNIT };
       const held = pitch.amount - 3_062_119_460_088_820n;
-      expect(decide(pitch, { warsBalance: held })).toEqual({ kind: "reimburse", member: MEMBER, amount: held, ref: PITCH.ref });
+      expect(decide(pitch, { currencyBalance: held })).toEqual({ kind: "reimburse", member: MEMBER, amount: held, ref: PITCH.ref });
     });
 
     it("leaves the amount as it was entered when the fund is short by half a centavo or more, or holds nothing", () => {
       const halfCentavo = WARS_UNIT / 200n;
-      expect(decide(ALL, { ...WIDE, warsBalance: ALL.amount - halfCentavo })).toMatchObject({ kind: "propose-payment", amount: ALL.amount });
-      expect(decide(PITCH, { warsBalance: PITCH.amount - halfCentavo })).toMatchObject({ kind: "wait" });
-      expect(decide({ ...ALL, amount: 1n }, { ...WIDE, warsBalance: 0n })).toMatchObject({ kind: "propose-payment", amount: 1n });
+      expect(decide(ALL, { ...WIDE, currencyBalance: ALL.amount - halfCentavo })).toMatchObject({ kind: "propose-payment", amount: ALL.amount });
+      expect(decide(PITCH, { currencyBalance: PITCH.amount - halfCentavo })).toMatchObject({ kind: "wait" });
+      expect(decide({ ...ALL, amount: 1n }, { ...WIDE, currencyBalance: 0n })).toMatchObject({ kind: "propose-payment", amount: 1n });
     });
 
     it("takes its proposal of what the fund held as this expense's, even once the fund holds more", () => {
       const earlier = proposed(AGENT, BLOCK - 600n, 42, { a: MEMBER, amount: HELD, note: "carne+bebida" });
-      const richer = { ...WIDE, warsBalance: 60_000n * WARS_UNIT };
+      const richer = { ...WIDE, currencyBalance: 60_000n * WARS_UNIT };
       expect(decide(ALL, richer, [earlier])).toEqual({
         kind: "proposed",
         transactionHash: earlier.transactionHash,

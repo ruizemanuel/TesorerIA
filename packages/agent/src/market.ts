@@ -32,31 +32,31 @@ export async function readReferences({ base, celo }: { base: ContractReader; cel
   return { usdArs, usdtUsd };
 }
 
-/** What converting `usdtAmount` of a fund's USDT would give, three ways, all in wARS. */
+/** What converting `dollarAmount` of a fund's USDT would give, three ways, all in wARS. */
 export type ConversionQuote = {
-  usdtAmount: bigint;
+  dollarAmount: bigint;
   /** What the pool pays now, from Uniswap's QuoterV2. */
-  quotedWars: bigint;
-  /** The fund's own 30-minute TWAP quote: `convert` reverts if `minWarsOut` is under 98% of it. */
-  twapWars: bigint;
+  quotedCurrency: bigint;
+  /** The fund's own 30-minute TWAP quote: `convert` reverts if `minCurrencyOut` is under 98% of it. */
+  twapCurrency: bigint;
   /** The pool's wARS balance: its depth on the side a conversion takes from. */
-  poolWars: bigint;
+  poolCurrency: bigint;
 };
 
 export async function quoteConversion(
   celo: Pick<PublicClient, "readContract" | "simulateContract">,
   fund: Address,
-  usdtAmount: bigint,
+  dollarAmount: bigint,
 ): Promise<ConversionQuote> {
-  const [quote, twapWars, poolWars] = await Promise.all([
+  const [quote, twapCurrency, poolCurrency] = await Promise.all([
     celo.simulateContract({
       address: UNISWAP_V3_QUOTER,
       abi: quoterAbi,
       functionName: "quoteExactInputSingle",
-      args: [{ tokenIn: USDT, tokenOut: WARS, amountIn: usdtAmount, fee: POOL_FEE, sqrtPriceLimitX96: 0n }],
+      args: [{ tokenIn: USDT, tokenOut: WARS, amountIn: dollarAmount, fee: POOL_FEE, sqrtPriceLimitX96: 0n }],
     }),
-    celo.readContract({ address: fund, abi: fundAbi, functionName: "quoteUsdtInWars", args: [usdtAmount] }),
+    celo.readContract({ address: fund, abi: fundAbi, functionName: "quoteUsdtInWars", args: [dollarAmount] }),
     celo.readContract({ address: WARS, abi: erc20Abi, functionName: "balanceOf", args: [POOL] }),
   ]);
-  return { usdtAmount, quotedWars: quote.result[0], twapWars, poolWars };
+  return { dollarAmount, quotedCurrency: quote.result[0], twapCurrency, poolCurrency };
 }

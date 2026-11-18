@@ -79,9 +79,9 @@ async function baseAgreeingWithThePool(): Promise<ContractReader> {
         functionName === "decimals" ? 8 : [1n, answer, updatedAt, updatedAt, 1n],
     }) as unknown as ContractReader;
   const { usdtUsd } = await readReferences({ base: answering(1n, 0n), celo: publicClient });
-  const { quotedWars } = await quoteConversion(publicClient, fund, 1_000_000n);
+  const { quotedCurrency } = await quoteConversion(publicClient, fund, 1_000_000n);
   // For 1 USDT, Chainlink's wARS are 100 × usdArs × usdtUsd (8 decimals each): pick usdArs to match the pool.
-  return answering(quotedWars / (100n * usdtUsd.answer), BigInt(Math.floor(Date.now() / 1000)));
+  return answering(quotedCurrency / (100n * usdtUsd.answer), BigInt(Math.floor(Date.now() / 1000)));
 }
 
 beforeAll(async () => {
@@ -141,12 +141,12 @@ describe("the agent against a fork of Celo mainnet, with the deployed FundFactor
     expect(conversions).toHaveLength(1);
     const [decision] = conversions;
     expect(decision).toMatchObject({ kind: "convert", status: "success" });
-    expect(decision?.action).toMatchObject({ kind: "convert", usdtAmount: parseUnits("50", 6) });
+    expect(decision?.action).toMatchObject({ kind: "convert", dollarAmount: parseUnits("50", 6) });
 
     const usdtLeft = await publicClient.readContract({ address: USDT, abi: erc20Abi, functionName: "balanceOf", args: [fund] });
     expect(usdtLeft).toBe(0n);
-    const minWarsOut = decision?.action?.kind === "convert" ? decision.action.minWarsOut : 0n;
-    expect((await wars(fund)) - before).toBeGreaterThanOrEqual(minWarsOut);
+    const minCurrencyOut = decision?.action?.kind === "convert" ? decision.action.minCurrencyOut : 0n;
+    expect((await wars(fund)) - before).toBeGreaterThanOrEqual(minCurrencyOut);
     const tx = await publicClient.getTransaction({ hash: decision?.tx ?? "0x" });
     expect(tx.input.endsWith(ATTRIBUTION_SUFFIX.slice(2))).toBe(true);
   });

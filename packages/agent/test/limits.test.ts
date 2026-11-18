@@ -18,7 +18,7 @@ import {
 } from "./support/fixtures";
 
 const MEMBER = MEMBERS[1] as Address;
-const QUIET_DAY: DailyActivity = { reimbursedWars: 0n, convertedUsdt: 0n, transactions: 0 };
+const QUIET_DAY: DailyActivity = { reimbursed: 0n, convertedDollar: 0n, transactions: 0 };
 
 describe("dailyActivity", () => {
   it("adds up the last day's reimbursements, conversions and the agent's own proposals", () => {
@@ -31,8 +31,8 @@ describe("dailyActivity", () => {
       proposed(MEMBERS[0] as Address, BLOCK - 3n, 5), // a member's proposal isn't the agent's
     ];
     expect(dailyActivity(events, AGENT, since)).toEqual({
-      reimbursedWars: 20_000n * WARS_UNIT,
-      convertedUsdt: 50n * USDT_UNIT,
+      reimbursed: 20_000n * WARS_UNIT,
+      convertedDollar: 50n * USDT_UNIT,
       transactions: 3,
     });
   });
@@ -49,8 +49,8 @@ describe("authorize", () => {
   });
 
   it("encodes a conversion and a payment proposal", () => {
-    const fund = fundSnapshot({ usdtBalance: 20n * USDT_UNIT });
-    const convert = authorize({ kind: "convert", usdtAmount: 20n * USDT_UNIT, minWarsOut: 31_000n * WARS_UNIT }, fund, QUIET_DAY, AGENT);
+    const fund = fundSnapshot({ dollarBalance: 20n * USDT_UNIT });
+    const convert = authorize({ kind: "convert", dollarAmount: 20n * USDT_UNIT, minCurrencyOut: 31_000n * WARS_UNIT }, fund, QUIET_DAY, AGENT);
     expect(decodeFunctionData({ abi: fundAbi, data: convert.data })).toEqual({
       functionName: "convert",
       args: [20n * USDT_UNIT, 31_000n * WARS_UNIT],
@@ -73,20 +73,20 @@ describe("authorize", () => {
   });
 
   it("holds the per-transaction and daily limits", () => {
-    const fund = fundSnapshot({ weeklyCap: 10_000_000n * WARS_UNIT, warsBalance: 10_000_000n * WARS_UNIT, usdtBalance: 10_000n * USDT_UNIT });
+    const fund = fundSnapshot({ weeklyCap: 10_000_000n * WARS_UNIT, currencyBalance: 10_000_000n * WARS_UNIT, dollarBalance: 10_000n * USDT_UNIT });
     const reimburse = (amount: bigint, today = QUIET_DAY) =>
       authorize({ kind: "reimburse", member: MEMBER, amount, ref: ref(1) }, fund, today, AGENT);
-    const convert = (usdtAmount: bigint, today = QUIET_DAY) =>
-      authorize({ kind: "convert", usdtAmount, minWarsOut: 1n }, fund, today, AGENT);
+    const convert = (dollarAmount: bigint, today = QUIET_DAY) =>
+      authorize({ kind: "convert", dollarAmount, minCurrencyOut: 1n }, fund, today, AGENT);
 
     expect(() => reimburse(LIMITS.maxReimbursementWars)).not.toThrow();
     expect(() => reimburse(LIMITS.maxReimbursementWars + 1n)).toThrow("per-reimbursement limit");
-    const reimbursedToday = { ...QUIET_DAY, reimbursedWars: LIMITS.maxDailyReimbursedWars - 1n };
+    const reimbursedToday = { ...QUIET_DAY, reimbursed: LIMITS.maxDailyReimbursedWars - 1n };
     expect(() => reimburse(2n, reimbursedToday)).toThrow("daily reimbursement limit");
 
     expect(() => convert(LIMITS.maxConversionUsdt)).not.toThrow();
     expect(() => convert(LIMITS.maxConversionUsdt + 1n)).toThrow("per-conversion limit");
-    const convertedToday = { ...QUIET_DAY, convertedUsdt: LIMITS.maxDailyConvertedUsdt - 1n };
+    const convertedToday = { ...QUIET_DAY, convertedDollar: LIMITS.maxDailyConvertedUsdt - 1n };
     expect(() => convert(2n, convertedToday)).toThrow("daily conversion limit");
 
     const busyDay = { ...QUIET_DAY, transactions: LIMITS.maxDailyTransactions };
@@ -94,12 +94,12 @@ describe("authorize", () => {
   });
 
   it("checks the weekly cap and the balances like the contract does", () => {
-    const fund = fundSnapshot({ spentThisWeek: 50_000n * WARS_UNIT, warsBalance: 8_000n * WARS_UNIT, usdtBalance: 1n });
+    const fund = fundSnapshot({ spentThisWeek: 50_000n * WARS_UNIT, currencyBalance: 8_000n * WARS_UNIT, dollarBalance: 1n });
     const reimburse = (amount: bigint) =>
       authorize({ kind: "reimburse", member: MEMBER, amount, ref: ref(1) }, fund, QUIET_DAY, AGENT);
     expect(() => reimburse(10_001n * WARS_UNIT)).toThrow("this week's cap");
     expect(() => reimburse(9_000n * WARS_UNIT)).toThrow("doesn't hold that much wARS");
-    expect(() => authorize({ kind: "convert", usdtAmount: 2n, minWarsOut: 1n }, fund, QUIET_DAY, AGENT)).toThrow(
+    expect(() => authorize({ kind: "convert", dollarAmount: 2n, minCurrencyOut: 1n }, fund, QUIET_DAY, AGENT)).toThrow(
       "doesn't hold that much USDT",
     );
   });

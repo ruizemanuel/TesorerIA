@@ -46,10 +46,10 @@ describe("quoteConversion", () => {
       [`${WARS}.balanceOf`]: 106_669_036_955_606_543_270_134_078n,
     });
     await expect(quoteConversion(celo.client as never, FUND, 300_000_000n)).resolves.toEqual({
-      usdtAmount: 300_000_000n,
-      quotedWars: 482_243_292_884_944_290_611_892n,
-      twapWars: 482_300_000_000_000_000_000_000n,
-      poolWars: 106_669_036_955_606_543_270_134_078n,
+      dollarAmount: 300_000_000n,
+      quotedCurrency: 482_243_292_884_944_290_611_892n,
+      twapCurrency: 482_300_000_000_000_000_000_000n,
+      poolCurrency: 106_669_036_955_606_543_270_134_078n,
     });
     expect(celo.calls).toContainEqual(
       expect.objectContaining({

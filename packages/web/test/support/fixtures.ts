@@ -37,8 +37,8 @@ export function snapshot(change: Partial<FundSnapshot> = {}): FundSnapshot {
     startTime: START,
     week: 2n,
     spentThisWeek: 0n,
-    warsBalance: 90_000n * WARS,
-    usdtBalance: 0n,
+    currencyBalance: 90_000n * WARS,
+    dollarBalance: 0n,
     ...change,
   };
 }

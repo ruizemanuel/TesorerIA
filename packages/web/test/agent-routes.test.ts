@@ -93,7 +93,7 @@ describe("POST /api/agent/heartbeat", () => {
     expect(await quiet.json()).toEqual({ ran: true, decisions: {} });
 
     // USDT waiting in the fund: the agent decides about it (here it can't price it, so it is blocked, and says so).
-    state.makeContext = fakeAgent({ snapshot: () => snapshot({ usdtBalance: 1_000n * USDT_UNIT }) }).makeContext;
+    state.makeContext = fakeAgent({ snapshot: () => snapshot({ dollarBalance: 1_000n * USDT_UNIT }) }).makeContext;
     const busy = await beat(`Bearer ${SECRET}`);
     expect(busy.status).toBe(200);
     expect(await busy.json()).toEqual({ ran: true, decisions: { blocked: 1 } });

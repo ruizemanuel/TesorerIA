@@ -109,7 +109,7 @@ export function decideExpense({
   if (member === undefined) return { kind: "reject", reason: "Only members get money back" };
   const { ref } = expense;
   if (expense.amount <= 0n) return { kind: "reject", reason: "The amount must be more than zero" };
-  const amount = payable(expense.amount, fund.warsBalance);
+  const amount = payable(expense.amount, fund.currencyBalance);
   const earlier = events.find(
     (e) => e.eventName === "Reimbursement" && e.args.ref.toLowerCase() === ref.toLowerCase(),
   );
@@ -133,9 +133,9 @@ export function decideExpense({
     return propose(`It doesn't fit in what's left of this week's cap (${formatUnits(left, 18)} wARS)`);
   }
   if (amount > LIMITS.maxReimbursementWars) return propose("It's above the agent's per-reimbursement limit");
-  if (today.reimbursedWars + amount > LIMITS.maxDailyReimbursedWars) {
+  if (today.reimbursed + amount > LIMITS.maxDailyReimbursedWars) {
     return propose("It's above the agent's daily reimbursement limit");
   }
-  if (amount > fund.warsBalance) return { kind: "wait", reason: "The fund doesn't hold enough wARS yet" };
+  if (amount > fund.currencyBalance) return { kind: "wait", reason: "The fund doesn't hold enough wARS yet" };
   return { kind: "reimburse", member, amount, ref };
 }

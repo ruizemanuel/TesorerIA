@@ -12,9 +12,9 @@ export const MAX_REFERENCE_DEVIATION_BPS = 200n;
 export const MAX_REFERENCE_AGE = 26n * 3_600n;
 /** How far ahead of the agent's clock a Chainlink update may be dated, in seconds. */
 export const MAX_CLOCK_SKEW = 300n;
-/** `minWarsOut` sits this far under the quote, not at the contract's 2% floor (spec, 8.1). */
+/** `minCurrencyOut` sits this far under the quote, not at the contract's 2% floor (spec, 8.1). */
 export const SLIPPAGE_BPS = 50n;
-/** `Fund.convert` reverts if `minWarsOut` is under 98% of the fund's TWAP quote. */
+/** `Fund.convert` reverts if `minCurrencyOut` is under 98% of the fund's TWAP quote. */
 const CONTRACT_FLOOR_BPS = 9_800n;
 const BPS = 10_000n;
 
@@ -24,23 +24,23 @@ const BPS = 10_000n;
  */
 export type SkipCode = "daily-limit" | "price-reference" | "pool-depth" | "price-gap" | "price-floor";
 
-export type ConversionPlan = { kind: "none" } | { kind: "skip"; code: SkipCode; reason: string } | { kind: "quote"; usdtAmount: bigint };
+export type ConversionPlan = { kind: "none" } | { kind: "skip"; code: SkipCode; reason: string } | { kind: "quote"; dollarAmount: bigint };
 
 /** How much of the fund's USDT to convert now: all of it, within the agent's limits. */
 export function planConversion(fund: FundSnapshot, today: DailyActivity): ConversionPlan {
-  if (fund.usdtBalance < MIN_CONVERSION_USDT) return { kind: "none" };
-  let usdtAmount = fund.usdtBalance;
-  if (usdtAmount > LIMITS.maxConversionUsdt) usdtAmount = LIMITS.maxConversionUsdt;
-  const leftToday = LIMITS.maxDailyConvertedUsdt - today.convertedUsdt;
-  if (usdtAmount > leftToday) usdtAmount = leftToday;
-  if (usdtAmount < MIN_CONVERSION_USDT) {
+  if (fund.dollarBalance < MIN_CONVERSION_USDT) return { kind: "none" };
+  let dollarAmount = fund.dollarBalance;
+  if (dollarAmount > LIMITS.maxConversionUsdt) dollarAmount = LIMITS.maxConversionUsdt;
+  const leftToday = LIMITS.maxDailyConvertedUsdt - today.convertedDollar;
+  if (dollarAmount > leftToday) dollarAmount = leftToday;
+  if (dollarAmount < MIN_CONVERSION_USDT) {
     return { kind: "skip", code: "daily-limit", reason: "The agent reached its daily conversion limit for this fund" };
   }
-  return { kind: "quote", usdtAmount };
+  return { kind: "quote", dollarAmount };
 }
 
 export type ConversionDecision =
-  | { kind: "convert"; usdtAmount: bigint; minWarsOut: bigint }
+  | { kind: "convert"; dollarAmount: bigint; minCurrencyOut: bigint }
   | { kind: "skip"; code: SkipCode; reason: string };
 
 function percent(bps: bigint): string {
@@ -49,7 +49,7 @@ function percent(bps: bigint): string {
 
 /**
  * Whether to convert at this quote (spec, 8.1): Chainlink is fresh, the pool is deep enough, and its price is
- * close to Chainlink's. If so, `minWarsOut` is the quote less SLIPPAGE_BPS, and never under the contract's floor.
+ * close to Chainlink's. If so, `minCurrencyOut` is the quote less SLIPPAGE_BPS, and never under the contract's floor.
  */
 export function decideConversion({
   quote,
@@ -73,21 +73,21 @@ export function decideConversion({
       return { kind: "skip", code: "price-reference", reason: `Chainlink's ${name} is ${(Number(age) / 3_600).toFixed(1)} hours old (26 at most)` };
     }
   }
-  if (quote.poolWars < POOL_DEPTH_MULTIPLE * quote.quotedWars) {
+  if (quote.poolCurrency < POOL_DEPTH_MULTIPLE * quote.quotedCurrency) {
     return { kind: "skip", code: "pool-depth", reason: "The pool holds less than 10 times the wARS this conversion takes" };
   }
   // wARS per USDT by Chainlink, (ARS per USD) × (USD per USDT), and from USDT's 6 decimals to wARS's 18.
   const referenceWars =
-    (quote.usdtAmount * 10n ** 12n * usdArs.answer * usdtUsd.answer) / 10n ** BigInt(usdArs.decimals + usdtUsd.decimals);
-  const gap = quote.quotedWars > referenceWars ? quote.quotedWars - referenceWars : referenceWars - quote.quotedWars;
+    (quote.dollarAmount * 10n ** 12n * usdArs.answer * usdtUsd.answer) / 10n ** BigInt(usdArs.decimals + usdtUsd.decimals);
+  const gap = quote.quotedCurrency > referenceWars ? quote.quotedCurrency - referenceWars : referenceWars - quote.quotedCurrency;
   const gapBps = (gap * BPS) / referenceWars;
   if (gapBps > MAX_REFERENCE_DEVIATION_BPS) {
     return { kind: "skip", code: "price-gap", reason: `The pool's price is ${percent(gapBps)}% away from Chainlink's (2% at most)` };
   }
-  const floor = (quote.twapWars * CONTRACT_FLOOR_BPS) / BPS;
-  if (quote.quotedWars < floor) {
+  const floor = (quote.twapCurrency * CONTRACT_FLOOR_BPS) / BPS;
+  if (quote.quotedCurrency < floor) {
     return { kind: "skip", code: "price-floor", reason: "The pool pays less than the contract's floor, 2% under its 30-minute TWAP" };
   }
-  const nearQuote = (quote.quotedWars * (BPS - SLIPPAGE_BPS)) / BPS;
-  return { kind: "convert", usdtAmount: quote.usdtAmount, minWarsOut: nearQuote > floor ? nearQuote : floor };
+  const nearQuote = (quote.quotedCurrency * (BPS - SLIPPAGE_BPS)) / BPS;
+  return { kind: "convert", dollarAmount: quote.dollarAmount, minCurrencyOut: nearQuote > floor ? nearQuote : floor };
 }

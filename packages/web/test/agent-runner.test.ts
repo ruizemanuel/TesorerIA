@@ -29,7 +29,7 @@ describe("runAgent: the week summaries (spec, 9.4)", () => {
     const ana = await addUser(db, "Ana", ANA);
     const fund = await addLiveFund(db, { creatorId: ana.id, address: FUND, members: [ana.id] });
     // USDT waiting that the agent can't price: the heartbeat decides "blocked", and saves it.
-    const { makeContext } = fakeAgent({ snapshot: () => snapshot({ usdtBalance: 1_000n * USDT_UNIT }) });
+    const { makeContext } = fakeAgent({ snapshot: () => snapshot({ dollarBalance: 1_000n * USDT_UNIT }) });
     return { db, makeContext, ana, fundId: fund.id };
   }
   /** An agreed expense waiting for the agent: the queue's work, which the summaries must never delay. */

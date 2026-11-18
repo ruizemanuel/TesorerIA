@@ -33,16 +33,16 @@ function historyGap(snapshot: FundSnapshot, events: readonly FundEvent[]): strin
         break;
       case "Contribution": {
         const member = getAddress(e.args.member);
-        contributed.set(member, (contributed.get(member) ?? 0n) + e.args.creditedWars);
+        contributed.set(member, (contributed.get(member) ?? 0n) + e.args.credited);
         if (isAddressEqual(e.args.token, USDT)) usdtLeft += e.args.amount;
         break;
       }
       case "Conversion":
-        usdtLeft -= e.args.usdtIn;
+        usdtLeft -= e.args.dollarIn;
         break;
       case "FundClosed":
       case "RemainderDistributed":
-        usdtLeft -= e.args.usdtBalance;
+        usdtLeft -= e.args.dollarBalance;
         break;
       case "MemberReplaced":
         contributed.set(getAddress(e.args.newMember), contributed.get(getAddress(e.args.oldMember)) ?? 0n);
@@ -50,12 +50,12 @@ function historyGap(snapshot: FundSnapshot, events: readonly FundEvent[]): strin
         break;
       case "MemberRemoved":
         contributed.delete(getAddress(e.args.member));
-        usdtLeft -= e.args.usdtReturned;
+        usdtLeft -= e.args.dollarReturned;
         break;
     }
   }
-  if (usdtLeft > snapshot.usdtBalance) {
-    return `USDT contributed less what left adds up to ${usdtLeft}, more than the fund holds (${snapshot.usdtBalance})`;
+  if (usdtLeft > snapshot.dollarBalance) {
+    return `USDT contributed less what left adds up to ${usdtLeft}, more than the fund holds (${snapshot.dollarBalance})`;
   }
   if (reimbursed !== snapshot.spentThisWeek) {
     return `This week's reimbursements add up to ${reimbursed}, but spentInWeek is ${snapshot.spentThisWeek}`;

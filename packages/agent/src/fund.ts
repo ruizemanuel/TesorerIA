@@ -22,8 +22,8 @@ export type FundSnapshot = {
   startTime: bigint;
   week: bigint;
   spentThisWeek: bigint;
-  warsBalance: bigint;
-  usdtBalance: bigint;
+  currencyBalance: bigint;
+  dollarBalance: bigint;
 };
 
 /** The reads the agent needs from a Celo client. */
@@ -38,7 +38,7 @@ export type CeloReader = Pick<PublicClient, "getBlockNumber" | "multicall" | "re
 export async function readFund(client: CeloReader, fund: Address, blockNumber?: bigint): Promise<FundSnapshot> {
   const block = blockNumber ?? (await client.getBlockNumber({ cacheTime: 0 }));
   const at = { allowFailure: false, blockNumber: block } as const;
-  const [agent, closed, members, votesRequired, weeklyCap, startTime, week, totalContributed, warsBalance, usdtBalance] =
+  const [agent, closed, members, votesRequired, weeklyCap, startTime, week, totalContributed, currencyBalance, dollarBalance] =
     await client.multicall({
       ...at,
       contracts: [
@@ -76,8 +76,8 @@ export async function readFund(client: CeloReader, fund: Address, blockNumber?: 
     startTime,
     week,
     spentThisWeek,
-    warsBalance,
-    usdtBalance,
+    currencyBalance,
+    dollarBalance,
   };
 }
 

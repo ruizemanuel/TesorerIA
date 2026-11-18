@@ -8,7 +8,7 @@ const DIEGO = getAddress("0x000000000000000000000000000000000000aaa4");
 const EVA = getAddress("0x000000000000000000000000000000000000aaa5");
 
 const paidIn = (member: Address, amount: bigint, block: bigint) =>
-  event("Contribution", { member, token: WARS_TOKEN, amount, creditedWars: amount }, block);
+  event("Contribution", { member, token: WARS_TOKEN, amount, credited: amount }, block);
 /** What snapshot()'s members put in: 30,000 wARS each. */
 const contributions = MEMBERS.map((member, i) => paidIn(member, 30_000n * WARS, BLOCK - 900_000n + BigInt(i)));
 
@@ -40,7 +40,7 @@ describe("checkHistory", () => {
       event("MemberAdded", { member: EVA }, BLOCK - 600n),
       paidIn(EVA, 5_000n * WARS, BLOCK - 500n),
       event("MemberReplaced", { oldMember: DIEGO, newMember: ANA }, BLOCK - 400n),
-      event("MemberRemoved", { member: EVA, warsReturned: 5_000n * WARS, usdtReturned: 0n }, BLOCK - 300n),
+      event("MemberRemoved", { member: EVA, currencyReturned: 5_000n * WARS, dollarReturned: 0n }, BLOCK - 300n),
       paidIn(CARO, 10_000n * WARS, BLOCK - 200n),
     ];
     expect(() => checkHistory(snapshot(), history)).not.toThrow();
@@ -48,21 +48,21 @@ describe("checkHistory", () => {
 
   it("stops on a history that misses a conversion, by the fund's USDT (conversion-loss design)", () => {
     // Ana put her 30.000 in as 18 USDT; Beto and Caro in wARS.
-    const usdtIn = event("Contribution", { member: ANA, token: USDT, amount: 18n * USDT_UNIT, creditedWars: 30_000n * WARS }, BLOCK - 900_000n);
+    const usdtIn = event("Contribution", { member: ANA, token: USDT, amount: 18n * USDT_UNIT, credited: 30_000n * WARS }, BLOCK - 900_000n);
     const paid = [usdtIn, ...contributions.slice(1)];
-    const converted = event("Conversion", { usdtIn: 18n * USDT_UNIT, warsOut: 29_990n * WARS }, BLOCK - 800_000n);
-    expect(() => checkHistory(snapshot({ usdtBalance: 0n }), paid)).toThrow(HistoryGapError);
-    expect(() => checkHistory(snapshot({ usdtBalance: 18n * USDT_UNIT }), paid)).not.toThrow(); // still waiting
-    expect(() => checkHistory(snapshot({ usdtBalance: 0n }), [...paid, converted])).not.toThrow();
-    expect(() => checkHistory(snapshot({ usdtBalance: 5n * USDT_UNIT }), [...paid, converted])).not.toThrow(); // sent straight to the fund
+    const converted = event("Conversion", { dollarIn: 18n * USDT_UNIT, currencyOut: 29_990n * WARS }, BLOCK - 800_000n);
+    expect(() => checkHistory(snapshot({ dollarBalance: 0n }), paid)).toThrow(HistoryGapError);
+    expect(() => checkHistory(snapshot({ dollarBalance: 18n * USDT_UNIT }), paid)).not.toThrow(); // still waiting
+    expect(() => checkHistory(snapshot({ dollarBalance: 0n }), [...paid, converted])).not.toThrow();
+    expect(() => checkHistory(snapshot({ dollarBalance: 5n * USDT_UNIT }), [...paid, converted])).not.toThrow(); // sent straight to the fund
   });
 
   it("takes out the USDT that closing split and a member who left took", () => {
-    const paid = [event("Contribution", { member: ANA, token: USDT, amount: 18n * USDT_UNIT, creditedWars: 30_000n * WARS }, BLOCK - 900_000n), ...contributions.slice(1)];
-    const out = (e: FundEvent) => checkHistory(snapshot({ usdtBalance: 0n }), [...paid, e]);
-    expect(() => out(event("FundClosed", { warsBalance: 60_000n * WARS, usdtBalance: 18n * USDT_UNIT }, BLOCK - 100n))).not.toThrow();
-    expect(() => out(event("RemainderDistributed", { warsBalance: 0n, usdtBalance: 18n * USDT_UNIT }, BLOCK - 100n))).not.toThrow();
-    expect(() => out(event("MemberRemoved", { member: DIEGO, warsReturned: 0n, usdtReturned: 18n * USDT_UNIT }, BLOCK - 100n))).not.toThrow();
+    const paid = [event("Contribution", { member: ANA, token: USDT, amount: 18n * USDT_UNIT, credited: 30_000n * WARS }, BLOCK - 900_000n), ...contributions.slice(1)];
+    const out = (e: FundEvent) => checkHistory(snapshot({ dollarBalance: 0n }), [...paid, e]);
+    expect(() => out(event("FundClosed", { currencyBalance: 60_000n * WARS, dollarBalance: 18n * USDT_UNIT }, BLOCK - 100n))).not.toThrow();
+    expect(() => out(event("RemainderDistributed", { currencyBalance: 0n, dollarBalance: 18n * USDT_UNIT }, BLOCK - 100n))).not.toThrow();
+    expect(() => out(event("MemberRemoved", { member: DIEGO, currencyReturned: 0n, dollarReturned: 18n * USDT_UNIT }, BLOCK - 100n))).not.toThrow();
   });
 
   it("stops on a history that misses a proposal", () => {
@@ -96,7 +96,7 @@ describe("completeHistory", () => {
   it("fills a hole from the node, back from the snapshot's block only as far as the history needs", async () => {
     // Blockscout misses CARO's contribution, 150,003 blocks back: the node's first 100,000 blocks don't have it, the next ones do.
     // (Blocks apart by other than a multiple of 100,000: event() names the transaction after the block's last digits.)
-    const conversion = event("Conversion", { usdtIn: 6_060_000n, warsOut: 9_996n * WARS }, BLOCK - 10n);
+    const conversion = event("Conversion", { dollarIn: 6_060_000n, currencyOut: 9_996n * WARS }, BLOCK - 10n);
     const all = [
       paidIn(ANA, 30_000n * WARS, BLOCK - 900_001n),
       paidIn(BETO, 30_000n * WARS, BLOCK - 800_002n),
