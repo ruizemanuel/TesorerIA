@@ -62,14 +62,14 @@ describe("the dictionaries", () => {
       `Each person puts in ${dollars.fee} per week. The agent pays back up to ${dollars.cap} per week for “la cancha”. Everything else is voted on. No one can change this alone, not even the agent.`,
     );
     const judges = (m: Messages) => {
-      const { celo, contract, agent, code } = m.home.judgesLinks;
-      return html(m.home.judges(link(celo), link(contract), link(agent), link(code)));
+      const { celo, contracts, agent, code } = m.home.judgesLinks;
+      return html(m.home.judges(link(celo), contracts(link("v1"), link("v2")), link(agent), link(code)));
     };
     expect(judges(es)).toBe(
-      "Corre en <a>Celo mainnet</a>, con <a>la FundFactory verificada</a>, <a>el agente registrado en ERC-8004 (#9887)</a> y <a>el código abierto</a>.",
+      "Corre en <a>Celo mainnet</a>, con las FundFactory verificadas (<a>v1</a> y <a>v2</a>), <a>el agente registrado en ERC-8004 (#9887)</a> y <a>el código abierto</a>.",
     );
     expect(judges(en)).toBe(
-      "Runs on <a>Celo mainnet</a>, with <a>the verified FundFactory</a>, <a>the agent registered in ERC-8004 (#9887)</a> and <a>the open-source code</a>.",
+      "Runs on <a>Celo mainnet</a>, with the verified FundFactory contracts (<a>v1</a> and <a>v2</a>), <a>the agent registered in ERC-8004 (#9887)</a> and <a>the open-source code</a>.",
     );
     expect(html(es.login.firstTime(link(es.login.createLink)))).toBe(
       "¿Es tu primera vez? Entrá con el link de invitación que te pasaron, o <a>creá un fondo</a>.",

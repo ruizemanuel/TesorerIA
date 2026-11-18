@@ -90,8 +90,9 @@ const ARGS: Record<string, (k: Kit) => Case[]> = {
   "home.rules.vote": ({ fund }) => [call(fund, 5, 8)],
   "home.rules.money": ({ m, link }) => [call(link(m.home.rules.contractLink))],
   "home.judges": ({ m, link }) => [
-    call(link(m.home.judgesLinks.celo), link(m.home.judgesLinks.contract), link(m.home.judgesLinks.agent), link(m.home.judgesLinks.code)),
+    call(link(m.home.judgesLinks.celo), m.home.judgesLinks.contracts(link("v1"), link("v2")), link(m.home.judgesLinks.agent), link(m.home.judgesLinks.code)),
   ],
+  "home.judgesLinks.contracts": ({ link }) => [call(link("v1"), link("v2"))],
   "login.firstTime": ({ m, link }) => [call(link(m.login.createLink))],
   "deploy.waitingForCreator": () => [call(NAME)],
   "deploy.votesOption": () => [call(5, 8)],

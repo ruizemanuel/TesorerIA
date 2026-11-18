@@ -1,8 +1,9 @@
-import { FUND_FACTORY, shortMessage } from "@tesoreria/agent";
+import { shortMessage } from "@tesoreria/agent";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { connection } from "next/server";
 import { getAddress } from "viem";
+import { HomeJudges } from "../components/home-judges";
 import { HomeRules } from "../components/home-rules";
 import { LanguageSwitch } from "../components/language-switch";
 import { ButtonLink, Card, Logo } from "../components/ui";
@@ -28,15 +29,6 @@ async function liveFund(address: string, locale: Locale) {
     console.error(`The portada could not read the public fund: ${shortMessage(error)}`);
     return null;
   }
-}
-
-/** A link of the line for the judges. */
-function judgesLink(href: string, label: string) {
-  return (
-    <a className="font-semibold text-primary" href={href}>
-      {label}
-    </a>
-  );
 }
 
 /** The portada (spec, 9.2): what it is, the real group's week and rules live, and the links for the judges. */
@@ -105,14 +97,7 @@ export default async function Home() {
         </ol>
       </Card>
       {real && <HomeRules view={real.view} m={m} locale={locale} />}
-      <p className="text-[13px] text-muted">
-        {m.home.judges(
-          judgesLink("https://celo.blockscout.com", m.home.judgesLinks.celo),
-          judgesLink(`https://celo.blockscout.com/address/${FUND_FACTORY}`, m.home.judgesLinks.contract),
-          judgesLink("https://8004scan.io/agents/celo/9887", m.home.judgesLinks.agent),
-          judgesLink("https://github.com/ruizemanuel/TesorerIA", m.home.judgesLinks.code),
-        )}
-      </p>
+      <HomeJudges m={m} />
     </main>
   );
 }

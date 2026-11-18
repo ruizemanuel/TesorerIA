@@ -3,6 +3,9 @@ import { llmsTxt } from "../src/lib/llms-txt";
 
 const PUBLIC_FUND = "0x9A74F670F3c59Ae4B8450fdD477b0461b89D2dfD";
 
+const FACTORY_V2 = "0x1337a61CF7fDeF412E04894FE705d4341878d4d3";
+const FEE_RECIPIENT = "0x5Dc9C76C6999C6C604b3D91C040D17b125ca4581";
+
 /** Fund's 20 errors and their selectors, from `cast sig` (Foundry), not from viem. */
 const ERRORS = [
   ["InvalidParams()", "0xa86b6512"],
@@ -26,6 +29,25 @@ const ERRORS = [
   ["SwapOverpayment()", "0xdf0f68a0"],
   ["FundNotClosed()", "0x593cbbf1"],
 ] as const;
+
+/** The five errors FundV2 adds, from `cast sig` too. */
+const ERRORS_V2 = [
+  ["NoDollar()", "0xad2b14af"],
+  ["InsufficientPending()", "0xeed47552"],
+  ["GiveBackTooLarge()", "0x23a618cb"],
+  ["TooManyProposals()", "0x188f201e"],
+  ["NoteTooLong()", "0x155be563"],
+] as const;
+
+/** A section of the page: from its heading to the next heading of the same or a higher level. */
+function section(text: string, heading: string): string {
+  const level = heading.match(/^#+/)![0].length;
+  const start = text.indexOf(`\n${heading}\n`);
+  expect(start, heading).toBeGreaterThan(-1);
+  const rest = text.slice(start + 1);
+  const next = rest.slice(heading.length).search(new RegExp(`\n#{1,${level}} `));
+  return next === -1 ? rest : rest.slice(0, heading.length + next);
+}
 
 let GET: () => Response;
 
@@ -150,12 +172,99 @@ describe("/llms.txt: the site for an agent that reads it (llmstxt.org)", () => {
     }
     expect(text).toContain("anyone can call `execute` once a proposal has the votes it needs");
     expect(text).toContain("an ERC-20 `approve`");
-    expect(text).toContain("0 Pay, 1 AddMember, 2 RemoveMember, 3 ReplaceMember, 4 SetWeeklyCap, 5 SetVotesRequired, 6 SetAgent, 7 Close");
-    // FundV2's GiveBack action and its five new errors aren't published yet: the page is Fund's.
-    expect(text).not.toContain("8 GiveBack");
-    for (const error of ["NoDollar()", "InsufficientPending()", "GiveBackTooLarge()", "TooManyProposals()", "NoteTooLong()"]) {
-      expect(text, error).not.toContain(error);
+    expect(text).toContain("0 Pay, 1 AddMember, 2 RemoveMember, 3 ReplaceMember, 4 SetWeeklyCap, 5 SetVotesRequired, 6 SetAgent, 7 Close.");
+    // Fund.Action ends at Close: the 8 is FundV2's, in its own section.
+    expect(section(text, "## Functions")).not.toContain("8 GiveBack");
+  });
+
+  it("names both factories, by their addresses and the version of the funds each one deploys", async () => {
+    const text = await GET().text();
+    const contracts = section(text, "## Contracts");
+    expect(contracts).toContain("[FundFactory](https://celo.blockscout.com/address/0xdF3B0d9edCA58Aac7c9Db4F2931f3559daf82020)");
+    expect(contracts).toContain(`[FundFactoryV2](https://celo.blockscout.com/address/${FACTORY_V2})`);
+    expect(contracts).toContain("version 1");
+    expect(contracts).toContain("version 2");
+    expect(contracts).toContain("`funds(i)` for each `i` below `fundCount()`, on either factory");
+  });
+
+  it("lists every error of either version with its selector, on one line each: 25 in all", async () => {
+    const text = await GET().text();
+    const lines = text.split("\n");
+    const all = [...ERRORS, ...ERRORS_V2];
+    expect(all).toHaveLength(25);
+    for (const [error, selector] of all) {
+      expect(lines.filter((line) => line.includes(`\`${error}\``) && line.includes(selector)), error).toHaveLength(1);
     }
+    // And no other: the section holds exactly those 25.
+    expect(section(text, "## Errors").split("\n").filter((line) => line.startsWith("- `"))).toHaveLength(25);
+  });
+
+  it("says new funds keep 0.25 % for gas, and who sends it where", async () => {
+    const v2 = section(await GET().text(), "## Version 2");
+    expect(v2).toContain("New funds keep 0.25 % for gas");
+    expect(v2).toContain("`feeOwed`");
+    expect(v2).toContain("anyone can call `payFee`");
+    expect(v2).toContain(`[fee recipient](https://celo.blockscout.com/address/${FEE_RECIPIENT})`);
+    // The contract's own ceiling, so a reader doesn't take the web's 0.25 % for the only one possible.
+    expect(v2).toContain("up to 1 %");
+  });
+
+  it("says v2 holds USDT pending until it converts it, and credits what the conversion really got", async () => {
+    const v2 = section(await GET().text(), "## Version 2");
+    expect(v2).toContain("A USDT contribution is not credited when it arrives: it stays pending");
+    expect(v2).toContain("`pendingDollar(address)`");
+    expect(v2).toContain("until the agent converts it");
+    expect(v2).toContain("at what the conversion really got");
+    expect(v2).toContain("`credited` in `Conversion`");
+    // Version 1's rule (credited at once, at the TWAP) is not told for version 2.
+    expect(v2).not.toContain("`creditedWars`");
+  });
+
+  it("lists v2's own functions and reads, and propose's actions with 8 GiveBack", async () => {
+    const v2 = section(await GET().text(), "## Version 2");
+    const lines = v2.split("\n");
+    for (const signature of [
+      "contribute(uint256 amount)",
+      "contributeDollar(uint256 amount)",
+      "convert(address[] members_, uint256[] dollarAmounts, uint256 minCurrencyOut)",
+      "payFee()",
+      "currency()",
+      "dollar()",
+      "pool()",
+      "feeBps()",
+      "feeOwed()",
+      "availableCurrency()",
+      "quoteDollar(uint256 dollarAmount)",
+      "pendingDollar(address)",
+      "totalPendingDollar()",
+      "proposalsInWeek(uint256 week, address)",
+    ]) {
+      expect(lines.filter((line) => line === `- \`${signature}\``), signature).toHaveLength(1);
+    }
+    // What is the same as version 1's is said once, in version 1's lists: this one holds what version 2 adds or changes.
+    expect(lines).not.toContain("- `vote(uint256 id)`");
+    expect(lines).not.toContain("- `contributeWars(uint256 amount)`");
+    expect(v2).toContain("0 Pay, 1 AddMember, 2 RemoveMember, 3 ReplaceMember, 4 SetWeeklyCap, 5 SetVotesRequired, 6 SetAgent, 7 Close, 8 GiveBack.");
+    expect(v2).toContain("an ERC-20 `approve`");
+    expect(v2).toContain("`convert` is the agent's: it swaps several members' dollars in one swap");
+    expect(v2).toContain("`GiveBack` pays a member back part of what they contributed, by vote, and lowers their `contributed` by as much");
+    expect(v2).toContain("at most 10 proposals a week");
+    expect(v2).toContain("560 bytes");
+    expect(v2).toContain("`weeklyCap` can't exceed `balanceCap`");
+  });
+
+  it("says a version 2 fund takes any wFIAT as its currency, and which one the web creates today", async () => {
+    const v2 = section(await GET().text(), "## Version 2");
+    expect(v2).toContain("any wFIAT");
+    expect(v2).toContain("`currency()`");
+    expect(v2).toContain("the web creates them in wARS with USDT");
+  });
+
+  it("keeps version 1's rules as they were, marked as version 1's", async () => {
+    const text = await GET().text();
+    expect(section(text, "### USDT contributions in version 1")).toContain("credited to the member at once");
+    expect(section(text, "## Functions")).toContain("- `contributeWars(uint256 amount)`");
+    expect(section(text, "## Functions")).toContain("- `convert(uint256 usdtAmount, uint256 minWarsOut)`");
   });
 
   it("gives this site's addresses for a fund's public page, its movements, a week's summary and a receipt, and how it picks a language", async () => {

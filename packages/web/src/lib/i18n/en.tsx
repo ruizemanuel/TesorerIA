@@ -124,14 +124,18 @@ export const en: Messages = {
       leaving:
         "If you leave, the group votes you out and you take your share of what's in the fund, in proportion to what you put in. If it closes, it's all split the same way among those still in it.",
     },
-    judges: (celo: ReactNode, contract: ReactNode, agent: ReactNode, code: ReactNode) => (
+    judges: (celo: ReactNode, contracts: ReactNode, agent: ReactNode, code: ReactNode) => (
       <>
-        Runs on {celo}, with {contract}, {agent} and {code}.
+        Runs on {celo}, with {contracts}, {agent} and {code}.
       </>
     ),
     judgesLinks: {
       celo: "Celo mainnet",
-      contract: "the verified FundFactory",
+      contracts: (v1: ReactNode, v2: ReactNode) => (
+        <>
+          the verified FundFactory contracts ({v1} and {v2})
+        </>
+      ),
       agent: "the agent registered in ERC-8004 (#9887)",
       code: "the open-source code",
     },

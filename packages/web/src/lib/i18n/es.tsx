@@ -145,15 +145,20 @@ export const es = {
       leaving:
         "Si te vas, el grupo vota tu salida y te llevás tu parte de lo que hay en el fondo, en proporción a lo que aportaste. Si se cierra, se reparte todo de la misma forma entre los que quedan.",
     },
-    /** For the judges: each argument is a link, the text of which is in `judgesLinks`. */
-    judges: (celo: ReactNode, contract: ReactNode, agent: ReactNode, code: ReactNode) => (
+    /** For the judges: each argument is a link, the text of which is in `judgesLinks` (`contracts` takes one link per version). */
+    judges: (celo: ReactNode, contracts: ReactNode, agent: ReactNode, code: ReactNode) => (
       <>
-        Corre en {celo}, con {contract}, {agent} y {code}.
+        Corre en {celo}, con {contracts}, {agent} y {code}.
       </>
     ),
     judgesLinks: {
       celo: "Celo mainnet",
-      contract: "la FundFactory verificada",
+      /** The two FundFactory contracts, each argument a link to one version's. */
+      contracts: (v1: ReactNode, v2: ReactNode) => (
+        <>
+          las FundFactory verificadas ({v1} y {v2})
+        </>
+      ),
       agent: "el agente registrado en ERC-8004 (#9887)",
       code: "el código abierto",
     },

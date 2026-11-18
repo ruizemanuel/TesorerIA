@@ -1,8 +1,11 @@
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { getAddress } from "viem";
 import { describe, expect, it } from "vitest";
+import { HomeJudges } from "../src/components/home-judges";
 import { type YourFund, fundTag, homeTarget, yourFunds } from "../src/lib/home";
 import { en } from "../src/lib/i18n/en";
-import { es } from "../src/lib/i18n/es";
+import { type Messages, es } from "../src/lib/i18n/es";
 
 const A = getAddress("0x9A74F670F3c59Ae4B8450fdD477b0461b89D2dfD");
 const B = getAddress("0x00000000000000000000000000000000000f00d1");
@@ -114,5 +117,23 @@ describe("the rows of Tus fondos as the panel shows them, in both languages (spe
 
   it("says nothing after a fund's name when it has no tag", () => {
     expect(fundTag({ key: "1", name: "Pádel", href: `/f/${B}`, tag: null }, es)).toBeNull();
+  });
+});
+
+describe("HomeJudges: the portada's line for the judges", () => {
+  const FACTORY = "0xdF3B0d9edCA58Aac7c9Db4F2931f3559daf82020";
+  const FACTORY_V2 = "0x1337a61CF7fDeF412E04894FE705d4341878d4d3";
+
+  it("links the two FundFactory contracts, one to each factory's page on Blockscout, and says they are verified", () => {
+    const line = (m: Messages) => renderToStaticMarkup(createElement(HomeJudges, { m }));
+    const said = (html: string) => html.replace(/<[^>]+>/g, "");
+    expect(said(line(es))).toBe("Corre en Celo mainnet, con las FundFactory verificadas (v1 y v2), el agente registrado en ERC-8004 (#9887) y el código abierto.");
+    expect(said(line(en))).toBe("Runs on Celo mainnet, with the verified FundFactory contracts (v1 and v2), the agent registered in ERC-8004 (#9887) and the open-source code.");
+    for (const html of [line(es), line(en)]) {
+      // Two links to the explorer's address pages, one for each version's factory, in that order.
+      const addresses = [...html.matchAll(/href="(https:\/\/celo\.blockscout\.com\/address\/[^"]+)"/g)].map((match) => match[1]);
+      expect(addresses).toEqual([`https://celo.blockscout.com/address/${FACTORY}`, `https://celo.blockscout.com/address/${FACTORY_V2}`]);
+      expect(html).toContain('href="https://celo.blockscout.com"');
+    }
   });
 });
