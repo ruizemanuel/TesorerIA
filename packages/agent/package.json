@@ -12,6 +12,7 @@
     "test:fork": "vitest run --project fork",
     "typecheck": "tsc --noEmit",
     "deploy:factory": "tsx --env-file-if-exists=.env.local scripts/deploy-factory.ts",
+    "deploy:factory-v2": "tsx --env-file-if-exists=.env.local scripts/deploy-factory-v2.ts",
     "agent:tick": "tsx --env-file-if-exists=.env.local scripts/tick.ts",
     "register:agent": "tsx --env-file-if-exists=.env.local scripts/register-agent.ts",
     "agent-uri:set": "tsx --env-file-if-exists=.env.local scripts/set-agent-uri.ts",
