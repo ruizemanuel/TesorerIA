@@ -65,6 +65,69 @@ describe("checkHistory", () => {
     expect(() => out(event("MemberRemoved", { member: DIEGO, currencyReturned: 0n, dollarReturned: 18n * USDT_UNIT }, BLOCK - 100n))).not.toThrow();
   });
 
+  describe("in version 2", () => {
+    /** Version 2's events: a dollar contribution waits, credited with nothing, until a conversion credits it. */
+    const dollarIn = (member: Address, amount: bigint, block: bigint) => event("Contribution", { member, token: USDT, amount, credited: 0n }, block);
+    /** One member's part of a swap: what it gave before the fee (`currencyOut`), and what it credited them. */
+    const convertedFor = (member: Address, dollars: bigint, credited: bigint, block: bigint) =>
+      event("Conversion", { member, dollarIn: dollars, currencyOut: (credited * 10_000n) / 9_975n, credited }, block);
+    const givenBack = (member: Address, amount: bigint, block: bigint) => event("ContributionGivenBack", { member, amount }, block);
+    /**
+     * Ana put in 30.000 in pesos (29.925 once the fee was set aside). Diego sent 18 USDT, converted into 29.900 credited,
+     * and Beto took his place, with them; then the group gave Beto 4.900 back. Eva joined, sent 3 USDT and was removed
+     * with them. Caro put in 20.000 credited, and her 6 USDT are still pending.
+     */
+    const history = [
+      event("Contribution", { member: ANA, token: WARS_TOKEN, amount: 30_000n * WARS, credited: 29_925n * WARS }, BLOCK - 900n),
+      dollarIn(DIEGO, 18n * USDT_UNIT, BLOCK - 850n),
+      convertedFor(DIEGO, 18n * USDT_UNIT, 29_900n * WARS, BLOCK - 800n),
+      event("MemberReplaced", { oldMember: DIEGO, newMember: BETO }, BLOCK - 750n),
+      givenBack(BETO, 4_900n * WARS, BLOCK - 700n),
+      event("MemberAdded", { member: EVA }, BLOCK - 650n),
+      dollarIn(EVA, 3n * USDT_UNIT, BLOCK - 600n),
+      event("MemberRemoved", { member: EVA, currencyReturned: 0n, dollarReturned: 3n * USDT_UNIT }, BLOCK - 550n),
+      paidIn(CARO, 20_000n * WARS, BLOCK - 500n),
+      dollarIn(CARO, 6n * USDT_UNIT, BLOCK - 400n),
+    ];
+    const v2 = (change: Parameters<typeof snapshot>[0] = {}) =>
+      snapshot({
+        version: 2,
+        feeBps: 25,
+        contributed: [29_925n * WARS, 25_000n * WARS, 20_000n * WARS],
+        totalContributed: 74_925n * WARS,
+        pendingDollar: [0n, 0n, 6n * USDT_UNIT],
+        pendingValue: [0n, 0n, 10_020n * WARS],
+        totalPendingDollar: 6n * USDT_UNIT,
+        dollarBalance: 6n * USDT_UNIT,
+        ...change,
+      });
+
+    it("a v2 history adds up with conversions, give-backs and pending dollars", () => {
+      expect(() => checkHistory(v2(), history)).not.toThrow();
+      // Caro's pending dollars are counted too: one more than the contract says is a hole.
+      expect(() => checkHistory(v2({ pendingDollar: [0n, 0n, 5n * USDT_UNIT] }), history)).toThrow(HistoryGapError);
+    });
+
+    it("a v2 history missing a Conversion has a hole", () => {
+      expect(() => checkHistory(v2(), history.filter((e) => e.eventName !== "Conversion"))).toThrow(HistoryGapError);
+    });
+
+    it("a dollar sent straight to a v2 fund is no hole", () => {
+      // 5 USDT that came in without contributeDollar: they're nobody's, and only add to what the fund holds.
+      expect(() => checkHistory(v2({ dollarBalance: 11n * USDT_UNIT }), history)).not.toThrow();
+      // Holding less than what members have pending can't be.
+      expect(() => checkHistory(v2({ dollarBalance: 5n * USDT_UNIT }), history)).toThrow(HistoryGapError);
+    });
+
+    it("a closed v2 fund that returned pending dollars adds up", () => {
+      // The close gave Caro her 6 USDT back with no event of hers: FundClosed is what says so.
+      const closed = event("FundClosed", { currencyBalance: 70_025n * WARS, dollarBalance: 6n * USDT_UNIT }, BLOCK - 100n);
+      const after = v2({ closed: true, pendingDollar: [0n, 0n, 0n], pendingValue: [0n, 0n, 0n], totalPendingDollar: 0n, dollarBalance: 0n });
+      expect(() => checkHistory(after, [...history, closed])).not.toThrow();
+      expect(() => checkHistory(after, history)).toThrow(HistoryGapError);
+    });
+  });
+
   it("stops on a history that misses a proposal", () => {
     const proposal = event(
       "ProposalCreated",

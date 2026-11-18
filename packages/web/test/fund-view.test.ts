@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { buildFundView } from "../src/lib/fund-view";
 import { en } from "../src/lib/i18n/en";
 import { es } from "../src/lib/i18n/es";
-import { ANA, BETO, CARO, WARS, snapshot } from "./support/fixtures";
+import { ANA, BETO, CARO, USDT_UNIT, WARS, snapshot } from "./support/fixtures";
 
 const NAMES = new Map<Address, string>([
   [ANA, "Ana"],
@@ -134,6 +134,30 @@ describe("buildFundView", () => {
       }).me;
     expect(paid((2_407n * WARS) / 100n)).toMatchObject({ owed: 0n, ahead: 0n }); // 0,24 %, the worst measured
     expect(paid(100n * WARS)).toMatchObject({ owed: 70n * WARS, ahead: 0n });
+  });
+
+  it("a v2 member's share counts their own pending dollars", () => {
+    // Caro's 6 USDT are still pending, worth 10.000 at the TWAP: the close gives them back to her whole, and splits the
+    // rest of the balance (90.000) by what each contributed, or in equal parts if no one did.
+    const share = (viewer: Address, contributed: bigint[]) =>
+      view(
+        {
+          version: 2,
+          feeBps: 25,
+          contributed,
+          totalContributed: contributed.reduce((a, b) => a + b, 0n),
+          pendingDollar: [0n, 0n, 6n * USDT_UNIT],
+          pendingValue: [0n, 0n, 10_000n * WARS],
+          totalPendingDollar: 6n * USDT_UNIT,
+          dollarBalance: 6n * USDT_UNIT,
+        },
+        viewer,
+      ).me?.share;
+    expect(share(ANA, [30_000n * WARS, 30_000n * WARS, 0n])).toBe(45_000n * WARS);
+    expect(share(CARO, [30_000n * WARS, 30_000n * WARS, 0n])).toBe(10_000n * WARS);
+    expect(share(CARO, [30_000n * WARS, 30_000n * WARS, 20_000n * WARS])).toBe((90_000n * WARS * 20_000n) / 80_000n + 10_000n * WARS);
+    expect(share(ANA, [0n, 0n, 0n])).toBe(30_000n * WARS);
+    expect(share(CARO, [0n, 0n, 0n])).toBe(40_000n * WARS);
   });
 
   it("says what's left of the week's cap, never below zero", () => {

@@ -38,6 +38,7 @@ export {
   type WeekSummaryFacts,
   closeShares,
   conversionLoss,
+  dollarContributions,
   givenBack,
   joinWeeks,
   memberDues,

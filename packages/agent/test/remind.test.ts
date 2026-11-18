@@ -2,7 +2,7 @@ import { type Address, type Hash, getAddress, pad, toHex } from "viem";
 import { describe, expect, it } from "vitest";
 import { USDT, WARS } from "../src/chain";
 import type { FundEvent } from "../src/events";
-import { closeShares, conversionLoss, givenBack, joinWeeks, memberDues, weekSummary } from "../src/remind";
+import { closeShares, conversionLoss, dollarContributions, givenBack, joinWeeks, memberDues, weekSummary } from "../src/remind";
 import {
   BLOCK,
   MEMBERS,
@@ -11,6 +11,8 @@ import {
   WARS_UNIT,
   converted,
   fundSnapshot,
+  fundSnapshotV2,
+  fundSnapshotWithPending,
   memberAdded,
   memberReplaced,
   reimbursed,
@@ -19,6 +21,22 @@ import {
 
 const [ANA, BETO, CARLA] = MEMBERS as [Address, Address, Address];
 const FEE = 10_000n * WARS_UNIT;
+
+/** A version 2 fund's events, at `block` in transaction `tx`: what FundV2 emits. */
+const v2At = (block: bigint, tx: number, logIndex = 0) => ({ blockNumber: block, transactionHash: pad(toHex(tx), { size: 32 }) as Hash, logIndex });
+/** contributeDollar: the dollars wait under the member's name, credited with nothing until they're converted. */
+const dollarIn = (member: Address, amount: bigint, block: bigint, tx: number): FundEvent => ({
+  eventName: "Contribution",
+  args: { member, token: USDT, amount, credited: 0n },
+  ...v2At(block, tx),
+});
+/** convert: one member's part of a swap, and what it credited them once the fee was set aside. */
+const convertedFor = (member: Address, dollarAmount: bigint, currencyOut: bigint, credited: bigint, block: bigint, tx: number, logIndex = 0): FundEvent => ({
+  eventName: "Conversion",
+  args: { member, dollarIn: dollarAmount, currencyOut, credited },
+  ...v2At(block, tx, logIndex),
+});
+const positionOf = (event: FundEvent) => `${event.transactionHash}:${event.logIndex}`;
 
 describe("joinWeeks", () => {
   it("dates an added member by its event, and a replacement by its predecessor", () => {
@@ -98,6 +116,92 @@ describe("memberDues, with what was given back (spec, 7.3)", () => {
     expect(dues(20_000n * WARS_UNIT)[2]).toMatchObject({ contributed: 20_000n * WARS_UNIT, owed: 10_000n * WARS_UNIT });
     expect(dues(50_000n * WARS_UNIT)[2]).toMatchObject({ contributed: 0n, owed: 30_000n * WARS_UNIT }); // never below zero
     expect(dues(10_000n * WARS_UNIT).slice(0, 2).map((d) => d.contributed)).toEqual([30_000n * WARS_UNIT, 30_000n * WARS_UNIT]);
+  });
+});
+
+describe("memberDues in version 2", () => {
+  const W = WARS_UNIT;
+
+  it("counts a v2 member's pending dollars at their TWAP value, net of the fee", () => {
+    // Week 0: Ana sent her fee in USDT a minute ago and the agent hasn't converted it. At the TWAP it's worth 10.030, and
+    // converting it will set 0,25 % of that aside: 10.004,925 put in, so she owes nothing.
+    const fund = fundSnapshotWithPending([6_030_000n, 0n, 0n], {
+      week: 0n,
+      contributed: [0n, 10_000n * W, 10_000n * W],
+      totalContributed: 20_000n * W,
+      pendingValue: [10_030n * W, 0n, 0n],
+    });
+    expect(memberDues({ fund, weeklyFee: FEE, joined: new Map() })[0]).toEqual({ member: ANA, due: FEE, contributed: 10_004_925n * (W / 1_000n), owed: 0n });
+    // A fee of 1 % would leave 9.929,70 put in: 70,30 owed, over the 0,5 % that goes with the next week's.
+    expect(memberDues({ fund: { ...fund, feeBps: 100 }, weeklyFee: FEE, joined: new Map() })[0]?.owed).toBe(70_300n * (W / 1_000n));
+  });
+
+  it("ignores givenBack and conversionLoss in v2", () => {
+    // The contract already lowers what a member contributed when it gives some back, and credits what a conversion got.
+    const fund = fundSnapshotV2({ contributed: [30_000n * W, 30_000n * W, 20_000n * W], totalContributed: 80_000n * W });
+    const dues = memberDues({
+      fund,
+      weeklyFee: FEE,
+      joined: new Map(),
+      givenBack: new Map([[CARLA, 10_000n * W]]),
+      conversionLoss: new Map([[ANA, 60n * W]]),
+    });
+    expect(dues.map((d) => [d.contributed, d.owed])).toEqual([
+      [30_000n * W, 0n],
+      [30_000n * W, 0n],
+      [20_000n * W, 10_000n * W],
+    ]);
+  });
+});
+
+describe("dollarContributions: what each dollar contribution of a version 2 fund counts", () => {
+  const W = WARS_UNIT;
+  const U = USDT_UNIT;
+
+  it("takes a member's dollars first in, first out, and values what's still pending by its part of the TWAP value, net of the fee", () => {
+    const first = dollarIn(ANA, 3n * U, BLOCK - 100n, 30);
+    const second = dollarIn(ANA, 3n * U, BLOCK - 90n, 31);
+    const beto = dollarIn(BETO, 6n * U, BLOCK - 80n, 32);
+    const carla = dollarIn(CARLA, 6n * U, BLOCK - 75n, 33);
+    const events = [
+      first,
+      second,
+      beto,
+      carla,
+      // 2 of Ana's USDT gave 3.330, credited at 3.321,675: all from her first 3.
+      convertedFor(ANA, 2n * U, 3_330n * W, 3_321_675n * (W / 1_000n), BLOCK - 70n, 34),
+      memberReplaced(BETO, OUTSIDER, BLOCK - 60n, 35),
+    ];
+    // Ana's 4 USDT left are worth 6.680 at the TWAP, and the 6 Beto left to his new account 10.020. The contract says
+    // Carla has nothing pending (a history read short of a conversion): hers is worth nothing, and nothing is divided by 0.
+    const fund = fundSnapshotV2({
+      members: [ANA, OUTSIDER, CARLA],
+      pendingDollar: [4n * U, 6n * U, 0n],
+      pendingValue: [6_680n * W, 10_020n * W, 0n],
+      totalPendingDollar: 10n * U,
+      dollarBalance: 10n * U,
+    });
+    const counted = dollarContributions(events, fund);
+    // 3.321,675 converted, and a quarter of 6.680 less 0,25 %: 1.665,825.
+    expect(counted.get(positionOf(first))).toBe(4_987_500n * (W / 1_000n));
+    expect(counted.get(positionOf(second))).toBe(4_997_475n * (W / 1_000n));
+    expect(counted.get(positionOf(beto))).toBe(9_994_950n * (W / 1_000n));
+    expect(counted.get(positionOf(carla))).toBe(0n);
+    expect(counted.size).toBe(4);
+  });
+
+  it("splits a conversion's credit among the contributions it took, adding up to exactly what it credited", () => {
+    const contributions = [dollarIn(ANA, 1n * U, BLOCK - 100n, 30), dollarIn(ANA, 1n * U, BLOCK - 90n, 31), dollarIn(ANA, 1n * U, BLOCK - 80n, 32)];
+    // A credit 3 doesn't divide: the thirds, rounded down, would leave a wei out.
+    const counted = dollarContributions([...contributions, convertedFor(ANA, 3n * U, 4_995n * W, 4_982_512_500_000_000_000_001n, BLOCK - 70n, 33)], fundSnapshotV2());
+    expect([...counted.values()].reduce((sum, value) => sum + value, 0n)).toBe(4_982_512_500_000_000_000_001n);
+  });
+
+  it("counts nothing for the dollars the close gave back, and nothing at all in version 1", () => {
+    const pending = dollarIn(ANA, 6n * U, BLOCK - 100n, 30);
+    const closed: FundEvent = { eventName: "FundClosed", args: { currencyBalance: 90_000n * W, dollarBalance: 6n * U }, ...v2At(BLOCK - 50n, 31) };
+    expect(dollarContributions([pending, closed], fundSnapshotV2({ closed: true }))).toEqual(new Map([[positionOf(pending), 0n]]));
+    expect(dollarContributions([pending], fundSnapshot({ pendingDollar: [6n * U, 0n, 0n], pendingValue: [10_020n * W, 0n, 0n] }))).toEqual(new Map());
   });
 });
 
@@ -272,9 +376,9 @@ describe("weekSummary: the photo of a week that closed (spec, 9.4)", () => {
     args: { member, token: OUTSIDER, amount: credited, credited: credited },
     ...at(block, tx),
   });
-  const proposal = (id: bigint, a: Address, amount: bigint, note: string, block: bigint, tx: number): FundEvent => ({
+  const proposal = (id: bigint, a: Address, amount: bigint, note: string, block: bigint, tx: number, action = 0): FundEvent => ({
     eventName: "ProposalCreated",
-    args: { id, action: 0, a, b: OUTSIDER, amount, proposer: ANA, note },
+    args: { id, action, a, b: OUTSIDER, amount, proposer: ANA, note },
     ...at(block, tx),
   });
   const payment = (member: Address, amount: bigint, block: bigint, tx: number, logIndex: number): FundEvent => ({
@@ -381,5 +485,80 @@ describe("weekSummary: the photo of a week that closed (spec, 9.4)", () => {
   it("owes nothing to whoever paid ahead", () => {
     const facts = summary(fundSnapshot({ contributed: [50_000n * WARS_UNIT, 30_000n * WARS_UNIT, 30_000n * WARS_UNIT] }));
     expect(facts.dues.map((d) => d.owed)).toEqual([0n, 0n, 0n]);
+  });
+
+  describe("in version 2", () => {
+    const W = WARS_UNIT;
+    const U = USDT_UNIT;
+    /** Units of a thousandth of a wARS, for the fee's decimals. */
+    const mW = W / 1_000n;
+
+    it("counts a converted dollar contribution by what its conversion credited, in the week it arrived", () => {
+      const facts = summary(fundSnapshotV2(), [
+        dollarIn(ANA, 6n * U, FIRST + 10n, 40),
+        dollarIn(BETO, 4n * U, FIRST + 20n, 41),
+        // Carla put in 10.000 in pesos: 9.975 credited once the fee was set aside.
+        { eventName: "Contribution", args: { member: CARLA, token: WARS, amount: 10_000n * W, credited: 9_975n * W }, ...at(FIRST + 25n, 42) },
+        // One swap for Ana's and Beto's, each credited their part less the fee.
+        convertedFor(ANA, 6n * U, 9_990n * W, 9_965_025n * mW, FIRST + 30n, 43, 0),
+        convertedFor(BETO, 4n * U, 6_660n * W, 6_643_350n * mW, FIRST + 30n, 43, 1),
+      ]);
+      expect(facts.contributed).toBe(9_965_025n * mW + 6_643_350n * mW + 9_975n * W);
+    });
+
+    it("counts one still pending at the close at its TWAP value, net of the fee", () => {
+      // Beto's 6 USDT are worth 10.020 at the TWAP as the week closes: 9.994,95 once converting them sets the fee aside.
+      const fund = fundSnapshotWithPending([0n, 6n * U, 0n], { pendingValue: [0n, 10_020n * W, 0n] });
+      expect(summary(fund, [dollarIn(BETO, 6n * U, FIRST + 10n, 40)]).contributed).toBe(9_994_950n * mW);
+    });
+
+    it("doesn't count again last week's dollars converted this week", () => {
+      // Ana's 6 USDT of last week and 4 of this one, converted together this week into 16.608,375 credited: last week's
+      // get 6/10 of it (counted in last week's summary, while they were pending), this week's the 6.643,35 left.
+      const facts = summary(fundSnapshotV2(), [
+        dollarIn(ANA, 6n * U, FIRST - 100n, 30),
+        dollarIn(ANA, 4n * U, FIRST + 10n, 40),
+        convertedFor(ANA, 10n * U, 16_650n * W, 16_608_375n * mW, FIRST + 30n, 41),
+      ]);
+      expect(facts.contributed).toBe(6_643_350n * mW);
+    });
+
+    it("counts nothing for the pending dollars of a member who left", () => {
+      // Carla's 6 USDT went back to her with her removal. Added back, she has 4 USDT pending worth 6.680: only those count,
+      // never the first ones on top, at her new pending value.
+      const fund = fundSnapshotWithPending([0n, 0n, 4n * U], {
+        contributed: [30_000n * W, 30_000n * W, 0n],
+        totalContributed: 60_000n * W,
+        pendingValue: [0n, 0n, 6_680n * W],
+      });
+      const facts = summary(fund, [
+        dollarIn(CARLA, 6n * U, FIRST + 10n, 40),
+        { eventName: "MemberRemoved", args: { member: CARLA, currencyReturned: 0n, dollarReturned: 6n * U }, ...at(FIRST + 20n, 41) },
+        memberAdded(CARLA, FIRST + 30n, 42),
+        dollarIn(CARLA, 4n * U, FIRST + 40n, 43),
+      ]);
+      expect(facts.contributed).toBe(6_663_300n * mW);
+      expect(facts.joined).toEqual([CARLA]);
+    });
+
+    it("lists a v2 contribution given back among the week's payments", () => {
+      // One batch: proposal 3 pays the pitch to Beto, and proposal 4 (a GiveBack) gives Carla back 10.000, which the
+      // contract took off what she contributed: 20.000 of the 30.000 due, so she owes 10.000, not 20.000.
+      const fund = fundSnapshotV2({ contributed: [30_000n * W, 30_000n * W, 20_000n * W], totalContributed: 80_000n * W });
+      const events: FundEvent[] = [
+        proposal(3n, BETO, 8_000n * W, "las pelotas", FIRST + 5n, 12),
+        proposal(4n, CARLA, 10_000n * W, "deposité en otro fondo", FIRST + 6n, 13, 8),
+        payment(BETO, 8_000n * W, FIRST + 40n, 16, 0),
+        executed(3n, FIRST + 40n, 16, 1),
+        { eventName: "ContributionGivenBack", args: { member: CARLA, amount: 10_000n * W }, ...at(FIRST + 40n, 16, 2) },
+        executed(4n, FIRST + 40n, 16, 3),
+      ];
+      const facts = weekSummary({ fund, balance: 0n, weeklyFee: FEE, events, first: FIRST, weekOf, giveBacks: new Set([4n]) });
+      expect(facts.payments).toEqual([
+        { member: BETO, amount: 8_000n * W, note: "las pelotas", givenBack: false },
+        { member: CARLA, amount: 10_000n * W, note: "deposité en otro fondo", givenBack: true },
+      ]);
+      expect(facts.dues.map((d) => d.owed)).toEqual([0n, 0n, 10_000n * W]);
+    });
   });
 });

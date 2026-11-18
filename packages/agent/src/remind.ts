@@ -21,8 +21,9 @@ export function joinWeeks(events: readonly FundEvent[], weekOf: (event: FundEven
 }
 
 /**
- * What a member should have put in by the end of this week, what they did (less what was given back to them and what
- * converting their USDT lost), and what they owe. All in wARS.
+ * What a member should have put in by the end of this week, what they did, and what they owe, in the fund's currency. What
+ * they did is, in version 1, what they contributed less what was given back to them and what converting their USDT lost;
+ * in version 2, what they contributed and their pending dollars net of the fee (memberDues).
  */
 export type MemberDues = { member: Address; due: bigint; contributed: bigint; owed: bigint };
 
@@ -34,11 +35,22 @@ export type MemberDues = { member: Address; due: bigint; contributed: bigint; ow
  */
 export const OWED_SAID_FROM_BPS = 50n;
 
+const BPS = 10_000n;
+
+/** What converting `value` of the currency credits a member: `value` less the fee FundV2._creditShares sets aside from it. */
+function lessFee(fund: FundSnapshot, value: bigint): bigint {
+  return value - (value * BigInt(fund.feeBps)) / BPS;
+}
+
 /**
  * Each member's dues at `weeklyFee` per week, from the week they joined through the current one (spec, 8.1:
- * reminders). `weeklyFee` is the fund's fee, which lives off chain. What a member was given back of their
- * contributions (`givenBack`) and what converting their USDT lost (`conversionLoss`, negative when it gained), both by
- * checksummed account, don't count as put in. Under OWED_SAID_FROM_BPS of the fee owed is nothing.
+ * reminders). `weeklyFee` is the fund's fee, which lives off chain. Under OWED_SAID_FROM_BPS of the fee owed is nothing.
+ *
+ * In version 1, what a member was given back of their contributions (`givenBack`) and what converting their USDT lost
+ * (`conversionLoss`, negative when it gained), both by checksummed account, don't count as put in. Version 2 ignores
+ * both: its contract takes a give-back off what the member contributed, and a conversion credits what it got. What its
+ * members put in is what they contributed plus their pending dollars at their TWAP value, less the fee converting them
+ * will set aside: whoever sent USDT a minute ago doesn't owe, even with the agent stopped.
  */
 export function memberDues({
   fund,
@@ -57,7 +69,10 @@ export function memberDues({
     const weeks = fund.week - (joined.get(getAddress(member)) ?? 0n) + 1n;
     const due = weeks > 0n ? weeklyFee * weeks : 0n;
     const gross = fund.contributed[i] ?? 0n;
-    const net = gross - (givenBack.get(getAddress(member)) ?? 0n) - (conversionLoss.get(getAddress(member)) ?? 0n);
+    const net =
+      fund.version === 2
+        ? gross + lessFee(fund, fund.pendingValue[i] ?? 0n)
+        : gross - (givenBack.get(getAddress(member)) ?? 0n) - (conversionLoss.get(getAddress(member)) ?? 0n);
     const contributed = net > 0n ? net : 0n;
     const short = due > contributed ? due - contributed : 0n;
     return { member, due, contributed, owed: short * 10_000n < weeklyFee * OWED_SAID_FROM_BPS ? 0n : short };
@@ -65,8 +80,8 @@ export function memberDues({
 }
 
 /**
- * The proposal a Payment in `events` paid: the ProposalExecuted that follows it in the same transaction (Fund.execute
- * emits it last), so each payment of a batch goes with its own.
+ * The proposal a Payment (or a version 2 ContributionGivenBack) in `events` paid: the ProposalExecuted that follows it in
+ * the same transaction (`execute` emits it last), so each payment of a batch goes with its own.
  */
 export function paidProposal(events: readonly FundEvent[], payment: FundEvent): bigint | undefined {
   const execution = events.find(
@@ -98,6 +113,11 @@ export function givenBack(events: readonly FundEvent[], giveBacks: ReadonlySet<b
     }
   }
   return back;
+}
+
+/** Where an event is in the chain, `${transactionHash}:${logIndex}`: what tells one event from every other. */
+function positionOf(event: FundEvent): string {
+  return `${event.transactionHash}:${event.logIndex}`;
 }
 
 /** A conversion's USDT against what it had been credited, in wARS: positive if it brought less, and whose it was. */
@@ -191,7 +211,7 @@ export function conversionLoss(events: readonly FundEvent[]): ConversionLoss {
           difference += credited - worth;
           if (!members.includes(head.member)) members.push(head.member);
         }
-        if (members.length > 0) byConversion.set(`${event.transactionHash}:${event.logIndex}`, { difference, members });
+        if (members.length > 0) byConversion.set(positionOf(event), { difference, members });
         break;
       }
     }
@@ -199,13 +219,91 @@ export function conversionLoss(events: readonly FundEvent[]): ConversionLoss {
   return { byMember, byConversion };
 }
 
+/**
+ * What each dollar contribution of a version 2 fund counts, in its currency, by the Contribution's position
+ * (`${transactionHash}:${logIndex}`): the weeks' summaries count it in the week it arrived (weekSummary). `events` go from
+ * the fund's creation up to `fund`'s block.
+ *
+ * FundV2 keeps each member's dollars pending under their name until a conversion credits them, so every member has their
+ * own queue of dollar contributions, oldest first, and the count is exact:
+ * - a Conversion takes its `dollarIn` from its member's queue and gives each contribution it took its part of `credited`,
+ *   in proportion (the last one gets what rounding leaves, so the parts add up to `credited`);
+ * - a replacement moves the queue to the new account, as the contract moves the pending dollars;
+ * - a removal empties the queue, and so does the close for everyone (`_split` gives the pending dollars back with no
+ *   event per member): what they gave back counts nothing;
+ * - what is still pending at `fund`'s block counts its part of the member's `pendingValue`, less the fee converting it
+ *   will set aside; nothing if the contract says the member has nothing pending.
+ * Version 1 credits a dollar contribution as it arrives, so it has none to count here.
+ */
+export function dollarContributions(events: readonly FundEvent[], fund: FundSnapshot): Map<string, bigint> {
+  const counted = new Map<string, bigint>();
+  const dollar = fund.dollar;
+  if (fund.version !== 2 || dollar === null) return counted;
+  const queues = new Map<Address, { position: string; left: bigint }[]>();
+  const add = (position: string, amount: bigint) => counted.set(position, (counted.get(position) ?? 0n) + amount);
+  for (const event of events) {
+    switch (event.eventName) {
+      case "Contribution": {
+        if (!isAddressEqual(event.args.token, dollar)) break;
+        const member = getAddress(event.args.member);
+        const position = positionOf(event);
+        const queue = queues.get(member) ?? [];
+        queue.push({ position, left: event.args.amount });
+        queues.set(member, queue);
+        counted.set(position, 0n);
+        break;
+      }
+      case "Conversion": {
+        // Only FundV2's names its member.
+        if (!("member" in event.args)) break;
+        const { dollarIn, credited } = event.args;
+        const queue = queues.get(getAddress(event.args.member)) ?? [];
+        let left = dollarIn;
+        let given = 0n;
+        while (left > 0n && queue.length > 0) {
+          const head = queue[0]!;
+          const take = head.left < left ? head.left : left;
+          head.left -= take;
+          left -= take;
+          const part = left === 0n ? credited - given : (credited * take) / dollarIn;
+          given += part;
+          add(head.position, part);
+          if (head.left === 0n) queue.shift();
+        }
+        break;
+      }
+      case "MemberReplaced": {
+        const old = getAddress(event.args.oldMember);
+        const queue = queues.get(old);
+        queues.delete(old);
+        if (queue !== undefined) queues.set(getAddress(event.args.newMember), queue);
+        break;
+      }
+      case "MemberRemoved":
+        queues.delete(getAddress(event.args.member));
+        break;
+      case "FundClosed":
+        queues.clear();
+        break;
+    }
+  }
+  for (const [i, member] of fund.members.entries()) {
+    const pending = fund.pendingDollar[i] ?? 0n;
+    if (pending === 0n) continue;
+    const value = fund.pendingValue[i] ?? 0n;
+    for (const { position, left } of queues.get(getAddress(member)) ?? []) add(position, lessFee(fund, (value * left) / pending));
+  }
+  return counted;
+}
+
 /** A member's part if the fund closed now. */
 export type CloseShare = { member: Address; contributed: bigint; currency: bigint; dollar: bigint };
 
 /**
- * What each member would get if the fund closed now, split like `Fund._split` does: in proportion to what
+ * What each member would get if a version 1 fund closed now, split like `Fund._split` does: in proportion to what
  * each contributed, or equally if no one did. `spread` is the gap between the largest and smallest
- * contribution, which the agent points out when someone proposes to close (spec, 7.3).
+ * contribution, which the agent points out when someone proposes to close (spec, 7.3). This is version 1's rule:
+ * FundV2 gives each member their own pending dollars back first, and splits only the rest.
  */
 export function closeShares(fund: FundSnapshot): { shares: CloseShare[]; spread: bigint } {
   const n = BigInt(fund.members.length);
@@ -237,11 +335,14 @@ export type WeekSummaryFacts = {
   /** Seconds: startTime + week × WEEK, and the start of the next week. */
   startsAt: bigint;
   endsAt: bigint;
-  /** balanceInWars at `block`, the same count as the inicio. */
+  /** The fund's whole balance at `block`, the same count as the inicio: balanceInWars in version 1, balanceInCurrency in 2. */
   balance: bigint;
   /** Every member at `block`, in the contract's order, with what they owed when the week closed (memberDues). */
   dues: { member: Address; owed: bigint }[];
-  /** The week's Contribution.credited, added up. */
+  /**
+   * What the week's contributions put in, added up: each one's Contribution.credited, and in version 2 what each dollar
+   * contribution counts on top (dollarContributions).
+   */
   contributed: bigint;
   reimbursements: { member: Address; amount: bigint }[];
   /** Each payment the group approved, with its proposal's note, and whether it gave a contribution back (spec, 7.3). */
@@ -253,9 +354,11 @@ export type WeekSummaryFacts = {
 /**
  * The photo of the week `fund` was read in, at its last block (spec, 9.4). `events` go from the fund's creation up to
  * that block: the dues need every MemberAdded (joinWeeks, with the screen's `weekOf`), and a payment's note is in its
- * proposal, which may be older than the week. Only the events from `first` on are the week's. Conversions only count
- * in the dues, through what they got under or over what their USDT was credited (conversionLoss): the summary doesn't
- * list them. `giveBacks` are the proposals (by id) that gave a contribution back.
+ * proposal, which may be older than the week. Only the events from `first` on are the week's. The summary doesn't list
+ * conversions. In version 1 they only count in the dues, through what they got under or over what their USDT was
+ * credited (conversionLoss), and `giveBacks` are the proposals (by id) whose payment gave a contribution back. In
+ * version 2 a dollar contribution counts in the week it arrived, at what its conversion credited or, still pending, at
+ * its TWAP value net of the fee (dollarContributions); and a contribution given back is one of the week's payments.
  */
 export function weekSummary({
   fund,
@@ -278,8 +381,8 @@ export function weekSummary({
     fund,
     weeklyFee,
     joined: joinWeeks(events, weekOf),
-    givenBack: givenBack(events, giveBacks),
-    conversionLoss: conversionLoss(events).byMember,
+    // Version 2 needs neither: its contract already counts both in what each member contributed.
+    ...(fund.version === 1 ? { givenBack: givenBack(events, giveBacks), conversionLoss: conversionLoss(events).byMember } : {}),
   }).map(({ member, owed }) => ({
     member,
     owed,
@@ -287,6 +390,9 @@ export function weekSummary({
   const notes = new Map<bigint, string>();
   for (const event of events) if (event.eventName === "ProposalCreated") notes.set(event.args.id, event.args.note);
   const week = events.filter((event) => event.blockNumber >= first && event.blockNumber <= fund.block);
+  const noteOf = (id: bigint | undefined) => (id === undefined ? "" : (notes.get(id) ?? ""));
+  // Empty in version 1, whose dollar contributions are credited as they arrive.
+  const dollars = dollarContributions(events, fund);
   let contributed = 0n;
   const reimbursements: WeekSummaryFacts["reimbursements"] = [];
   const payments: WeekSummaryFacts["payments"] = [];
@@ -294,7 +400,7 @@ export function weekSummary({
   for (const event of week) {
     switch (event.eventName) {
       case "Contribution":
-        contributed += event.args.credited;
+        contributed += event.args.credited + (dollars.get(positionOf(event)) ?? 0n);
         break;
       case "Reimbursement":
         reimbursements.push({ member: getAddress(event.args.member), amount: event.args.amount });
@@ -304,11 +410,14 @@ export function weekSummary({
         payments.push({
           member: getAddress(event.args.member),
           amount: event.args.amount,
-          note: id === undefined ? "" : (notes.get(id) ?? ""),
+          note: noteOf(id),
           givenBack: id !== undefined && giveBacks.has(id),
         });
         break;
       }
+      case "ContributionGivenBack":
+        payments.push({ member: getAddress(event.args.member), amount: event.args.amount, note: noteOf(paidProposal(week, event)), givenBack: true });
+        break;
       case "MemberAdded":
         joined.push(getAddress(event.args.member));
         break;

@@ -30,6 +30,8 @@ vi.mock("../src/lib/chain", () => ({
     getBlock: async () => ({ timestamp: CLOCK.timestamp }),
     readContract: async ({ functionName }: { functionName: string }) => {
       if (functionName === "balanceInWars") return 87_500n * 10n ** 18n;
+      // FundV2's whole balance: a version 2 fund has no balanceInWars.
+      if (functionName === "balanceInCurrency") return 92_500n * 10n ** 18n;
       // A proposal the chain still has open, with one vote and nobody else's.
       if (functionName === "getProposal") return { executed: false, deadline: CLOCK.timestamp + 86_400n };
       if (functionName === "voteCount") return 1n;
@@ -508,6 +510,53 @@ it("explains the USDT waiting only with the agent's conversion decisions on this
   // A reimbursement the agent couldn't send: blocked too, but about the expense, not the USDT.
   await db.insert(decisions).values({ fund: address, expenseId, kind: "blocked", reason: "The agent holds 0 USDT for gas" });
   expect(await holds()).toEqual([]);
+});
+
+describe("loadFundScreen: a version 2 fund", () => {
+  /** A live version 2 fund of Ana, Beto and Caro, wARS with USDT, as the chain reads it with `change`. */
+  async function liveFundV2(change: Partial<FundSnapshot> = {}) {
+    const address = randomAccount();
+    await addLiveFund(db, { creatorId: ana.id, address, members: [ana.id, beto.id, caro.id], version: 2 });
+    chainFund({ address, members: [ana, beto, caro].map((person) => getAddress(person.account)), version: 2, feeBps: 25, ...change });
+    return address;
+  }
+  const caroAccount = () => getAddress(caro.account);
+  const holds = async (address: Address) =>
+    texts((await loadFundScreen(address, asViewer(ana)))!).filter((text) => text.startsWith("Todavía no pasé a pesos"));
+  const decide = (address: Address, kind: string, code: string | null, minutesAgo: number, action: Record<string, string> | null = null) =>
+    db.insert(decisions).values({ fund: address, kind, code, reason: "for the log", action, createdAt: new Date(Date.now() - minutesAgo * 60_000) });
+  /** Caro sent 6 USDT that wait, pending under her name, and 20 more reached the fund without contributeDollar. */
+  const caroPending = () => ({
+    pendingDollar: [0n, 0n, 6n * USDT_UNIT],
+    pendingValue: [0n, 0n, 10_020n * WARS],
+    totalPendingDollar: 6n * USDT_UNIT,
+    dollarBalance: 26n * USDT_UNIT,
+  });
+
+  it("reads its balance with balanceInCurrency", async () => {
+    const address = await liveFundV2();
+    expect((await loadFundScreen(address, asViewer(ana)))!.view.balance).toBe(92_500n * WARS);
+  });
+
+  it("a v2 fund's hold counts its pending dollars, not what was sent to it directly", async () => {
+    // 20 USDT sent straight to the fund are nobody's: the agent never converts them, so there's nothing to explain.
+    const address = await liveFundV2({ dollarBalance: 20n * USDT_UNIT });
+    await decide(address, "skip", "price-reference", 1);
+    expect(await holds(address)).toEqual([]);
+
+    setHistory([event("Contribution", { member: caroAccount(), token: USDT, amount: 6n * USDT_UNIT, credited: 0n }, BLOCK - 100n)]);
+    chainFund({ address, members: [ana, beto, caro].map((person) => getAddress(person.account)), version: 2, feeBps: 25, ...caroPending() });
+    expect(await holds(address)).toEqual([expect.stringContaining(`Todavía no pasé a pesos ${formatUsdt(6n * USDT_UNIT, "es")}: el precio de referencia`)]);
+  });
+
+  it("takes no failed fee payment for a reason the dollars wait", async () => {
+    // The heartbeat sends the week's fee before converting: a fee it couldn't send says nothing about the dollars.
+    setHistory([event("Contribution", { member: caroAccount(), token: USDT, amount: 6n * USDT_UNIT, credited: 0n }, BLOCK - 100n)]);
+    const address = await liveFundV2(caroPending());
+    await decide(address, "skip", "price-reference", 2);
+    await decide(address, "blocked", null, 1, { kind: "pay-fee" });
+    expect(await holds(address)).toEqual([expect.stringContaining("el precio de referencia del dólar no está al día")]);
+  });
 });
 
 describe("loadFundScreen: the week summaries (spec, 9.4)", () => {

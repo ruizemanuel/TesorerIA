@@ -1,4 +1,15 @@
-import { FUND_FACTORY_BLOCK, type FundEvent, type FundSnapshot, MIN_CONVERSION_USDT, conversionLoss, givenBack, joinWeeks, readFund, readFundEvents } from "@tesoreria/agent";
+import {
+  type ConversionLoss,
+  FUND_FACTORY_BLOCK,
+  type FundEvent,
+  type FundSnapshot,
+  MIN_CONVERSION_USDT,
+  conversionLoss,
+  givenBack,
+  joinWeeks,
+  readFund,
+  readFundEvents,
+} from "@tesoreria/agent";
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { type Address, getAddress, zeroAddress } from "viem";
 import { celoClient, logReader, nodeLogReader } from "./chain";
@@ -8,6 +19,7 @@ import { type Db, getDb } from "./db/client";
 import { decisions, expenses, funds, memberships, users, weekSummaries } from "./db/schema";
 import { env } from "./env";
 import { MAX_MEMBERS, memberFundAbi } from "./fund-abi";
+import { readBalance } from "./fund-balance";
 import { type FundView, buildFundView } from "./fund-view";
 import { giveBackTransactions, proposalsIn } from "./give-backs";
 import { completeHistory } from "./history";
@@ -92,14 +104,13 @@ export async function loadFundScreen(
   // A history that doesn't add up to the snapshot gets its hole filled from the node, or nothing is shown from it.
   const fromBlock = fund.createdBlock ?? FUND_FACTORY_BLOCK;
   const node = nodeLogReader();
-  const [balance, block, events] = await Promise.all([
-    client.readContract({ address: snapshot.address, abi: memberFundAbi, functionName: "balanceInWars", blockNumber: snapshot.block }),
-    client.getBlock({ blockNumber: snapshot.block }),
+  const [balance, events] = await Promise.all([
+    readBalance(client, snapshot),
     readFundEvents(logReader(), snapshot.address, fromBlock, snapshot.block).then((read) =>
       completeHistory({ snapshot, events: read, fromBlock, node: (from, to) => readFundEvents(node, snapshot.address, from, to) }),
     ),
   ]);
-  const clock = { block: snapshot.block, timestamp: block.timestamp };
+  const clock = { block: snapshot.block, timestamp: snapshot.timestamp };
 
   // Names by account. A public view without the group's OK shows "Miembro N", in the contract's order.
   const names = new Map<Address, string>();
@@ -146,8 +157,10 @@ export async function loadFundScreen(
   }));
 
   // What converting each member's USDT got under or over what it was credited (conversion-loss design): the dues and
-  // Movements both read it.
-  const loss = conversionLoss(events);
+  // Movements both read it. Version 2 has none: its contract credits what each conversion got, and takes a give-back off
+  // what the member contributed, so `contributed` already says both.
+  const version1 = snapshot.version === 1;
+  const loss: ConversionLoss = version1 ? conversionLoss(events) : { byMember: new Map(), byConversion: new Map() };
   const view = buildFundView({
     snapshot,
     name: fund.name,
@@ -155,7 +168,7 @@ export async function loadFundScreen(
     balance,
     weeklyFee: fund.weeklyFee,
     joined,
-    givenBack: givenBack(events, giveBacks),
+    givenBack: version1 ? givenBack(events, giveBacks) : new Map(),
     conversionLoss: loss.byMember,
     names,
     viewer: publicView ? null : (viewer?.account ?? null),
@@ -228,15 +241,19 @@ export function loadPublicFundScreen(address: Address, locale: Locale): Promise<
 }
 
 /**
- * Why the agent hasn't converted the USDT the fund holds (spec, 8.1, F8): its latest decision on the fund, when it
- * skipped the conversion, was blocked, or sent one that reverted. Null under MIN_CONVERSION_USDT (the agent leaves
- * that much where it is), or when its latest decision was a conversion that went through. Only a decision of the
- * last half hour counts: the heartbeat decides again every 15 minutes while USDT waits, so an older one may be about
- * other USDT (a run that couldn't read the fund, with nothing to convert, before this USDT came). Both addresses are
- * checksummed: the agent's come from viem's decoding, and this one from getAddress.
+ * Why the agent hasn't converted the USDT waiting (spec, 8.1, F8): its latest decision on the fund, when it skipped
+ * the conversion, was blocked, or sent one that reverted. What waits is all the fund holds in version 1, and in version
+ * 2 only what members have pending: a dollar sent straight to a version 2 fund is nobody's, and the agent never converts
+ * it. Null under MIN_CONVERSION_USDT (the agent leaves that much where it is), or when its latest decision was a
+ * conversion that went through. The fee a version 2 heartbeat sends before converting is no conversion decision, sent or
+ * blocked: each of those carries its action, `pay-fee`. Only a decision of the last half hour counts: the heartbeat
+ * decides again every 15 minutes while USDT waits, so an older one may be about other USDT (a run that couldn't read
+ * the fund, with nothing to convert, before this USDT came). Both addresses are checksummed: the agent's come from
+ * viem's decoding, and this one from getAddress.
  */
 async function conversionHold(db: Db, snapshot: FundSnapshot): Promise<ConversionHold | null> {
-  if (snapshot.dollarBalance < MIN_CONVERSION_USDT) return null;
+  const waiting = snapshot.version === 2 ? snapshot.totalPendingDollar : snapshot.dollarBalance;
+  if (waiting < MIN_CONVERSION_USDT) return null;
   const [latest] = await db
     .select({ kind: decisions.kind, code: decisions.code, status: decisions.status, createdAt: decisions.createdAt })
     .from(decisions)
@@ -244,6 +261,7 @@ async function conversionHold(db: Db, snapshot: FundSnapshot): Promise<Conversio
       and(
         eq(decisions.fund, snapshot.address),
         isNull(decisions.expenseId),
+        sql`${decisions.action}->>'kind' is distinct from 'pay-fee'`,
         sql`${decisions.createdAt} > now() - interval '30 minutes'`,
       ),
     )
@@ -251,7 +269,7 @@ async function conversionHold(db: Db, snapshot: FundSnapshot): Promise<Conversio
     .limit(1);
   if (latest === undefined) return null;
   const held = latest.kind === "skip" || latest.kind === "blocked" || (latest.kind === "convert" && latest.status === "reverted");
-  return held ? { usdt: snapshot.dollarBalance, code: latest.kind === "skip" ? latest.code : null, at: latest.createdAt } : null;
+  return held ? { usdt: waiting, code: latest.kind === "skip" ? latest.code : null, at: latest.createdAt } : null;
 }
 
 /** Each proposal's state now: votes, executed, deadline, and whether `viewer` voted. */

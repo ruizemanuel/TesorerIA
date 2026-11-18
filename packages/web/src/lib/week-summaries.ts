@@ -18,7 +18,7 @@ import { blockTime, weekAt } from "./chain-time";
 import type { Db } from "./db/client";
 import { type StoredWeekSummary, funds, weekSummaries } from "./db/schema";
 import { formatDay, formatPesos } from "./format";
-import { memberFundAbi } from "./fund-abi";
+import { readBalance } from "./fund-balance";
 import { giveBackTransactions, proposalsIn } from "./give-backs";
 import { completeHistory } from "./history";
 import type { Messages } from "./i18n/messages";
@@ -113,16 +113,15 @@ export function chainWeekSummaryDeps(
       const { first, last } = await weekBlockRange(client, { startTime, week, from: fund.createdBlock });
       const snapshot = await readFund(client, { address: fund.address, version: fund.version }, last);
       if (snapshot.week !== week) throw new Error(`Block ${last} is in week ${snapshot.week}, not in week ${week}`);
-      const [balance, block, events] = await Promise.all([
-        client.readContract({ address: fund.address, abi: memberFundAbi, functionName: "balanceInWars", blockNumber: last }),
-        client.getBlock({ blockNumber: last }),
+      const [balance, events] = await Promise.all([
+        readBalance(client, snapshot),
         // A hole in the history would leave a contribution or a reimbursement out of the summary (3/11): the node
         // fills it, or nothing is written from it.
         readFundEvents(logs, fund.address, fund.createdBlock, last).then((read) =>
           completeHistory({ snapshot, events: read, fromBlock: fund.createdBlock, node: (from, to) => readFundEvents(node, fund.address, from, to) }),
         ),
       ]);
-      const clock = { block: last, timestamp: block.timestamp };
+      const clock = { block: last, timestamp: snapshot.timestamp };
       // The same weekOf as the screen (read-fund.ts), so the summary's dues are the week's list as it closed.
       const weekOf = (event: (typeof events)[number]) => weekAt(blockTime(event.blockNumber, clock), snapshot.startTime);
       const giveBacks = proposalsIn(events, fund.giveBackTxs);

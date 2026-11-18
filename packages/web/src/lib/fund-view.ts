@@ -17,7 +17,10 @@ export type FundView = {
   name: string;
   agreedExpense: string;
   closed: boolean;
-  /** wARS plus the USDT valued at the pool's TWAP: the contract's balanceInWars. */
+  /**
+   * Everything the fund holds, in its currency, its dollars valued at the pool's TWAP (readBalance): version 1's
+   * balanceInWars, version 2's balanceInCurrency.
+   */
   balance: bigint;
   weeklyFee: bigint;
   weeklyCap: bigint;
@@ -61,9 +64,12 @@ export function buildFundView({
   weeklyFee: bigint;
   /** The week each member joined, from joinWeeks; founders are left out (week 0). */
   joined: ReadonlyMap<Address, bigint>;
-  /** What each member was given back of their contributions (givenBack, spec 7.3): it doesn't count as paid ahead. */
+  /**
+   * Version 1: what each member was given back of their contributions (givenBack, spec 7.3): it doesn't count as paid
+   * ahead. Version 2's contract already takes it off what they contributed (memberDues ignores it).
+   */
   givenBack?: ReadonlyMap<Address, bigint>;
-  /** What converting each member's USDT lost, negative if it gained (conversionLoss): it doesn't count as put in either. */
+  /** Version 1: what converting each member's USDT lost, negative if it gained (conversionLoss): it doesn't count as put in either. */
   conversionLoss?: ReadonlyMap<Address, bigint>;
   /** First names by checksummed account; a member without one shows as "Miembro N" ("Member N" in English). */
   names: ReadonlyMap<Address, string>;
@@ -85,12 +91,16 @@ export function buildFundView({
     const over = contributed > due ? contributed - due : 0n;
     ahead = over * 10_000n >= weeklyFee * AHEAD_SAID_FROM_BPS ? over : 0n;
     // Fund._split pays each token in proportion to what each contributed (equal parts if no one did): in pesos, that's
-    // the balance times the member's part. The contract's count, with what was given back still in it (spec, 7.3).
-    const counted = snapshot.contributed[mine.position - 1] ?? 0n;
+    // the balance times the member's part. The contract's count, with what was given back still in it in version 1
+    // (spec, 7.3). FundV2._split first gives each member their own pending dollars back, whole, and splits the rest
+    // that way: the balance less everyone's pending dollars at their TWAP value.
+    const i = mine.position - 1;
+    const counted = snapshot.contributed[i] ?? 0n;
+    const pending = snapshot.version === 2 ? snapshot.pendingValue.reduce((sum, value) => sum + value, 0n) : 0n;
+    const rest = balance > pending ? balance - pending : 0n;
+    const own = snapshot.version === 2 ? (snapshot.pendingValue[i] ?? 0n) : 0n;
     share =
-      snapshot.totalContributed === 0n
-        ? balance / BigInt(snapshot.members.length)
-        : (balance * counted) / snapshot.totalContributed;
+      (snapshot.totalContributed === 0n ? rest / BigInt(snapshot.members.length) : (rest * counted) / snapshot.totalContributed) + own;
   }
   return {
     address: snapshot.address,

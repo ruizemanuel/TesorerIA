@@ -1,4 +1,4 @@
-import { type LogReader, type RawLog, WARS as WARS_TOKEN, type WeekSummaryFacts, fundAbi } from "@tesoreria/agent";
+import { type LogReader, POOL, type RawLog, USDT, WARS as WARS_TOKEN, type WeekSummaryFacts, fundAbi } from "@tesoreria/agent";
 import { eq } from "drizzle-orm";
 import { type Address, type Hash, type Hex, encodeAbiParameters, encodeEventTopics, getAddress, pad, parseAbiParameters, zeroAddress } from "viem";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -239,6 +239,31 @@ describe("chainWeekSummaryDeps: the photo of a week, from the chain", () => {
 
     expect(photo.contributed).toBe(10_000n * WARS);
     expect(photo.block).toBe(CREATED + 604_799n);
+  });
+
+  it("the photo of a v2 week reads balanceInCurrency", async () => {
+    // The same week as a version 2 fund, wARS with USDT: FundV2 has no balanceInWars, and asking for it would revert.
+    const read: string[] = [];
+    const v2 = {
+      ...client,
+      multicall: async ({ contracts }: { contracts: { functionName: string; args?: readonly unknown[] }[] }) =>
+        contracts.length === 16
+          ? [AGENT, false, [ANA, BETO, CARO], 2, 60_000n * WARS, START, 0n, 10_000n * WARS, 450_000n * WARS, WARS_TOKEN, USDT, POOL, 25, 0n, 10_000n * WARS, 0n]
+          : contracts.map((call) => (call.functionName === "contributed" && call.args?.[0] === BETO ? 10_000n * WARS : 0n)),
+      readContract: async ({ functionName }: { functionName: string }) => {
+        read.push(functionName);
+        if (functionName === "balanceInWars") throw new Error("FundV2 has no balanceInWars");
+        return functionName === "balanceInCurrency" ? 12_500n * WARS : 0n;
+      },
+    } as unknown as Parameters<typeof chainWeekSummaryDeps>[0];
+    const reader: LogReader = async ({ fromBlock, toBlock }) =>
+      paidByBeto.blockNumber >= fromBlock && paidByBeto.blockNumber <= toBlock ? [paidByBeto] : [];
+
+    const photo = await chainWeekSummaryDeps(v2, reader, AGENT, reader).facts({ ...fund, version: 2 }, 0n, START);
+
+    expect(photo.balance).toBe(12_500n * WARS);
+    expect(read).toContain("balanceInCurrency");
+    expect(read).not.toContain("balanceInWars");
   });
 
   it("tells a payment that gave a contribution back, and takes it off the dues, by the transaction of its expense (spec, 7.3)", async () => {
