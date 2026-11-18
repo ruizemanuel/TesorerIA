@@ -1,4 +1,4 @@
-import { FUND_FACTORY } from "@tesoreria/agent";
+import { FUND_FACTORY_V2 } from "@tesoreria/agent";
 import { getAddress } from "viem";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CurrentUser } from "../src/lib/current-user";
@@ -114,7 +114,7 @@ describe("the invitation and the deploy", () => {
     expect((await deploy(json({ votesRequired: 2 }), params({ id }))).status).toBe(403);
     state.user = people[0]!;
     const step = (await (await deploy(json({ votesRequired: 2 }), params({ id }))).json()) as { call?: { to: string } };
-    expect(step.call?.to).toBe(FUND_FACTORY);
+    expect(step.call?.to).toBe(FUND_FACTORY_V2);
     expect((await draftById(db, id))?.status).toBe("deploying");
 
     expect(await (await cancel(new Request("http://localhost:3000/api", { method: "DELETE" }), params({ id }))).json()).toEqual({ reopened: true });
@@ -129,7 +129,7 @@ describe("the invitation and the deploy", () => {
     await db.update(operations).set({ createdAt: new Date(Date.now() - PENDING_FOR_MS - 60_000) });
     const response = await deploy(json({ votesRequired: 2 }), params({ id }));
     expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({ ok: true, call: { to: FUND_FACTORY }, nonce: "5" });
+    expect(await response.json()).toMatchObject({ ok: true, call: { to: FUND_FACTORY_V2 }, nonce: "5" });
   });
 
   it("answers 404 to an id that isn't one, and 400 to a transaction that isn't a hash", async () => {

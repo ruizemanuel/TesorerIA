@@ -1,4 +1,4 @@
-import { AGENT_ADDRESS, FUND_FACTORY, USDT, WARS as WARS_TOKEN, fundFactoryAbi } from "@tesoreria/agent";
+import { AGENT_ADDRESS, FUND_FACTORY, FUND_FACTORY_V2, type FundVersion, USDT, WARS as WARS_TOKEN, fundFactoryAbi, fundFactoryV2Abi } from "@tesoreria/agent";
 import { keyChangeCallData } from "@tesoreria/wallet";
 import { createFakePasskey } from "@tesoreria/wallet/testing";
 import { eq } from "drizzle-orm";
@@ -267,19 +267,23 @@ describe("POST /api/bundler", () => {
     });
   });
 
-  describe("a createFund", () => {
+  // Each version's createFund is sponsored on its own factory: v1's (funds already frozen with it) and v2's (what new funds take).
+  describe.each([
+    { version: 1, factory: FUND_FACTORY, abi: fundFactoryAbi },
+    { version: 2, factory: FUND_FACTORY_V2, abi: fundFactoryV2Abi },
+  ] as { version: FundVersion; factory: Address; abi: typeof fundFactoryAbi | typeof fundFactoryV2Abi }[])("a createFund of a v$version fund", ({ version, factory, abi }) => {
     let creator: CurrentUser;
     /** The calldata deployCall built for each of the creator's two frozen drafts, and for one opened again since. */
     let futbol: Hex;
     let asado: Hex;
     let reopened: Hex;
 
-    /** A draft `creatorId` made, with three more people, frozen by deployCall with 2 votes and the server's agent. */
+    /** A draft `creatorId` made, with three more people, frozen by deployCall with this version, 2 votes and the server's agent. */
     async function frozen(db: Db, creatorId: string, name: string) {
       const created = await createDraft(db, creatorId, { name, agreedExpense: "la cancha", weeklyFee: 10_000n * WARS, weeklyCap: 60_000n * WARS }, es);
       if (!created.ok) throw new Error(created.error);
       for (const person of ["Beto", "Caro", "Dani"]) await joinFund(db, (await addUser(db, person)).id, created.inviteCode, es);
-      const deploy = await deployCall(db, { fundId: created.id, userId: creatorId, votesRequired: 2, agent: AGENT_ADDRESS, m: es });
+      const deploy = await deployCall(db, { fundId: created.id, userId: creatorId, votesRequired: 2, agent: AGENT_ADDRESS, version, m: es });
       if (!deploy.ok) throw new Error(deploy.error);
       return { fundId: created.id, data: deploy.call.data };
     }
@@ -297,15 +301,15 @@ describe("POST /api/bundler", () => {
 
     /** The settings a createFund's data carries. */
     const createFundParams = (data: Hex) => {
-      const decoded = decodeFunctionData({ abi: fundFactoryAbi, data });
+      const decoded = decodeFunctionData({ abi, data });
       if (decoded.functionName !== "createFund") throw new Error(`Not a createFund: ${decoded.functionName}`);
       return decoded.args[0];
     };
     /** `data`'s createFund with one of its settings changed. */
     const changed = (data: Hex, change: Partial<ReturnType<typeof createFundParams>>): Hex =>
-      encodeFunctionData({ abi: fundFactoryAbi, functionName: "createFund", args: [{ ...createFundParams(data), ...change }] });
+      encodeFunctionData({ abi, functionName: "createFund", args: [{ ...createFundParams(data), ...change }] as never });
     const stub = (data: Hex) =>
-      call(rpc("pm_getPaymasterStubData", [op(creator.account, safeCallData([{ to: FUND_FACTORY, data }])), entryPoint07Address, CELO, {}]));
+      call(rpc("pm_getPaymasterStubData", [op(creator.account, safeCallData([{ to: factory, data }])), entryPoint07Address, CELO, {}]));
 
     it("sends on the exact call deployCall built for each draft its creator is creating", async () => {
       state.user = creator;

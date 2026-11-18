@@ -45,7 +45,7 @@ export { MAX_MEMBERS };
  * FundFactoryV2. A draft takes it when it's frozen (`deployCall`) and keeps it from then on: what it was frozen with is
  * what the chain gets, every time.
  */
-export const NEW_FUND_VERSION: FundVersion = 1;
+export const NEW_FUND_VERSION: FundVersion = 2;
 
 /** The factory that creates the funds of `version`. */
 function factoryOf(version: FundVersion): Address {

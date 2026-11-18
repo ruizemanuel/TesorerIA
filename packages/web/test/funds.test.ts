@@ -149,7 +149,7 @@ describe("drafts and invitations", () => {
 
     const draft = await draftById(db, created.id);
     expect(draft?.members.map((m) => m.userId)).toEqual([ana.id, ...others]);
-    const result = await deployCall(db, { fundId: created.id, userId: ana.id, votesRequired: 2, agent: AGENT, m: es });
+    const result = await deployCall(db, { fundId: created.id, userId: ana.id, votesRequired: 2, agent: AGENT, version: 1, m: es });
     if (!result.ok) throw new Error(result.error);
     const { args } = decodeFunctionData({ abi: fundFactoryAbi, data: result.call.data });
     expect(args?.[0]).toMatchObject({ members: draft?.members.map((m) => m.account) });
@@ -243,10 +243,10 @@ describe("drafts and invitations", () => {
 });
 
 describe("deployCall", () => {
-  it("builds createFund for the creator, with the members in the order they joined and the votes they chose", async () => {
+  it("builds a v1 createFund for the creator, with the members in the order they joined and the votes they chose", async () => {
     const db = await testDb();
     const { people, fundId, inviteCode } = await group(db);
-    const result = await deployCall(db, { fundId, userId: people[0]!.id, votesRequired: 2, agent: AGENT, m: es });
+    const result = await deployCall(db, { fundId, userId: people[0]!.id, votesRequired: 2, agent: AGENT, version: 1, m: es });
     if (!result.ok) throw new Error(result.error);
     expect(result.call.to).toBe(FUND_FACTORY);
     const { args } = decodeFunctionData({ abi: fundFactoryAbi, data: result.call.data });
@@ -309,19 +309,19 @@ describe("the fund's version: v1 `Fund` or v2 `FundV2`, taken when the draft is 
     return decoded.functionName === "createFund" ? decoded.args[0] : undefined;
   };
 
-  it("with NEW_FUND_VERSION at 1, a new draft is created as today", async () => {
-    expect(NEW_FUND_VERSION).toBe(1);
+  it("a new draft is a v2 fund in wARS, and a draft still open takes v2 when it's frozen", async () => {
+    expect(NEW_FUND_VERSION).toBe(2);
     const db = await testDb();
     const { people, fundId } = await group(db);
     expect((await db.select().from(funds).where(eq(funds.id, fundId)))[0]).toMatchObject({
-      version: 1,
+      version: 2,
       currency: WARS_TOKEN,
       balanceCap: DEFAULT_BALANCE_CAP,
     });
     const result = await deployCall(db, { fundId, userId: people[0]!.id, votesRequired: 2, agent: AGENT, m: es });
     if (!result.ok) throw new Error(result.error);
-    expect(result.call.to).toBe(FUND_FACTORY);
-    expect(decodeFunctionData({ abi: fundFactoryAbi, data: result.call.data }).args?.[0]).toEqual({
+    expect(result.call.to).toBe(FUND_FACTORY_V2);
+    expect(v2Params(result.call.data)).toEqual({
       name: "Fútbol de los jueves",
       members: people.map((p) => getAddress(p.account)),
       votesRequired: 2,
@@ -329,8 +329,19 @@ describe("the fund's version: v1 `Fund` or v2 `FundV2`, taken when the draft is 
       agreedExpense: "la cancha",
       weeklyCap: 60_000n * WARS,
       balanceCap: 450_000n * WARS,
+      currency: WARS_TOKEN,
+      dollar: USDT,
+      pool: POOL,
+      feeBps: 25,
     });
-    expect(await versionOf(db, fundId)).toBe(1);
+    expect(await versionOf(db, fundId)).toBe(2);
+
+    // A draft made when new funds were v1 and still open: frozen now, it takes the version new funds have.
+    const old = await group(db);
+    await db.update(funds).set({ version: 1 }).where(eq(funds.id, old.fundId));
+    const frozen = await deployCall(db, { fundId: old.fundId, userId: old.people[0]!.id, votesRequired: 2, agent: AGENT, m: es });
+    expect(frozen).toMatchObject({ ok: true, call: { to: FUND_FACTORY_V2 } });
+    expect(await versionOf(db, old.fundId)).toBe(2);
   });
 
   it("deployCall builds FundFactoryV2's createFund with wARS, USDT, today's pool and a 0.25 % fee", async () => {
@@ -373,7 +384,7 @@ describe("the fund's version: v1 `Fund` or v2 `FundV2`, taken when the draft is 
     const { people, fundId } = await group(db);
     const first = await deploy(db, fundId, people[0]!.id, 2);
     if (!first.ok) throw new Error(first.error);
-    expect(await deploy(db, fundId, people[0]!.id)).toEqual(first); // the version of new funds is NEW_FUND_VERSION, 1
+    expect(await deploy(db, fundId, people[0]!.id)).toEqual(first); // the version of new funds is NEW_FUND_VERSION, 2
     expect(await deploy(db, fundId, people[0]!.id, 1)).toEqual(first);
     expect(await versionOf(db, fundId)).toBe(2);
   });
@@ -518,12 +529,12 @@ describe("the fund's version: v1 `Fund` or v2 `FundV2`, taken when the draft is 
     expect(first).toMatchObject({ ok: true, call: { to: FUND_FACTORY_V2 } });
 
     // Sent with nonce 5 a long time ago, and the chain still has that nonce: the same call again, still v2, though
-    // new funds are v1 as far as this call knows.
+    // this call asks for v1 (the version a draft frozen now would take).
     await recordOperation(db, ana, { userOpHash: OP, kind: "create-fund", draftId: fundId, nonce: 5n });
     await db.update(operations).set({ createdAt: new Date(Date.now() - PENDING_FOR_MS - 60_000) });
     const unspent = fakeClient([], []);
     unspent.readContract.mockResolvedValue(5n);
-    expect(await step(unspent)).toEqual({ ...first, nonce: 5n });
+    expect(await step(unspent, 1)).toEqual({ ...first, nonce: 5n });
 
     await finishOperation(db, ana, { userOpHash: OP, transactionHash: TX, success: true });
     const landed = fakeClient([{ address: FUND_FACTORY_V2, fund: NEW_FUND, creator: members[0]! }], settingsFor(members, {}, 2), 2);
@@ -567,6 +578,7 @@ describe("cancelDeploy", () => {
   });
 });
 
+// These drafts are frozen as v1 and confirmed on FundFactory, the funds already live; a v2 one is confirmed in the fund's version tests above.
 describe("confirmDeploy", () => {
   it("goes live only with the factory's fund for this creator, with the draft's exact settings", async () => {
     const db = await testDb();
@@ -574,7 +586,7 @@ describe("confirmDeploy", () => {
     const other = await group(db); // another group's draft, there before any confirmation: it must stay untouched
     const creator = getAddress(people[0]!.account);
     const members = people.map((p) => getAddress(p.account));
-    await deployCall(db, { fundId, userId: people[0]!.id, votesRequired: 2, agent: AGENT, m: es });
+    await deployCall(db, { fundId, userId: people[0]!.id, votesRequired: 2, agent: AGENT, version: 1, m: es });
     const confirm = (client: ReturnType<typeof fakeClient>, userId = people[0]!.id) =>
       confirmDeploy(db, { fundId, userId, transactionHash: TX, client: client as never, agent: AGENT, factory: FUND_FACTORY, m: es });
 
@@ -596,7 +608,7 @@ describe("confirmDeploy", () => {
     const db = await testDb();
     const { people, fundId } = await group(db);
     const members = people.map((p) => getAddress(p.account));
-    await deployCall(db, { fundId, userId: people[0]!.id, votesRequired: 2, agent: AGENT, m: es });
+    await deployCall(db, { fundId, userId: people[0]!.id, votesRequired: 2, agent: AGENT, version: 1, m: es });
     // The bundler saw it land; our node is two reads behind.
     const lagging = fakeClient([{ address: FUND_FACTORY, fund: NEW_FUND, creator: members[0]! }], settingsFor(members));
     lagging.getTransactionReceipt.mockRejectedValueOnce(new Error("receipt not found")).mockRejectedValueOnce(new Error("receipt not found"));
@@ -611,7 +623,7 @@ describe("confirmDeploy", () => {
   it("answers that it isn't confirmed only after its tries, and keeps the draft being created", async () => {
     const db = await testDb();
     const { people, fundId } = await group(db);
-    await deployCall(db, { fundId, userId: people[0]!.id, votesRequired: 2, agent: AGENT, m: es });
+    await deployCall(db, { fundId, userId: people[0]!.id, votesRequired: 2, agent: AGENT, version: 1, m: es });
     const unreachable = fakeClient([], []);
     unreachable.getTransactionReceipt.mockRejectedValue(new Error("receipt not found"));
     const wait = { tries: 3, everyMs: 0 };
@@ -630,8 +642,9 @@ describe("deployStep", () => {
     const members = people.map((p) => getAddress(p.account));
     /** The chain's log search for UserOperationEvents: by default, it finds nothing. */
     const findOperation = vi.fn<UserOperationFinder>(async () => null);
+    // A v1 draft, to FundFactory: the version-2 flow is in the tests of the fund's version above.
     const step = (client: ReturnType<typeof fakeClient>, votesRequired = 2, createFundDailyLimit = 10) =>
-      deployStep(db, { fundId, userId: ana, votesRequired, agent: AGENT, client: client as never, findOperation, createFundDailyLimit, factory: FUND_FACTORY, m: es });
+      deployStep(db, { fundId, userId: ana, votesRequired, agent: AGENT, client: client as never, findOperation, createFundDailyLimit, factory: FUND_FACTORY, version: 1, m: es });
     /** Ana's createFund for the draft went out with nonce 5, and its receipt says `success` (none yet if undefined). */
     const sent = async (success?: boolean) => {
       await recordOperation(db, ana, { userOpHash: OP, kind: "create-fund", draftId: fundId, nonce: 5n });
@@ -993,7 +1006,7 @@ describe("in the language of the dictionary", () => {
     const refused = (error: string) => ({ ok: false, status: 409, error });
 
     expect(await confirm(fakeClient([], []))).toEqual(refused(en.funds.createFirst));
-    await deployCall(db, { fundId, userId: ana, votesRequired: 2, agent: AGENT, m: es });
+    await deployCall(db, { fundId, userId: ana, votesRequired: 2, agent: AGENT, version: 1, m: es });
     expect(await confirm(fakeClient([], []))).toEqual(refused(en.funds.notInOperation));
     expect(await confirm(fakeClient([], []), es)).toEqual(refused("No encontramos el fondo en esa operación."));
     expect(await confirm(fakeClient([{ address: FUND_FACTORY, fund: NEW_FUND, creator }], settingsFor(members, { votesRequired: 3 })))).toEqual(
