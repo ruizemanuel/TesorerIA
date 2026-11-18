@@ -1,4 +1,4 @@
-import { FUND_FACTORY, USDT, WARS, shortMessage } from "@tesoreria/agent";
+import { FUND_FACTORY, FUND_FACTORY_V2, USDT, WARS, shortMessage } from "@tesoreria/agent";
 import { ATTRIBUTION_SUFFIX, SAFE_P256_VERIFIERS, SAFE_WEBAUTHN_SHARED_SIGNER } from "@tesoreria/wallet";
 import { and, eq, isNotNull } from "drizzle-orm";
 import {
@@ -193,10 +193,10 @@ export type Sponsorship = {
   /** The live funds the person is a member of. */
   liveFunds: Address[];
   /**
-   * The createFund calldata of each draft they created that is being created right now (`deploying`), exactly as
-   * deployCall built it (`frozenCreateFunds`): the only createFunds theirs to send.
+   * The createFund call (its factory and its calldata) of each draft they created that is being created right now
+   * (`deploying`), exactly as deployCall built it (`frozenCreateFunds`): the only createFunds theirs to send.
    */
-  createFundCalls: Hex[];
+  createFundCalls: { to: Address; data: Hex }[];
   /**
    * The open requests to join those live funds, with the account each one asked from (sponsoredJoinRequests): the only
    * accounts the person's propose may add (spec, 9.4). None in a fund that already has MAX_MEMBERS members.
@@ -252,8 +252,9 @@ function isAddMember(calls: OperationCall[], { liveFunds, joinRequests }: Sponso
 
 /**
  * The calls the paymaster pays for, and nothing else (spec, 6: no open sponsored bundler), all with no value:
- * - FundFactory.createFund, alone, from the creator of a fund being created, and only with the exact calldata
- *   deployCall built for that frozen draft (`createFundCalls`): its members in order, its votes, the server's agent;
+ * - createFund, alone, on a factory, from the creator of a fund being created, and only with the exact target and
+ *   calldata deployCall built for that frozen draft (`createFundCalls`): its members in order, its votes, the server's
+ *   agent;
  * - approve(fund, x) on wARS or USDT, and contributeWars, contributeUsdt, vote and execute on the fund, for a
  *   live fund the person is a member of.
  * - one transfer of the person's own wARS, alone, to any address and for more than nothing, for a member of any live
@@ -270,9 +271,10 @@ export function checkCalls(
   const refuse = (error: string) => ({ ok: false, status: 403, error }) as const;
   if (calls.some((call) => call.value !== 0n)) return refuse("Sponsored calls can't send CELO");
   const [only] = calls;
-  if (calls.length === 1 && only !== undefined && isAddressEqual(only.to, FUND_FACTORY)) {
+  if (calls.length === 1 && only !== undefined && (isAddressEqual(only.to, FUND_FACTORY) || isAddressEqual(only.to, FUND_FACTORY_V2))) {
     const data = only.data.toLowerCase();
-    if (createFundCalls.some((frozen) => frozen.toLowerCase() === data)) return { ok: true, createsFund: true };
+    const isFrozen = (call: { to: Address; data: Hex }) => isAddressEqual(call.to, only.to) && call.data.toLowerCase() === data;
+    if (createFundCalls.some(isFrozen)) return { ok: true, createsFund: true };
     return refuse("Only the createFund of a draft you are creating, exactly as it was frozen, is sponsored on the factory");
   }
   if (isCashOut(calls)) {

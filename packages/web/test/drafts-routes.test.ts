@@ -81,6 +81,13 @@ describe("POST /api/drafts", () => {
     expect(await answer({ weeklyFee: "1.000.000.000.001" })).toEqual({ status: 400, error: "La cuota no puede pasar de $ 1.000.000.000.000." });
   });
 
+  it("refuses a weekly cap above the fund's cap, which a fund of its own would revert", async () => {
+    const response = await createDraftRoute(json({ ...DRAFT, weeklyCap: "450.001" }));
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: `El tope semanal no puede pasar el tope del fondo, de $${NBSP}450.000.` });
+    expect((await createDraftRoute(json({ ...DRAFT, weeklyCap: "450.000" }))).status).toBe(200);
+  });
+
   it("creates the draft, with its creator in it", async () => {
     const response = await createDraftRoute(json({ ...DRAFT, weeklyFee: "$ 10.000,50" }));
     expect(response.status).toBe(200);
@@ -148,6 +155,10 @@ describe("in the language of the request", () => {
     expect(await answer(await createDraftRoute(english({ ...DRAFT, weeklyFee: "10,000", weeklyCap: "1,000,000,000,001" })))).toEqual({
       status: 400,
       error: `The weekly cap can't be more than ARS${NBSP}1,000,000,000,000.`,
+    });
+    expect(await answer(await createDraftRoute(english({ ...DRAFT, weeklyFee: "10,000", weeklyCap: "450,001" })))).toEqual({
+      status: 400,
+      error: `The weekly cap can't be above the fund's cap of ARS${NBSP}450,000.`,
     });
     const created = await createDraftRoute(english({ ...DRAFT, weeklyFee: "ARS 10,000.50", weeklyCap: "60,000" }));
     const { id } = (await created.json()) as { id: string };

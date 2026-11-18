@@ -1,4 +1,15 @@
-import { AGENT_ADDRESS, FUND_FACTORY, fundFactoryAbi } from "@tesoreria/agent";
+import {
+  AGENT_ADDRESS,
+  FEE_BPS,
+  FUND_FACTORY,
+  FUND_FACTORY_V2,
+  type FundVersion,
+  POOL,
+  USDT,
+  WARS as WARS_TOKEN,
+  fundFactoryAbi,
+  fundFactoryV2Abi,
+} from "@tesoreria/agent";
 import { and, eq } from "drizzle-orm";
 import { type Address, type Hash, type Hex, decodeFunctionData, encodeAbiParameters, encodeEventTopics, getAddress, pad } from "viem";
 import { generatePrivateKey, privateKeyToAddress } from "viem/accounts";
@@ -9,7 +20,9 @@ import { claimCreateFundNonce } from "../src/lib/create-fund-cap";
 import type { Db } from "../src/lib/db/client";
 import { createFundNonces, funds, memberships, operations } from "../src/lib/db/schema";
 import { MAX_PESOS, formatPesos } from "../src/lib/format";
+import { DEFAULT_BALANCE_CAP } from "../src/lib/fund-abi";
 import {
+  NEW_FUND_VERSION,
   cancelDeploy,
   confirmDeploy,
   createDraft,
@@ -17,6 +30,7 @@ import {
   deployStep,
   draftById,
   draftByInvite,
+  frozenCreateFunds,
   fundsOf,
   joinFund,
 } from "../src/lib/funds";
@@ -40,27 +54,56 @@ async function group(db: Db, size = 3) {
   return { people, fundId: created.id, inviteCode: created.inviteCode };
 }
 
-/** A receipt with these FundCreated logs, a chain where every fund has `settings`, and the EntryPoint's nonce for anyone. */
-function fakeClient(logs: { address: Address; fund: Address; creator: Address }[], settings: unknown[]) {
+/**
+ * A receipt with these FundCreated logs (version 2's, with the currency indexed and the dollar in the data, if `version`
+ * is 2), a chain where every fund has `settings`, and the EntryPoint's nonce for anyone.
+ */
+function fakeClient(logs: { address: Address; fund: Address; creator: Address }[], settings: unknown[], version: FundVersion = 1) {
+  const name = "Fútbol de los jueves";
   return {
     getTransactionReceipt: vi.fn(async (_: { hash: Hash }) => ({
       blockNumber: 79_700_000n,
       status: "success",
-      logs: logs.map(({ address, fund, creator }) => ({
-        address,
-        topics: encodeEventTopics({ abi: fundFactoryAbi, eventName: "FundCreated", args: { fund, creator } }),
-        data: encodeAbiParameters([{ type: "string" }], ["Fútbol de los jueves"]),
-      })),
+      logs: logs.map(({ address, fund, creator }) =>
+        version === 1
+          ? {
+              address,
+              topics: encodeEventTopics({ abi: fundFactoryAbi, eventName: "FundCreated", args: { fund, creator } }),
+              data: encodeAbiParameters([{ type: "string" }], [name]),
+            }
+          : {
+              address,
+              topics: encodeEventTopics({ abi: fundFactoryV2Abi, eventName: "FundCreated", args: { fund, creator, currency: WARS_TOKEN } }),
+              data: encodeAbiParameters([{ type: "address" }, { type: "string" }], [USDT, name]),
+            },
+      ),
     })),
     multicall: vi.fn(async () => settings),
     readContract: vi.fn(async (_: { functionName: string; args: unknown[] }) => 0n),
   };
 }
 
-/** What a fund made from DRAFT for `members` with 2 votes returns, in confirmDeploy's multicall order, with one thing changed. */
-function settingsFor(members: Address[], change: Partial<Record<string, unknown>> = {}) {
-  const s = { members, votesRequired: 2, agent: AGENT, weeklyCap: 60_000n * WARS, balanceCap: 450_000n * WARS, name: "Fútbol de los jueves", agreedExpense: "la cancha", ...change };
-  return [s.members, s.votesRequired, s.agent, s.weeklyCap, s.balanceCap, s.name, s.agreedExpense];
+/**
+ * What a fund made from DRAFT for `members` with 2 votes returns, in confirmDeploy's multicall order, with one thing
+ * changed. A version 2 fund has four more: its currency, dollar, pool and fee.
+ */
+function settingsFor(members: Address[], change: Partial<Record<string, unknown>> = {}, version: FundVersion = 1) {
+  const s = {
+    members,
+    votesRequired: 2,
+    agent: AGENT,
+    weeklyCap: 60_000n * WARS,
+    balanceCap: 450_000n * WARS,
+    name: "Fútbol de los jueves",
+    agreedExpense: "la cancha",
+    currency: WARS_TOKEN,
+    dollar: USDT,
+    pool: POOL,
+    feeBps: FEE_BPS,
+    ...change,
+  };
+  const v1 = [s.members, s.votesRequired, s.agent, s.weeklyCap, s.balanceCap, s.name, s.agreedExpense];
+  return version === 1 ? v1 : [...v1, s.currency, s.dollar, s.pool, s.feeBps];
 }
 
 describe("drafts and invitations", () => {
@@ -85,7 +128,13 @@ describe("drafts and invitations", () => {
     expect(await createDraft(db, ana.id, { ...DRAFT, weeklyCap: 0n }, es)).toMatchObject({ ok: false, status: 400 });
     expect(await createDraft(db, ana.id, { ...DRAFT, weeklyFee: MAX_PESOS + 1n }, es)).toMatchObject({ ok: false, status: 400 });
     expect(await createDraft(db, ana.id, { ...DRAFT, weeklyCap: MAX_PESOS + 1n }, es)).toMatchObject({ ok: false, status: 400 });
-    expect(await createDraft(db, ana.id, { ...DRAFT, weeklyCap: MAX_PESOS }, es)).toMatchObject({ ok: true });
+    // A weekly cap can't pass the fund's cap, which is far below the most any amount may be.
+    expect(await createDraft(db, ana.id, { ...DRAFT, weeklyCap: DEFAULT_BALANCE_CAP + 1n }, es)).toEqual({
+      ok: false,
+      status: 400,
+      error: es.checks.capAboveFundCap(formatPesos(DEFAULT_BALANCE_CAP, "es")),
+    });
+    expect(await createDraft(db, ana.id, { ...DRAFT, weeklyCap: DEFAULT_BALANCE_CAP }, es)).toMatchObject({ ok: true });
   });
 
   it("orders people who joined at the same instant by their id, so every reader gets the same list", async () => {
@@ -248,6 +297,238 @@ describe("deployCall", () => {
     expect(await call(3)).toEqual({ ok: false, status: 409, error: "Ya empezaste a crear el fondo con 2 votos necesarios: elegí 2 para seguir." });
     expect((await draftById(db, fundId))?.votesRequired).toBe(2);
     expect(await call(2)).toEqual(first); // the same call, as the creator coming back to a closed tab gets
+  });
+});
+
+describe("the fund's version: v1 `Fund` or v2 `FundV2`, taken when the draft is frozen", () => {
+  const deploy = (db: Db, fundId: string, userId: string, version?: FundVersion) =>
+    deployCall(db, { fundId, userId, votesRequired: 2, agent: AGENT, ...(version === undefined ? {} : { version }), m: es });
+  const versionOf = async (db: Db, fundId: string) => (await db.select({ version: funds.version }).from(funds).where(eq(funds.id, fundId)))[0]?.version;
+  const v2Params = (data: Hex) => {
+    const decoded = decodeFunctionData({ abi: fundFactoryV2Abi, data });
+    return decoded.functionName === "createFund" ? decoded.args[0] : undefined;
+  };
+
+  it("with NEW_FUND_VERSION at 1, a new draft is created as today", async () => {
+    expect(NEW_FUND_VERSION).toBe(1);
+    const db = await testDb();
+    const { people, fundId } = await group(db);
+    expect((await db.select().from(funds).where(eq(funds.id, fundId)))[0]).toMatchObject({
+      version: 1,
+      currency: WARS_TOKEN,
+      balanceCap: DEFAULT_BALANCE_CAP,
+    });
+    const result = await deployCall(db, { fundId, userId: people[0]!.id, votesRequired: 2, agent: AGENT, m: es });
+    if (!result.ok) throw new Error(result.error);
+    expect(result.call.to).toBe(FUND_FACTORY);
+    expect(decodeFunctionData({ abi: fundFactoryAbi, data: result.call.data }).args?.[0]).toEqual({
+      name: "Fútbol de los jueves",
+      members: people.map((p) => getAddress(p.account)),
+      votesRequired: 2,
+      agent: AGENT,
+      agreedExpense: "la cancha",
+      weeklyCap: 60_000n * WARS,
+      balanceCap: 450_000n * WARS,
+    });
+    expect(await versionOf(db, fundId)).toBe(1);
+  });
+
+  it("deployCall builds FundFactoryV2's createFund with wARS, USDT, today's pool and a 0.25 % fee", async () => {
+    const db = await testDb();
+    const { people, fundId } = await group(db);
+    const result = await deploy(db, fundId, people[0]!.id, 2);
+    if (!result.ok) throw new Error(result.error);
+    expect(result.call.to).toBe(FUND_FACTORY_V2);
+    expect(v2Params(result.call.data)).toEqual({
+      name: "Fútbol de los jueves",
+      members: people.map((p) => getAddress(p.account)),
+      votesRequired: 2,
+      agent: AGENT,
+      agreedExpense: "la cancha",
+      weeklyCap: 60_000n * WARS,
+      balanceCap: 450_000n * WARS,
+      currency: WARS_TOKEN,
+      dollar: USDT,
+      pool: POOL,
+      feeBps: 25,
+    });
+    expect(await versionOf(db, fundId)).toBe(2);
+  });
+
+  it("a draft frozen with v1 keeps creating in v1", async () => {
+    const db = await testDb();
+    const { people, fundId } = await group(db);
+    const first = await deploy(db, fundId, people[0]!.id, 1);
+    if (!first.ok) throw new Error(first.error);
+    // The same call again (a resend, or the creator coming back to a closed tab), now that new funds are v2.
+    const again = await deploy(db, fundId, people[0]!.id, 2);
+    expect(again).toEqual(first);
+    expect(again).toMatchObject({ ok: true, call: { to: FUND_FACTORY } });
+    expect(decodeFunctionData({ abi: fundFactoryAbi, data: first.call.data }).functionName).toBe("createFund");
+    expect(await versionOf(db, fundId)).toBe(1);
+  });
+
+  it("a draft frozen with v2 keeps creating in v2, whatever the version of new funds is", async () => {
+    const db = await testDb();
+    const { people, fundId } = await group(db);
+    const first = await deploy(db, fundId, people[0]!.id, 2);
+    if (!first.ok) throw new Error(first.error);
+    expect(await deploy(db, fundId, people[0]!.id)).toEqual(first); // the version of new funds is NEW_FUND_VERSION, 1
+    expect(await deploy(db, fundId, people[0]!.id, 1)).toEqual(first);
+    expect(await versionOf(db, fundId)).toBe(2);
+  });
+
+  it("an old draft still open takes the new version when it's frozen", async () => {
+    const db = await testDb();
+    const { people, fundId } = await group(db);
+    await db.update(funds).set({ version: 1 }).where(eq(funds.id, fundId)); // made when new funds were v1
+    const result = await deploy(db, fundId, people[0]!.id, 2);
+    expect(result).toMatchObject({ ok: true, call: { to: FUND_FACTORY_V2 } });
+    expect(await versionOf(db, fundId)).toBe(2);
+    // Opened again, it takes the version new funds have by then, since nothing was sent with the one it had.
+    expect(await cancelDeploy(db, { fundId, userId: people[0]!.id, m: es })).toEqual({ ok: true, reopened: true });
+    expect(await deploy(db, fundId, people[0]!.id, 1)).toMatchObject({ ok: true, call: { to: FUND_FACTORY } });
+    expect(await versionOf(db, fundId)).toBe(1);
+  });
+
+  it("refuses to freeze as v2 a draft whose weekly cap is above the fund's cap, which FundV2 would revert", async () => {
+    const db = await testDb();
+    const { people, fundId } = await group(db);
+    await db.update(funds).set({ weeklyCap: DEFAULT_BALANCE_CAP + 1n }).where(eq(funds.id, fundId)); // an old draft: createDraft refuses it now
+    expect(await deploy(db, fundId, people[0]!.id, 2)).toEqual({
+      ok: false,
+      status: 400,
+      error: es.checks.capAboveFundCap(formatPesos(DEFAULT_BALANCE_CAP, "es")),
+    });
+    expect((await draftById(db, fundId))?.status).toBe("draft"); // nothing was frozen
+    // v1 never had that rule: such a draft still creates its v1 fund, and a v1 one already frozen is sent again as it was.
+    expect(await deploy(db, fundId, people[0]!.id, 1)).toMatchObject({ ok: true, call: { to: FUND_FACTORY } });
+    expect(await deploy(db, fundId, people[0]!.id, 2)).toMatchObject({ ok: true, call: { to: FUND_FACTORY } });
+  });
+
+  it("frozenCreateFunds gives each draft's call with its factory", async () => {
+    const db = await testDb();
+    const ana = await addUser(db, "Ana");
+    const others = [await addUser(db, "Beto"), await addUser(db, "Caro")];
+    const draft = async (name: string) => {
+      const created = await createDraft(db, ana.id, { ...DRAFT, name }, es);
+      if (!created.ok) throw new Error(created.error);
+      for (const person of others) await joinFund(db, person.id, created.inviteCode, es);
+      return created.id;
+    };
+    const [futbol, asado] = [await draft("Fútbol"), await draft("Asado")];
+    await draft("Pádel"); // never frozen: it has no call
+    const calls = [];
+    for (const [fundId, version] of [[futbol, 1], [asado, 2]] as const) {
+      const frozen = await deploy(db, fundId, ana.id, version);
+      if (!frozen.ok) throw new Error(frozen.error);
+      calls.push(frozen.call);
+    }
+
+    const given = await frozenCreateFunds(db, ana.id, () => AGENT);
+    expect(given).toHaveLength(2);
+    expect(given).toEqual(expect.arrayContaining(calls));
+    expect(given.map((call) => call.to).sort()).toEqual([FUND_FACTORY, FUND_FACTORY_V2].sort());
+    expect(await frozenCreateFunds(db, others[0]!.id, () => AGENT)).toEqual([]);
+  });
+
+  it("confirmDeploy refuses a v2 fund with another fee", async () => {
+    const db = await testDb();
+    const { people, fundId } = await group(db);
+    const members = people.map((p) => getAddress(p.account));
+    const creator = members[0]!;
+    await deploy(db, fundId, people[0]!.id, 2);
+    const confirm = (settings: unknown[]) =>
+      confirmDeploy(db, {
+        fundId,
+        userId: people[0]!.id,
+        transactionHash: TX,
+        client: fakeClient([{ address: FUND_FACTORY_V2, fund: NEW_FUND, creator }], settings, 2) as never,
+        agent: AGENT,
+        m: es,
+      });
+    expect(await confirm(settingsFor(members, { feeBps: 30 }, 2))).toEqual({ ok: false, status: 409, error: es.funds.mismatch });
+    expect((await draftById(db, fundId))?.status).toBe("deploying");
+    expect(await confirm(settingsFor(members, {}, 2))).toEqual({ ok: true, address: NEW_FUND });
+  });
+
+  it("confirmDeploy refuses a v2 fund with another currency, dollar or pool", async () => {
+    const db = await testDb();
+    const { people, fundId } = await group(db);
+    const members = people.map((p) => getAddress(p.account));
+    const other = getAddress("0x00000000000000000000000000000000000000ff");
+    await deploy(db, fundId, people[0]!.id, 2);
+    for (const change of [{ currency: other }, { dollar: other }, { pool: other }, { dollar: getAddress("0x0000000000000000000000000000000000000000") }]) {
+      const client = fakeClient([{ address: FUND_FACTORY_V2, fund: NEW_FUND, creator: members[0]! }], settingsFor(members, change, 2), 2);
+      expect(
+        await confirmDeploy(db, { fundId, userId: people[0]!.id, transactionHash: TX, client: client as never, agent: AGENT, m: es }),
+        JSON.stringify(Object.keys(change)),
+      ).toEqual({ ok: false, status: 409, error: es.funds.mismatch });
+    }
+    expect((await draftById(db, fundId))?.status).toBe("deploying");
+  });
+
+  it("markLive keeps the version of the factory that created it", async () => {
+    const db = await testDb();
+    const [one, two] = [await group(db), await group(db)];
+    const [fundOne, fundTwo] = [getAddress("0x00000000000000000000000000000000000f00d7"), getAddress("0x00000000000000000000000000000000000f00d8")];
+    await deploy(db, one.fundId, one.people[0]!.id, 1);
+    await deploy(db, two.fundId, two.people[0]!.id, 2);
+    const confirm = ({ people, fundId }: typeof one, fund: Address, factory: Address, version: FundVersion) =>
+      confirmDeploy(db, {
+        fundId,
+        userId: people[0]!.id,
+        transactionHash: TX,
+        client: fakeClient([{ address: factory, fund, creator: getAddress(people[0]!.account) }], settingsFor(people.map((p) => getAddress(p.account)), {}, version), version) as never,
+        agent: AGENT,
+        m: es,
+      });
+    // Each takes only its own version's factory: the other one's FundCreated isn't its fund.
+    expect(await confirm(one, fundOne, FUND_FACTORY_V2, 2)).toMatchObject({ ok: false, status: 409, error: es.funds.notInOperation });
+    expect(await confirm(two, fundTwo, FUND_FACTORY, 1)).toMatchObject({ ok: false, status: 409, error: es.funds.notInOperation });
+    expect(await versionOf(db, one.fundId)).toBe(1);
+    expect(await versionOf(db, two.fundId)).toBe(2);
+
+    expect(await confirm(one, fundOne, FUND_FACTORY, 1)).toEqual({ ok: true, address: fundOne });
+    expect(await confirm(two, fundTwo, FUND_FACTORY_V2, 2)).toEqual({ ok: true, address: fundTwo });
+    expect(await draftById(db, one.fundId)).toMatchObject({ status: "live", address: fundOne, version: 1 });
+    expect(await draftById(db, two.fundId)).toMatchObject({ status: "live", address: fundTwo, version: 2 });
+    expect(await versionOf(db, one.fundId)).toBe(1);
+    expect(await versionOf(db, two.fundId)).toBe(2);
+  });
+
+  it("deployStep builds, sends again and confirms a v2 createFund on FundFactoryV2, keeping its version", async () => {
+    const db = await testDb();
+    const { people, fundId } = await group(db, 4);
+    const ana = people[0]!.id;
+    const members = people.map((p) => getAddress(p.account));
+    const step = (client: ReturnType<typeof fakeClient>, version?: FundVersion) =>
+      deployStep(db, {
+        fundId,
+        userId: ana,
+        votesRequired: 2,
+        agent: AGENT,
+        client: client as never,
+        findOperation: async () => null,
+        createFundDailyLimit: 10,
+        ...(version === undefined ? {} : { version }),
+        m: es,
+      });
+    const first = await step(fakeClient([], []), 2);
+    expect(first).toMatchObject({ ok: true, call: { to: FUND_FACTORY_V2 } });
+
+    // Sent with nonce 5 a long time ago, and the chain still has that nonce: the same call again, still v2, though
+    // new funds are v1 as far as this call knows.
+    await recordOperation(db, ana, { userOpHash: OP, kind: "create-fund", draftId: fundId, nonce: 5n });
+    await db.update(operations).set({ createdAt: new Date(Date.now() - PENDING_FOR_MS - 60_000) });
+    const unspent = fakeClient([], []);
+    unspent.readContract.mockResolvedValue(5n);
+    expect(await step(unspent)).toEqual({ ...first, nonce: 5n });
+
+    await finishOperation(db, ana, { userOpHash: OP, transactionHash: TX, success: true });
+    const landed = fakeClient([{ address: FUND_FACTORY_V2, fund: NEW_FUND, creator: members[0]! }], settingsFor(members, {}, 2), 2);
+    expect(await step(landed)).toEqual({ ok: true, address: NEW_FUND });
+    expect(await draftById(db, fundId)).toMatchObject({ status: "live", address: NEW_FUND, version: 2 });
   });
 });
 

@@ -1,4 +1,4 @@
-import { FUND_FACTORY, USDT, WARS, fundFactoryAbi } from "@tesoreria/agent";
+import { FUND_FACTORY, FUND_FACTORY_V2, USDT, WARS, fundFactoryAbi } from "@tesoreria/agent";
 import { ATTRIBUTION_SUFFIX, type Call, SAFE_P256_VERIFIERS, SAFE_WEBAUTHN_SHARED_SIGNER, keyChangeCallData, safeKeyOf } from "@tesoreria/wallet";
 import { createFakePasskey } from "@tesoreria/wallet/testing";
 import { eq, sql } from "drizzle-orm";
@@ -59,6 +59,8 @@ const createFundCall = (members: Address[] = [ME, OTHER, randomAccount()]): Call
     args: [{ name: "Fútbol", members, votesRequired: 2, agent: AGENT, agreedExpense: "la cancha", weeklyCap: 1n, balanceCap: 1n }],
   }),
 });
+/** A createFund as `frozenCreateFunds` gives it: the factory it goes to, and its calldata. */
+const frozen = (call: Call): { to: Address; data: Hex } => ({ to: call.to, data: call.data! });
 const contribute = (fund: Address, token: "wars" | "usdt" = "wars") => contributeCalls({ fund, token, amount: 10n ** 18n });
 const op = (sender: string, callData: string = safeCallData(contribute(FUND))) => ({ sender, nonce: "0x0", callData });
 
@@ -215,7 +217,7 @@ describe("keyChangeCallKey", () => {
 describe("checkCalls", () => {
   const creating = createFundCall();
   const member = { liveFunds: [FUND], createFundCalls: [], joinRequests: [] };
-  const creator = { liveFunds: [], createFundCalls: [creating.data!], joinRequests: [] };
+  const creator = { liveFunds: [], createFundCalls: [frozen(creating)], joinRequests: [] };
   const fundCall = (to: Address, data: Hex, value = 0n): OperationCall => ({ to, value, data });
 
   it("lets a live fund's member approve it and contribute, in wARS or USDT, and vote and execute there", () => {
@@ -321,7 +323,7 @@ describe("checkCalls", () => {
 
   it("sponsors on the factory only the createFunds it's given, byte for byte in any case", () => {
     const another = createFundCall();
-    const both = { liveFunds: [], createFundCalls: [creating.data!, another.data!], joinRequests: [] };
+    const both = { liveFunds: [], createFundCalls: [frozen(creating), frozen(another)], joinRequests: [] };
     for (const call of [creating, another]) expect(checkCalls(asRead([call]), both)).toEqual({ ok: true, createsFund: true });
     const shouted = creating.data!.replace(/[a-f]/g, (letter) => letter.toUpperCase()) as Hex;
     expect(checkCalls([{ to: FUND_FACTORY, value: 0n, data: shouted }], creator)).toEqual({ ok: true, createsFund: true });
@@ -338,6 +340,16 @@ describe("checkCalls", () => {
       expect(checkCalls(asRead([call]), creator), why).toMatchObject({ ok: false, status: 403, error: expect.stringContaining("createFund") });
     }
     expect(checkCalls(asRead([creating]), member)).toMatchObject({ ok: false, status: 403 });
+  });
+
+  it("sponsors a createFund only on the factory it was frozen for: its target counts as much as its calldata", () => {
+    const toV2 = { to: FUND_FACTORY_V2, data: creating.data! };
+    const frozenForV2 = { liveFunds: [], createFundCalls: [toV2], joinRequests: [] };
+    expect(checkCalls(asRead([toV2]), frozenForV2)).toEqual({ ok: true, createsFund: true });
+    // The same bytes to the factory they weren't frozen for, in both directions.
+    expect(checkCalls(asRead([creating]), frozenForV2)).toMatchObject({ ok: false, status: 403, error: expect.stringContaining("createFund") });
+    expect(checkCalls(asRead([toV2]), creator)).toMatchObject({ ok: false, status: 403, error: expect.stringContaining("createFund") });
+    expect(checkCalls(asRead([toV2]), member)).toMatchObject({ ok: false, status: 403 });
   });
 });
 
@@ -722,7 +734,7 @@ describe("authorizeBundlerRequest", () => {
       const db = await testDb();
       const ana = await addUser(db, "Ana");
       const { fundId, call } = await frozenDraft(db, ana.id, "Fútbol");
-      expect(await frozenCreateFunds(db, ana.id, agent)).toEqual([call.data]);
+      expect(await frozenCreateFunds(db, ana.id, agent)).toEqual([frozen(call)]);
       await db.update(funds).set({ status: "live", address: FUND, createdBlock: 79_700_000n }).where(eq(funds.id, fundId));
       const unread = () => {
         throw new Error("Nothing being created needs the agent");
@@ -736,7 +748,7 @@ describe("authorizeBundlerRequest", () => {
       const ana = await addUser(db, "Ana");
       const people = await Promise.all(["Beto", "Caro", "Dani", "Eli"].map((name) => addUser(db, name)));
       const at = (minutes: number) => new Date(Date.UTC(2026, 9, 10, 12, minutes));
-      const calls: Hex[] = [];
+      const calls: { to: Address; data: Hex }[] = [];
       for (const [i, name] of ["Fútbol", "Asado"].entries()) {
         const created = await createDraft(db, ana.id, { name, agreedExpense: "la cancha", weeklyFee: 10_000n * WARS_UNIT, weeklyCap: 60_000n * WARS_UNIT }, es);
         if (!created.ok) throw new Error(created.error);
@@ -748,9 +760,10 @@ describe("authorizeBundlerRequest", () => {
         }
         const deploy = await deployCall(db, { fundId: created.id, userId: ana.id, votesRequired: 2, agent: AGENT, m: es });
         if (!deploy.ok) throw new Error(deploy.error);
-        calls.push(deploy.call.data);
+        calls.push(deploy.call);
       }
-      expect([...(await frozenCreateFunds(db, ana.id, agent))].sort()).toEqual([...calls].sort());
+      const byData = (list: { data: Hex }[]) => [...list].sort((a, b) => a.data.localeCompare(b.data));
+      expect(byData(await frozenCreateFunds(db, ana.id, agent))).toEqual(byData(calls));
     });
 
     it("sponsors each of two drafts being created with its own exact call, one at a time", async () => {

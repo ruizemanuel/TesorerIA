@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { personProblem, readDraft } from "../src/lib/checks";
 import { MAX_PESOS, NBSP, WARS_UNIT, formatPesos } from "../src/lib/format";
+import { DEFAULT_BALANCE_CAP } from "../src/lib/fund-abi";
 import { en } from "../src/lib/i18n/en";
 import { es } from "../src/lib/i18n/es";
 
@@ -28,6 +29,22 @@ describe("readDraft", () => {
     expect(error({ name: " " })).toBe("Poné un nombre para el fondo, de hasta 40 letras.");
     expect(error({ name: "x".repeat(41) })).toBe("Poné un nombre para el fondo, de hasta 40 letras.");
     expect(error({ agreedExpense: "" })).toBe("Poné cuál es el gasto acordado, de hasta 40 letras.");
+  });
+});
+
+describe("a weekly cap against the fund's cap", () => {
+  it("refuses a weekly cap above the fund's cap", () => {
+    expect(DEFAULT_BALANCE_CAP).toBe(450_000n * WARS_UNIT);
+    const error = (weeklyCap: string, locale: "es" | "en" = "es") => {
+      const read = readDraft({ ...DRAFT, weeklyFee: locale === "es" ? "10.000" : "10,000", weeklyCap }, locale);
+      return read.ok ? "" : read.error;
+    };
+    expect(error("450.001")).toBe(`El tope semanal no puede pasar el tope del fondo, de $${NBSP}450.000.`);
+    expect(error("450,001", "en")).toBe(`The weekly cap can't be above the fund's cap of ARS${NBSP}450,000.`);
+    expect(error("450.000,01")).toBe(`El tope semanal no puede pasar el tope del fondo, de $${NBSP}450.000.`);
+    // Up to it, it's fine; the sentence for an amount nobody means still comes first.
+    expect(readDraft({ ...DRAFT, weeklyCap: "450.000" }, "es")).toMatchObject({ ok: true, draft: { weeklyCap: DEFAULT_BALANCE_CAP } });
+    expect(error("1.000.000.000.001")).toBe(`El tope no puede pasar de ${formatPesos(MAX_PESOS, "es")}.`);
   });
 });
 

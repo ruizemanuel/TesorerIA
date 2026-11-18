@@ -77,6 +77,7 @@ const ARGS: Record<string, (k: Kit) => Case[]> = {
   "errors.amountTooBig": ({ pesos }) => [call(pesos(1_000_000_000_000))],
   "checks.feeTooBig": ({ pesos }) => [call(pesos(1_000_000_000_000))],
   "checks.capTooBig": ({ pesos }) => [call(pesos(1_000_000_000_000))],
+  "checks.capAboveFundCap": ({ pesos }) => [call(pesos(450_000))],
   "funds.accountCap": () => [call(3)],
   "funds.tooManyMembers": () => [call(10, 11)],
   "funds.votesRange": () => [call(8)],

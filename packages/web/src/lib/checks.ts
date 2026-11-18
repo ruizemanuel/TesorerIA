@@ -1,4 +1,5 @@
 import { MAX_PESOS, formatPesos, parsePesos } from "./format";
+import { DEFAULT_BALANCE_CAP } from "./fund-abi";
 import type { Locale } from "./i18n/locales";
 import { type Messages, messagesFor } from "./i18n/messages";
 
@@ -25,7 +26,12 @@ export function draftProblem({ name, agreedExpense, weeklyFee, weeklyCap }: Draf
   if (weeklyCap <= 0n) return m.checks.capZero;
   if (weeklyFee > MAX_PESOS) return m.checks.feeTooBig(formatPesos(MAX_PESOS, m.locale));
   if (weeklyCap > MAX_PESOS) return m.checks.capTooBig(formatPesos(MAX_PESOS, m.locale));
-  return null;
+  return fundCapProblem(weeklyCap, m);
+}
+
+/** Whether a weekly cap is above the fund's cap on its balance, which FundV2 reverts at creation, and what to say of it. */
+export function fundCapProblem(weeklyCap: bigint, m: Messages): string | null {
+  return weeklyCap > DEFAULT_BALANCE_CAP ? m.checks.capAboveFundCap(formatPesos(DEFAULT_BALANCE_CAP, m.locale)) : null;
 }
 
 /** A draft as the form has it, with its amounts read the way `locale` writes them (`parsePesos`), or what to fix. */

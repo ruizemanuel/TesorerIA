@@ -69,6 +69,8 @@ export const es = {
     capZero: "El tope tiene que ser más que cero.",
     feeTooBig: (max: string) => `La cuota no puede pasar de ${max}.`,
     capTooBig: (max: string) => `El tope no puede pasar de ${max}.`,
+    /** `cap` is the fund's cap on its balance: the weekly cap can't pass it (FundV2 reverts otherwise). */
+    capAboveFundCap: (cap: string) => `El tope semanal no puede pasar el tope del fondo, de ${cap}.`,
     feeUnreadable: "No entendimos la cuota. Escribila como 10.000 o 10.000,50.",
     capUnreadable: "No entendimos el tope. Escribilo como 60.000 o 60.000,50.",
   },

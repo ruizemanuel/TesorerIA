@@ -59,6 +59,7 @@ export const en: Messages = {
     capZero: "The weekly cap has to be more than zero.",
     feeTooBig: (max: string) => `The weekly dues can't be more than ${max}.`,
     capTooBig: (max: string) => `The weekly cap can't be more than ${max}.`,
+    capAboveFundCap: (cap: string) => `The weekly cap can't be above the fund's cap of ${cap}.`,
     feeUnreadable: "We couldn't read the weekly dues. Write them like 10,000 or 10,000.50.",
     capUnreadable: "We couldn't read the weekly cap. Write it like 60,000 or 60,000.50.",
   },
