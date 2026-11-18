@@ -214,6 +214,7 @@ export async function loadFundScreen(
     conversionHold: hold,
     summaries: summaryRows.map((row) => ({ week: row.week, at: row.createdAt })),
     currencyBalance: snapshot.currencyBalance,
+    version: snapshot.version,
     feeBps: snapshot.feeBps,
     viewerIsMember: !publicView && viewerIsMember,
     now: new Date(Number(clock.timestamp) * 1000),

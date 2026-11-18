@@ -5,7 +5,7 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CurrentUser } from "../src/lib/current-user";
 import type { Db } from "../src/lib/db/client";
 import { decisions, expenses, funds, joinRequests, memberships, operations, weekSummaries } from "../src/lib/db/schema";
-import { formatPesos, formatUsdt } from "../src/lib/format";
+import { NBSP, formatPesos, formatUsdt } from "../src/lib/format";
 import { JOIN_REQUEST_REACH_DAYS } from "../src/lib/join-requests";
 import { finishOperation, recordOperation } from "../src/lib/operations";
 import { HistoryGapError, loadFundScreen as loadScreen, loadPublicFundScreen } from "../src/lib/read-fund";
@@ -584,7 +584,7 @@ describe("loadFundScreen: a version 2 fund", () => {
     setHistory([event("FeePaid", { amount: 200n * WARS }, BLOCK - 100n)]);
     const address = await liveFundV2();
     expect(texts((await loadFundScreen(address, asViewer(ana)))!)).toEqual([
-      `Pasé ${formatPesos(200n * WARS, "es")} de la comisión del 0,25 % a TesorerIA, para cubrir lo que cuestan las operaciones del fondo.`,
+      `Pasé ${formatPesos(200n * WARS, "es")} de la comisión del 0,25${NBSP}% a TesorerIA, para cubrir lo que cuestan las operaciones del fondo.`,
     ]);
   });
 

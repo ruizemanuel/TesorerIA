@@ -637,7 +637,7 @@ describe("buildTimeline: a version 2 fund", () => {
   const ars = (text: string) => text.replaceAll("ARS ", `ARS${NBSP}`).replaceAll(" USDT", `${NBSP}USDT`);
   /** "0,25 %" and "0.25%", as each language writes the fee: the Spanish one doesn't break before its sign. */
   const percent = (text: string) => text.replaceAll(" %", `${NBSP}%`);
-  const v2 = (change: Partial<Parameters<typeof buildTimeline>[0]> = {}) => timeline({ feeBps: 25, ...change });
+  const v2 = (change: Partial<Parameters<typeof buildTimeline>[0]> = {}) => timeline({ version: 2, feeBps: 25, ...change });
   const giveBack = (amount: bigint) =>
     event("ProposalCreated", { id: 3n, action: 8, a: CARO, b: zeroAddress, amount, proposer: AGENT, note: "deposité en otro fondo" }, BLOCK - 300n, 30);
 
@@ -700,6 +700,26 @@ describe("buildTimeline: a version 2 fund", () => {
     const [english] = v2({ events: [event("FeePaid", { amount: 200n * WARS + 5n * 10n ** 16n }, BLOCK - 200n)], m: en });
     expect(english?.text).toBe(ars("I sent ARS 200.05 of the 0.25% fee to TesorerIA, to cover what the fund's operations cost."));
     expect(english?.detail).toBe("0.25% of each contribution covers what the fund's operations cost. I collect it and send it once a week.");
+  });
+
+  it("shows a v2 contribution in pesos as Aportar's button asked it, up to the centavo", () => {
+    // withFee($ 10.000, 25): the button said "Aportar $ 10.025,07", and sent this, a fraction of a centavo less.
+    const asked = 10_025_062_656_641_604_010_026n;
+    const contribution = event("Contribution", { member: CARO, token: WARS_TOKEN, amount: asked, credited: 10_000n * WARS + 1n }, BLOCK - 100n);
+    const onItsWay = { userOpHash: "0xc", kind: "contribute" as const, amount: asked, token: "wars" as const, createdAt: NOW };
+    expect(v2({ events: [contribution], pending: [onItsWay] }).map((i) => i.text)).toEqual([
+      $("Tu aporte de $ 10.025,07 está en camino."),
+      $("Caro aportó $ 10.025,07."),
+    ]);
+    expect(v2({ events: [contribution], pending: [onItsWay], m: en }).map((i) => i.text)).toEqual([
+      ars("Your contribution of ARS 10,025.07 is on its way."),
+      ars("Caro contributed ARS 10,025.07."),
+    ]);
+    // A version 1 fund's, to the nearest centavo, as always.
+    expect(timeline({ events: [contribution], pending: [onItsWay] }).map((i) => i.text)).toEqual([
+      $("Tu aporte de $ 10.025,06 está en camino."),
+      $("Caro aportó $ 10.025,06."),
+    ]);
   });
 
   it("leaves out a v2 RemainderDistributed of dust", () => {

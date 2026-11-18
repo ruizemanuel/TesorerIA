@@ -11,7 +11,6 @@ import {
   MIN_BINANCE_USDT,
   contributeCalls,
   defaultUsdtAmount,
-  defaultWarsAmount,
   nextRate,
   rampUrl,
   readUsdtAmount,
@@ -135,8 +134,7 @@ export function ContributePanel({
   const target = weeklyContribution({ owed, weeklyFee, room: usdtRoom });
   // Reimbursements land in this same account, so wARS are offered by what the member owes, never by what they hold (F7).
   // In a version 2 fund, what credits the week whole after the fee.
-  const warsDefault = defaultWarsAmount({ held: held?.wars ?? 0n, owed, weeklyFee, room, feeBps });
-  const wars = warsField(typed, warsDefault, version, { held: held?.wars ?? 0n, room, cap: balanceCap }, m);
+  const wars = warsField(typed, { held: held?.wars ?? 0n, owed, weeklyFee, room, feeBps }, version, balanceCap, m);
   // USDT too: what covers the week at the fund's rate, which moves, so the default follows it until the member types.
   const usdtOffer = { held: held?.usdt ?? 0n, rate: held?.rate ?? null, owed, weeklyFee, room: usdtRoom, feeBps };
   const usdtDefault = defaultUsdtAmount(usdtOffer);
@@ -144,7 +142,7 @@ export function ContributePanel({
   const toSend = held === null ? null : usdtToSend(usdtOffer);
   const reading = tab === "usdt" ? usdtReading : wars.reading;
   const amount = reading.ok ? reading.amount : 0n;
-  // Pesos up to the centavo, as the field shows them: what was typed already is, and a version 2 default is a fraction over.
+  // Pesos up to the centavo, as the field shows them: what was typed already is, and a version 2 fee's amount is a fraction over.
   const label = tab === "usdt" ? formatUsdt(amount, locale) : formatPesos(upToCentavo(amount), locale);
   // Ripio loads what the pesos tab asks: in a version 2 fund, what credits the week after the fee, up to the centavo.
   const rampAmount = version === 2 ? upToCentavo(withFee(target, feeBps)) : target;

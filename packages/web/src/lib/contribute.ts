@@ -1,8 +1,8 @@
 import { type FundVersion, fundV2Abi } from "@tesoreria/agent";
 import type { Call } from "@tesoreria/wallet";
 import { type Address, encodeFunctionData, erc20Abi } from "viem";
-import { MAX_PESOS, USDT_UNIT, formatPesos, formatUsdt, parsePesos, parseUsdt, upToCentavo } from "./format";
-import { DEFAULT_BALANCE_CAP, memberFundAbi } from "./fund-abi";
+import { MAX_PESOS, USDT_UNIT, downToCentavo, formatPesos, formatUsdt, parsePesos, parseUsdt, upToCentavo } from "./format";
+import { memberFundAbi } from "./fund-abi";
 import type { Locale } from "./i18n/locales";
 import type { Messages } from "./i18n/messages";
 
@@ -95,26 +95,22 @@ export function weeklyContribution({ owed, weeklyFee, room }: { owed: bigint; we
 }
 
 /**
+ * What the pesos tab knows: what the member holds, their week, what goes in before the fund's cap (roomUnderCap, with
+ * the fee), and the fund's fee in basis points (0, or left out, in version 1).
+ */
+export type WarsOffer = { held: bigint; owed: bigint; weeklyFee: bigint; room: bigint | null; feeBps?: number };
+
+/** What credits this week's contribution whole after the fund's fee (withFee): the week itself in version 1. */
+const askedWars = ({ owed, weeklyFee, feeBps = 0 }: WarsOffer) => withFee(weeklyContribution({ owed, weeklyFee, room: null }), feeBps);
+
+/**
  * The wARS Aportar offers by default. Never the whole balance: reimbursements land in the same account, so
  * someone just paid back would otherwise put it all back in (spec, 8.3). In a version 2 fund, what credits the week
  * whole after its fee (withFee), within `room`, which is what goes in before the fee (roomUnderCap).
  */
-export function defaultWarsAmount({
-  held,
-  owed,
-  weeklyFee,
-  room,
-  feeBps = 0,
-}: {
-  held: bigint;
-  owed: bigint;
-  weeklyFee: bigint;
-  room: bigint | null;
-  /** The fund's fee, in basis points: 0 in version 1. */
-  feeBps?: number;
-}): bigint {
-  const due = withFee(weeklyContribution({ owed, weeklyFee, room: null }), feeBps);
-  return min(held, room === null ? due : min(due, room));
+export function defaultWarsAmount(offer: WarsOffer): bigint {
+  const asked = askedWars(offer);
+  return min(offer.held, offer.room === null ? asked : min(asked, offer.room));
 }
 
 /** An amount of pesos as the field shows it, without the sign: "10.000", or "10,000" in English. */
@@ -126,20 +122,17 @@ export type PesosReading = { ok: true; amount: bigint } | { ok: false; error: st
 
 /**
  * What a member reads when what they typed doesn't fit under the fund's cap; `roomText` is the room in their tab's unit,
- * and `cap` the fund's.
+ * and `cap` the fund's (FundView's `balanceCap`).
  */
 function overCap(room: bigint, roomText: string, cap: bigint, m: Messages): string {
   const capText = formatPesos(cap, m.locale);
   return room === 0n ? m.contribute.capReached(capText) : m.contribute.roomLeft(roomText, capText);
 }
 
-/**
- * What a member typed in the amount field, or a sentence in the page's language that says what to fix. `cap` is the
- * fund's, the default one every fund the web makes has unless said.
- */
+/** What a member typed in the amount field, or a sentence in the page's language that says what to fix. */
 export function readPesosAmount(
   text: string,
-  { held, room, cap = DEFAULT_BALANCE_CAP }: { held: bigint; room: bigint | null; cap?: bigint },
+  { held, room, cap }: { held: bigint; room: bigint | null; cap: bigint },
   m: Messages,
 ): PesosReading {
   const amount = parsePesos(text, m.locale);
@@ -151,21 +144,27 @@ export function readPesosAmount(
 }
 
 /**
- * The pesos tab's field: what it shows, and what it sends. Untouched, a version 1 fund shows `offered` to the nearest
- * centavo and sends what that reads back, as it always did; a version 2 fund shows it up to the centavo and sends it
- * exact, since `offered` is what credits the week whole after the fee (withFee) and what it shows is a fraction of a
- * centavo over it. Typed, it sends what was typed.
+ * The pesos tab's field: what it shows, and what it sends. Untouched, a version 1 fund shows its default
+ * (defaultWarsAmount) to the nearest centavo and sends what that reads back, as it always did. A version 2 fund sends
+ * the fee's amount (withFee) exact and shows it up to the centavo, as the button says it: what it shows is a fraction of
+ * a centavo over it. When the cap or the account limits the default instead, it shows and sends it down to the
+ * centavo: what was shown reads back, and what fits under the cap is never refused. Typed, it sends what was typed.
  */
 export function warsField(
   typed: string | null,
-  offered: bigint,
+  offer: WarsOffer,
   version: FundVersion,
-  limits: { held: bigint; room: bigint | null; cap?: bigint },
+  cap: bigint,
   m: Messages,
 ): { value: string; reading: PesosReading } {
-  if (typed === null && version === 2) return { value: pesosText(upToCentavo(offered), m.locale), reading: { ok: true, amount: offered } };
+  const offered = defaultWarsAmount(offer);
+  if (typed === null && version === 2) {
+    if (offered === askedWars(offer)) return { value: pesosText(upToCentavo(offered), m.locale), reading: { ok: true, amount: offered } };
+    const amount = downToCentavo(offered);
+    return { value: pesosText(amount, m.locale), reading: { ok: true, amount } };
+  }
   const value = typed ?? pesosText(offered, m.locale);
-  return { value, reading: readPesosAmount(value, limits, m) };
+  return { value, reading: readPesosAmount(value, { held: offer.held, room: offer.room, cap }, m) };
 }
 
 /**
@@ -246,7 +245,7 @@ export type UsdtReading = { ok: true; amount: bigint } | { ok: false; error: str
 /** What a member typed in the USDT field, or a sentence in the page's language that says what to fix. */
 export function readUsdtAmount(
   text: string,
-  { held, rate, room, cap = DEFAULT_BALANCE_CAP }: { held: bigint; rate: bigint | null; room: bigint | null; cap?: bigint },
+  { held, rate, room, cap }: { held: bigint; rate: bigint | null; room: bigint | null; cap: bigint },
   m: Messages,
 ): UsdtReading {
   const amount = parseUsdt(text, m.locale);

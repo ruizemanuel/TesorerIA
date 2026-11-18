@@ -1,4 +1,4 @@
-import { type ConversionDifference, type FundEvent, type SkipCode, USDT, paidProposal } from "@tesoreria/agent";
+import { type ConversionDifference, type FundEvent, type FundVersion, type SkipCode, USDT, paidProposal } from "@tesoreria/agent";
 import { type Address, type Hash, getAddress, isAddressEqual } from "viem";
 import { type BlockClock, blockTime, weekAt } from "./chain-time";
 import type { ExpenseStatus } from "./db/schema";
@@ -91,6 +91,7 @@ export function buildTimeline({
   conversionHold = null,
   summaries = [],
   currencyBalance,
+  version = 1,
   feeBps = 0,
   viewerIsMember,
   now,
@@ -130,6 +131,11 @@ export function buildTimeline({
   summaries?: readonly { week: number; at: Date }[];
   /** What the fund can pay now (v2: without the fee set aside): a payment or a give-back over it can't be executed yet. */
   currencyBalance: bigint;
+  /**
+   * The fund's contract version: a version 2 contribution in pesos is said up to the centavo, as Aportar's button asked
+   * it (withFee sends a fraction of a centavo less); version 1's are whole centavos.
+   */
+  version?: FundVersion;
   /** A version 2 fund's fee, in basis points (FundV2.feeBps), for the weekly FeePaid; 0 in version 1, which has none. */
   feeBps?: number;
   viewerIsMember: boolean;
@@ -149,6 +155,8 @@ export function buildTimeline({
   /** The accounts an open AddMember proposal would add: their request is told by the proposal now. */
   const beingProposed = new Set<Address>();
   const newcomer = (address: Address) => names.get(getAddress(address)) ?? t.newAccount;
+  /** A contribution in pesos, as Aportar's button said it. */
+  const contributedPesos = (amount: bigint) => formatPesos(version === 2 ? upToCentavo(amount) : amount, m.locale);
   let cap = initialWeeklyCap;
 
   for (const event of events) {
@@ -160,7 +168,7 @@ export function buildTimeline({
     switch (event.eventName) {
       case "Contribution": {
         const { member, token, amount } = event.args;
-        const what = isAddressEqual(token, USDT) ? formatUsdt(amount, m.locale) : formatPesos(amount, m.locale);
+        const what = isAddressEqual(token, USDT) ? formatUsdt(amount, m.locale) : contributedPesos(amount);
         items.push({ ...base, actor: { kind: "member", name: who(member) }, text: t.contributed(who(member), what) });
         break;
       }
@@ -377,7 +385,7 @@ export function buildTimeline({
           : operation.kind === "propose"
             ? t.onItsWay.propose
             : t.onItsWay.contribution(
-                operation.token === "usdt" ? formatUsdt(operation.amount ?? 0n, m.locale) : formatPesos(operation.amount ?? 0n, m.locale),
+                operation.token === "usdt" ? formatUsdt(operation.amount ?? 0n, m.locale) : contributedPesos(operation.amount ?? 0n),
               );
     items.push({ id: `op:${operation.userOpHash}`, at: operation.createdAt, actor: { kind: "member", name: t.you }, text, pending: true });
   }

@@ -32,7 +32,10 @@ export type FundView = {
   balanceCap: bigint;
   /**
    * What the contract counts toward `balanceCap`: version 1's whole balance; version 2's available currency and every
-   * member's pending dollars at their TWAP value, without the dollars sent to it directly, which are nobody's.
+   * member's pending dollars at their TWAP value, without the dollars sent to it directly, which are nobody's. Never
+   * less than the contract's count: FundV2 floors the value of all the pending dollars at once, and each member's
+   * `pendingValue` is floored on its own, so their sum can be up to a wei low for each member with dollars pending but
+   * one, and that much more is counted.
    */
   counted: bigint;
   weeklyFee: bigint;
@@ -99,6 +102,9 @@ export function buildFundView({
   const mine = rows.find((row) => row.isMe);
   // Every member's pending dollars at their TWAP value: only version 2 holds them apart until they're converted.
   const pending = snapshot.version === 2 ? snapshot.pendingValue.reduce((sum, value) => sum + value, 0n) : 0n;
+  // What flooring each member's value apart can leave out of the contract's count (`counted`): a wei for each but one.
+  const pendingMembers = snapshot.version === 2 ? snapshot.pendingDollar.filter((dollars) => dollars > 0n).length : 0;
+  const flooredApart = BigInt(Math.max(0, pendingMembers - 1));
   let share = 0n;
   let ahead = 0n;
   if (mine !== undefined) {
@@ -127,7 +133,7 @@ export function buildFundView({
     dollar: snapshot.dollar,
     feeBps: snapshot.feeBps,
     balanceCap: snapshot.balanceCap,
-    counted: snapshot.version === 2 ? snapshot.currencyBalance + pending : balance,
+    counted: snapshot.version === 2 ? snapshot.currencyBalance + pending + flooredApart : balance,
     weeklyFee,
     weeklyCap: snapshot.weeklyCap,
     spentThisWeek: snapshot.spentThisWeek,
