@@ -30,7 +30,7 @@ export function statusAfter(decision: Decision, before: ExpenseStatus): ExpenseS
   if (decision.tx !== undefined) {
     if (decision.status === "reverted") return "blocked";
     if (decision.status === undefined) return "sending"; // sent, receipt unknown: settleSent finishes it
-    return decision.kind === "reimburse" ? "reimbursed" : "proposed";
+    return sentAction(decision.kind) === "reimburse" ? "reimbursed" : "proposed";
   }
   switch (decision.kind) {
     case "reimburse":
@@ -42,14 +42,42 @@ export function statusAfter(decision: Decision, before: ExpenseStatus): ExpenseS
     case "reject":
       // A run that died after sending, before keeping the hash: the chain already has this ref.
       return decision.reason.startsWith("Already reimbursed") ? "reimbursed" : "rejected";
-    default:
+    // Not an expense's decision, or one that stopped: kept as blocked. Listed one by one, so a new kind of decision is a
+    // type error here until it is placed, not a silent "blocked".
+    case "convert":
+    case "pay-fee":
+    case "skip":
+    case "blocked":
       return "blocked";
+    default:
+      return unreachable(decision.kind);
   }
+}
+
+/** Fails the typecheck, where it is called, when a union has a member that wasn't handled above it. */
+function unreachable(kind: never): never {
+  throw new Error(`Unhandled decision kind ${String(kind)}`);
 }
 
 /** What an expense's transaction did: a reimbursement, or else a proposal (a give-back's too: it's kept as a payment proposal). */
 function sentAction(kind: Decision["kind"]): "reimburse" | "propose-payment" {
-  return kind === "reimburse" ? "reimburse" : "propose-payment";
+  switch (kind) {
+    case "reimburse":
+      return "reimburse";
+    case "propose-payment":
+    case "propose-give-back":
+      return "propose-payment";
+    // Never an expense's transaction (those are the agent's heartbeat), and kept as a proposal, as they always were.
+    case "convert":
+    case "pay-fee":
+    case "skip":
+    case "wait":
+    case "reject":
+    case "blocked":
+      return "propose-payment";
+    default:
+      return unreachable(kind);
+  }
 }
 
 /** A decision as a row, its amounts as decimal strings (spec, 8.6). */

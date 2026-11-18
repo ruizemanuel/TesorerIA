@@ -271,9 +271,11 @@ export function weekStartBlock(fund: FundSnapshot): bigint {
 /**
  * How many of the agent's proposals this week a member may still ask for (spec, 8.1). In the app the agent proposes
  * everyone's expenses and give-backs, so its MAX_PROPOSALS_PER_WEEK are in practice the whole fund's, and the contract's
- * count is only the agent's. Every member keeps at least one: `left` is what the agent has left this week, less one for
- * each of the other members who hasn't had any yet. `used` is the agent's proposals since the week began that name
- * `member`. Version 1 has no such limit: null.
+ * count is only the agent's. Every member keeps at least one: `left` is what the agent has left this week (`free`), less
+ * one for each of the other members who hasn't had any yet. A member who hasn't had any keeps one all the same while
+ * `free` is above 0, even if a member replaced or added in the week leaves fewer places than members waiting: the
+ * alternative is that nobody has one all week. Once `free` is 0 (the contract's count) `left` is 0 for everyone.
+ * `used` is the agent's proposals since the week began that name `member`. Version 1 has no such limit: null.
  */
 export function proposalQuota(
   fund: FundSnapshot,
@@ -291,8 +293,11 @@ export function proposalQuota(
   const used = (m: Address) => usedBy.get(m.toLowerCase()) ?? 0;
   const waiting = fund.members.filter((m) => !isAddressEqual(m, member) && used(m) === 0).length;
   const free = MAX_PROPOSALS_PER_WEEK - fund.agentProposalsThisWeek;
-  const left = free > 0n ? Number(free) - waiting : 0;
-  return { used: used(member), left: Math.max(0, left) };
+  if (free <= 0n) return { used: used(member), left: 0 };
+  // A member who hasn't had one keeps theirs even when the others' shares have outgrown what's left (a member replaced or
+  // added in the week): the contract's own count is what stops the last of them.
+  const spare = Number(free) - waiting;
+  return { used: used(member), left: used(member) === 0 ? Math.max(1, spare) : Math.max(0, spare) };
 }
 
 type BlockTimes = Pick<PublicClient, "getBlock" | "getBlockNumber">;

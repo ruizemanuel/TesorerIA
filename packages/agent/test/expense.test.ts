@@ -337,6 +337,40 @@ describe("decideExpense in a v2 fund: give-backs by vote and the agent's weekly 
     expect(proposalQuota(nine, others, first)).toEqual({ used: 0, left: 1 });
   });
 
+  it("keeps one proposal for every member who hasn't had one after a member is replaced in the week", () => {
+    // A full fund of 10 where the agent proposed once for X, who was then replaced by Y: 9 places, and 10 members who
+    // have had none. The sum of what's reserved for the others (9 each) would leave nobody a place all week.
+    const fund = fundOf(10, { agentProposalsThisWeek: 1n });
+    const x = fund.members[0] as Address;
+    const y = getAddress(`0x${(0xdd00).toString(16).padStart(40, "0")}`);
+    const replaced = { ...fund, members: [y, ...fund.members.slice(1)] };
+    const events = [proposedFor(replaced, x, 1)];
+    for (const member of replaced.members) {
+      expect(proposalQuota(replaced, events, member), member).toEqual({ used: 0, left: 1 });
+      expect(decideIn(replaced, { ...OTHER, member }, events), member).toMatchObject({ kind: "propose-payment" });
+    }
+    // The contract's count is what stops them, once the places are gone.
+    expect(proposalQuota({ ...replaced, agentProposalsThisWeek: 10n }, events, y)).toEqual({ used: 0, left: 0 });
+  });
+
+  it("keeps one proposal for each member who joins in the week, and none for one who already used more than their share", () => {
+    // Three members, the agent made 8 proposals (6 for A, one each for B and C), so 2 places are free; then D, E and F join.
+    const fund = fundOf(6, { agentProposalsThisWeek: 8n });
+    const [a, b, c, d, e, f] = fund.members as [Address, Address, Address, Address, Address, Address];
+    const events = [
+      ...Array.from({ length: 6 }, (_, i) => proposedFor(fund, a, i + 1)),
+      proposedFor(fund, b, 7),
+      proposedFor(fund, c, 8),
+    ];
+    expect(proposalQuota(fund, events, a)).toEqual({ used: 6, left: 0 });
+    expect(proposalQuota(fund, events, b)).toEqual({ used: 1, left: 0 });
+    for (const newcomer of [d, e, f]) {
+      expect(proposalQuota(fund, events, newcomer), newcomer).toEqual({ used: 0, left: 1 });
+      expect(decideIn(fund, { ...OTHER, member: newcomer }, events), newcomer).toMatchObject({ kind: "propose-payment" });
+    }
+    expect(decideIn(fund, { ...OTHER, member: a }, events)).toMatchObject({ kind: "wait", code: "proposal-quota" });
+  });
+
   it("waits when the contract's count for the agent is 10", () => {
     // Nothing in the history says who the 10 were for (the log may be behind): the contract's count is the one that reverts.
     const full = fundSnapshotV2({ agentProposalsThisWeek: 10n });

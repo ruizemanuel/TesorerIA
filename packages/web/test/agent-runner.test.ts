@@ -166,5 +166,7 @@ describe("runAgent: the agent's weekly proposals and the give-backs of a v2 fund
     expect(statusAfter({ kind: "propose-give-back", reason: "r", tx: SENT_HASH, status: "reverted" }, "new")).toBe("blocked");
     expect(statusAfter({ kind: "wait", reason: "r", code: "proposal-quota" }, "new")).toBe("quota");
     expect(statusAfter({ kind: "wait", reason: "The fund doesn't hold enough wARS yet" }, "quota")).toBe("waiting");
+    // What isn't an expense's decision is blocked, each kind by name.
+    for (const kind of ["convert", "pay-fee", "skip", "blocked"] as const) expect(statusAfter({ kind, reason: "r" }, "new")).toBe("blocked");
   });
 });
