@@ -15,7 +15,7 @@ export { type ChainReader, type FactoryArtifact, checkPool, factoryDeployData } 
 export { shortMessage } from "./errors";
 export { type FundEvent, type LogReader, RPC_LOG_RANGE, type RawLog, blockscoutLogReader, readFundEvents, rpcLogReader } from "./events";
 export { type Expense, type ExpenseDecision, decideExpense } from "./expense";
-export { type CeloReader, type FundRef, type FundSnapshot, listFunds, readFund, weekBlockRange } from "./fund";
+export { type CeloReader, type FundRef, type FundSnapshot, listFunds, proposalQuota, readFund, weekBlockRange, weekStartBlock } from "./fund";
 export {
   type AgentAction,
   type DailyActivity,
@@ -44,6 +44,6 @@ export {
   paidProposal,
   weekSummary,
 } from "./remind";
-export { type AgentContext, type ChainView, type Decision, MIN_GAS_USDT, handleExpense, runHeartbeat } from "./run";
+export { type AgentContext, type ChainView, type Decision, MIN_GAS_USDT, type WaitCode, handleExpense, runHeartbeat } from "./run";
 export { type AgentSigner, type AgentTransaction, createAgentSigner } from "./signer";
 export { type CeloClient, createChainView } from "./view";

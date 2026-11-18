@@ -1,8 +1,10 @@
 import { type Address, type Hash, type Hex, formatUnits, isAddressEqual } from "viem";
 import { Action } from "./abi";
 import type { FundEvent } from "./events";
-import type { FundSnapshot } from "./fund";
+import { type FundSnapshot, proposalQuota } from "./fund";
 import { type DailyActivity, MAX_NOTE_LENGTH, fundCurrency, reimbursementLimits } from "./limits";
+// Type only: run.ts imports this file.
+import type { WaitCode } from "./run";
 
 /**
  * An expense a member entered in the web app. `member` is the account that entered it, never an address
@@ -27,9 +29,12 @@ export type Expense = {
 export type ExpenseDecision =
   | { kind: "reimburse"; member: Address; amount: bigint; ref: Hex }
   | { kind: "propose-payment"; member: Address; amount: bigint; note: string; reason: string }
+  /** A contribution given back, by vote: a version 2 fund only (in version 1 it is a payment). */
+  | { kind: "propose-give-back"; member: Address; amount: bigint; note: string; reason: string }
   /** The agent already proposed this payment, in `transactionHash`: proposing it again would make two. */
   | { kind: "proposed"; transactionHash: Hash; reason: string }
-  | { kind: "wait"; reason: string }
+  /** `code` says why, when the web has its own words for it. */
+  | { kind: "wait"; reason: string; code?: WaitCode }
   | { kind: "reject"; reason: string };
 
 /** Keeps a note within MAX_NOTE_LENGTH characters, for the chain. */
@@ -61,22 +66,30 @@ const ENTRY_MARGIN_BLOCKS = 300n;
 /**
  * The agent's own proposal of this payment, if it already made one since the expense was entered: a send that threw
  * after the node took it, retried. The contract keeps no ref for proposals (unlike reimbursements), so it's told by
- * what it pays: Pay, to the same member, the same amount, with the same note, proposed by the agent, from about the
- * block the expense was entered in (`now` and the snapshot's block place it, at a block a second). An identical
- * expense entered later is another one, and gets its own proposal. "The same amount" takes in what the fund held
- * then (`payable`), up to CURRENCY_SPECK less: the fund may hold more by the retry. Amounts are entered in centavos, so
- * another expense's is at least a centavo away.
+ * what it pays: `action` (Pay, or GiveBack for a give-back in a version 2 fund), to the same member, the same amount,
+ * with the same note, proposed by the agent, from about the block the expense was entered in (`now` and the snapshot's
+ * block place it, at a block a second). An identical expense entered later is another one, and gets its own proposal.
+ * "The same amount" takes in what the fund held then (`payable`), up to CURRENCY_SPECK less: the fund may hold more by
+ * the retry. Amounts are entered in centavos, so another expense's is at least a centavo away.
  */
 function earlierProposal(
   events: readonly FundEvent[],
-  { fund, member, amount, note, enteredAt, now }: { fund: FundSnapshot; member: Address; amount: bigint; note: string; enteredAt: bigint; now: bigint },
+  {
+    fund,
+    action,
+    member,
+    amount,
+    note,
+    enteredAt,
+    now,
+  }: { fund: FundSnapshot; action: number; member: Address; amount: bigint; note: string; enteredAt: bigint; now: bigint },
 ): FundEvent | undefined {
   const since = fund.block - (now > enteredAt ? now - enteredAt : 0n) - ENTRY_MARGIN_BLOCKS;
   return events.find(
     (e) =>
       e.eventName === "ProposalCreated" &&
       e.blockNumber >= since &&
-      e.args.action === Action.Pay &&
+      e.args.action === action &&
       isAddressEqual(e.args.proposer, fund.agent) &&
       isAddressEqual(e.args.a, member) &&
       e.args.amount <= amount &&
@@ -85,10 +98,33 @@ function earlierProposal(
   );
 }
 
+const BPS = 10_000n;
+
+/**
+ * What a member's give-back may be, in a version 2 fund, when it's above what they contributed: nothing to decide
+ * (null) if it isn't; `wait` if their pending dollars cover it once converted (what the conversion credits is
+ * `pendingValue` less the fee, as in the contract); otherwise `reject`, saying how much they can ask for.
+ */
+function giveBackAboveContributed(fund: FundSnapshot, member: Address, amount: bigint): ExpenseDecision | null {
+  const i = fund.members.indexOf(member);
+  const contributed = fund.contributed[i] ?? 0n;
+  if (amount <= contributed) return null;
+  const pendingValue = fund.pendingValue[i] ?? 0n;
+  const coming = pendingValue - (pendingValue * BigInt(fund.feeBps)) / BPS;
+  if (amount <= contributed + coming) {
+    return { kind: "wait", reason: "The member's pending dollars have to be converted first: it's above what they have contributed so far" };
+  }
+  const { symbol, decimals } = fundCurrency(fund);
+  // Rounded down to the centavo: the figure is never more than there is.
+  const most = formatUnits((contributed + coming) / 10n ** BigInt(decimals - 2), 2);
+  return { kind: "reject", reason: `Above what the member contributed and has pending: they can ask for at most ${most} ${symbol}` };
+}
+
 /**
  * What to do with an expense (spec, 8.1): pay the agreed expense back if it fits in what's left of the week's
  * cap and the agent's limits; anything else becomes a payment proposal for the members to vote on, unless the
- * agent already proposed it.
+ * agent already proposed it. In a version 2 fund a give-back is a `GiveBack` proposal, and a proposal waits for next
+ * week when the member has no part left of the agent's weekly proposals (`proposalQuota`).
  */
 export function decideExpense({
   expense,
@@ -118,14 +154,29 @@ export function decideExpense({
     return { kind: "reject", reason: `Already reimbursed, in transaction ${earlier.transactionHash}` };
   }
 
+  const giveBack = fund.version === 2 && expense.kind === "give-back";
+  // In order: a proposal that already went out is this expense's, whatever the quota says now (it may have taken the
+  // last place); then what a give-back may ask for; then the quota.
   const propose = (reason: string): ExpenseDecision => {
     const note = clip(expense.note);
-    const proposed = earlierProposal(events, { fund, member, amount: expense.amount, note, enteredAt: expense.enteredAt, now });
+    const action = giveBack ? Action.GiveBack : Action.Pay;
+    const proposed = earlierProposal(events, { fund, action, member, amount: expense.amount, note, enteredAt: expense.enteredAt, now });
     if (proposed !== undefined) {
       const { transactionHash } = proposed;
       return { kind: "proposed", transactionHash, reason: `Already proposed, in transaction ${transactionHash}` };
     }
-    return { kind: "propose-payment", member, amount, note, reason };
+    if (giveBack) {
+      const over = giveBackAboveContributed(fund, member, amount);
+      if (over !== null) return over;
+    }
+    if (proposalQuota(fund, events, member)?.left === 0) {
+      return {
+        kind: "wait",
+        code: "proposal-quota",
+        reason: "The agent's proposals for this week are shared among the members and none is left for this one: it will be proposed when next week starts",
+      };
+    }
+    return giveBack ? { kind: "propose-give-back", member, amount, note, reason } : { kind: "propose-payment", member, amount, note, reason };
   };
   if (expense.kind === "give-back") return propose("A contribution given back is always voted on");
   if (expense.kind === "other") return propose("Only the agreed expense is paid back without a vote");

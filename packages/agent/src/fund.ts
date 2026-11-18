@@ -2,6 +2,7 @@ import type { Address, PublicClient } from "viem";
 import { erc20Abi, isAddressEqual, zeroAddress } from "viem";
 import { fundAbi, fundFactoryAbi, fundV2Abi } from "./abi";
 import { FACTORIES, type Factory, type FundVersion, POOL, USDT, WARS } from "./chain";
+import type { FundEvent } from "./events";
 
 /** A fund and the contract it runs: where to read it from, and how. */
 export type FundRef = { address: Address; version: FundVersion };
@@ -252,6 +253,47 @@ export async function listFunds(client: CeloReader, factories: readonly Factory[
 
 /** The contract's WEEK: a fund's weeks are fixed windows of 7 days from its startTime (spec, 7.2). */
 export const WEEK = 604_800n;
+
+/** FundV2's MAX_PROPOSALS_PER_WEEK: what each proposer, the agent too, may propose in a fund's week. */
+export const MAX_PROPOSALS_PER_WEEK = 10n;
+
+/**
+ * The block the fund's current week began in, at a block a second as on Celo. It goes by the snapshot's own block and the
+ * time of it, never the server's clock: on the fork and in the e2e the chain runs ahead of it. A chain that skipped
+ * time inside the week (those two) puts it earlier than it was, so the last blocks of the week before would count in
+ * this one. Never before block 0.
+ */
+export function weekStartBlock(fund: FundSnapshot): bigint {
+  const elapsed = fund.timestamp - (fund.startTime + fund.week * WEEK);
+  return fund.block > elapsed ? fund.block - elapsed : 0n;
+}
+
+/**
+ * How many of the agent's proposals this week a member may still ask for (spec, 8.1). In the app the agent proposes
+ * everyone's expenses and give-backs, so its MAX_PROPOSALS_PER_WEEK are in practice the whole fund's, and the contract's
+ * count is only the agent's. Every member keeps at least one: `left` is what the agent has left this week, less one for
+ * each of the other members who hasn't had any yet. `used` is the agent's proposals since the week began that name
+ * `member`. Version 1 has no such limit: null.
+ */
+export function proposalQuota(
+  fund: FundSnapshot,
+  events: readonly FundEvent[],
+  member: Address,
+): { used: number; left: number } | null {
+  if (fund.version === 1) return null;
+  const since = weekStartBlock(fund);
+  const usedBy = new Map<string, number>();
+  for (const event of events) {
+    if (event.eventName !== "ProposalCreated" || event.blockNumber < since || !isAddressEqual(event.args.proposer, fund.agent)) continue;
+    const named = event.args.a.toLowerCase();
+    usedBy.set(named, (usedBy.get(named) ?? 0) + 1);
+  }
+  const used = (m: Address) => usedBy.get(m.toLowerCase()) ?? 0;
+  const waiting = fund.members.filter((m) => !isAddressEqual(m, member) && used(m) === 0).length;
+  const free = MAX_PROPOSALS_PER_WEEK - fund.agentProposalsThisWeek;
+  const left = free > 0n ? Number(free) - waiting : 0;
+  return { used: used(member), left: Math.max(0, left) };
+}
 
 type BlockTimes = Pick<PublicClient, "getBlock" | "getBlockNumber">;
 

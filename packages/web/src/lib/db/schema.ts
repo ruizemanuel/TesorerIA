@@ -130,7 +130,11 @@ export const joinRequests = pgTable(
   (t) => [primaryKey({ columns: [t.fundId, t.userId] })],
 );
 
-export const EXPENSE_STATUSES = ["new", "sending", "reimbursed", "proposed", "waiting", "rejected", "blocked"] as const;
+/**
+ * "waiting" is for pesos the fund doesn't hold yet; "quota" is for a proposal the agent has none of its weekly ones
+ * left for, which it makes when the next week starts (v2). A text column, so a new status needs no migration.
+ */
+export const EXPENSE_STATUSES = ["new", "sending", "reimbursed", "proposed", "waiting", "quota", "rejected", "blocked"] as const;
 export type ExpenseStatus = (typeof EXPENSE_STATUSES)[number];
 
 export const expenses = pgTable(

@@ -42,6 +42,9 @@ export function dailyActivity(events: readonly FundEvent[], agent: Address, sinc
       transactions.add(event.transactionHash);
     } else if (event.eventName === "ProposalCreated" && isAddressEqual(event.args.proposer, agent)) {
       transactions.add(event.transactionHash);
+    } else if (event.eventName === "FeePaid") {
+      // Anyone may send the fee, and it counts all the same: it is one of the day's transactions on the fund.
+      transactions.add(event.transactionHash);
     }
   }
   return { reimbursed, convertedDollar, transactions: transactions.size };
@@ -49,12 +52,15 @@ export function dailyActivity(events: readonly FundEvent[], agent: Address, sinc
 
 /**
  * Something the agent can do in a fund. A version 2 `convert` also names the members whose pending dollars it takes
- * and how much of each (`amounts` adds up to `dollarAmount`); a version 1 one names none.
+ * and how much of each (`amounts` adds up to `dollarAmount`); a version 1 one names none. `propose-give-back` and `pay-fee`
+ * exist in version 2 only.
  */
 export type AgentAction =
   | { kind: "convert"; dollarAmount: bigint; minCurrencyOut: bigint; members?: readonly Address[]; amounts?: readonly bigint[] }
   | { kind: "reimburse"; member: Address; amount: bigint; ref: Hex }
-  | { kind: "propose-payment"; member: Address; amount: bigint; note: string };
+  | { kind: "propose-payment"; member: Address; amount: bigint; note: string }
+  | { kind: "propose-give-back"; member: Address; amount: bigint; note: string }
+  | { kind: "pay-fee" };
 
 /** An action that a limit stops. Its message says which, for the timeline. */
 export class LimitError extends Error {
@@ -87,6 +93,11 @@ function listedMember(fund: FundSnapshot, address: Address): Address {
   const member = fund.members.find((m) => isAddressEqual(m, address));
   if (member === undefined) throw new LimitError(`${address} is not a member of the fund`);
   return member;
+}
+
+/** A LimitError for a note the agent would write on chain longer than MAX_NOTE_LENGTH characters. */
+function assertNoteLength(note: string): void {
+  if ([...note].length > MAX_NOTE_LENGTH) throw new LimitError(`Notes are at most ${MAX_NOTE_LENGTH} characters`);
 }
 
 /**
@@ -131,7 +142,8 @@ export function authorize(
   agent: Address,
 ): AgentTransaction {
   if (!isAddressEqual(fund.agent, agent)) throw new LimitError("This wallet is not the fund's agent");
-  if (fund.closed) throw new LimitError("The fund is closed");
+  // Sending the fee is the one thing the agent does in a closed fund: the contract lets anyone send it, and the last one is still owed.
+  if (fund.closed && action.kind !== "pay-fee") throw new LimitError("The fund is closed");
   if (today.transactions >= LIMITS.maxDailyTransactions) {
     throw new LimitError(`The agent already sent ${today.transactions} transactions for this fund in the last day`);
   }
@@ -176,7 +188,7 @@ export function authorize(
       const member = listedMember(fund, action.member);
       const { amount, note } = action;
       if (amount <= 0n) throw new LimitError("Nothing to pay");
-      if ([...note].length > MAX_NOTE_LENGTH) throw new LimitError(`Notes are at most ${MAX_NOTE_LENGTH} characters`);
+      assertNoteLength(note);
       return {
         to: fund.address,
         data: encodeFunctionData({
@@ -185,6 +197,26 @@ export function authorize(
           args: [Action.Pay, member, zeroAddress, amount, note],
         }),
       };
+    }
+    case "propose-give-back": {
+      if (fund.version !== 2) throw new LimitError("A give-back is proposed in a version 2 fund only");
+      const member = listedMember(fund, action.member);
+      const { amount, note } = action;
+      if (amount <= 0n) throw new LimitError("Nothing to give back");
+      assertNoteLength(note);
+      return {
+        to: fund.address,
+        data: encodeFunctionData({
+          abi: fundV2Abi,
+          functionName: "propose",
+          args: [Action.GiveBack, member, zeroAddress, amount, note],
+        }),
+      };
+    }
+    case "pay-fee": {
+      if (fund.version !== 2) throw new LimitError("The fee is sent in a version 2 fund only");
+      if (fund.feeOwed <= 0n) throw new LimitError("The fund owes no fee");
+      return { to: fund.address, data: encodeFunctionData({ abi: fundV2Abi, functionName: "payFee" }) };
     }
   }
 }

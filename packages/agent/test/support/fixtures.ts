@@ -120,6 +120,10 @@ export function proposed(
   };
 }
 
+export function feePaid(amount: bigint, block = BLOCK - 10n, tx = 6): FundEvent {
+  return { eventName: "FeePaid", args: { amount }, ...position(block, tx) };
+}
+
 export function memberAdded(member: Address, block: bigint, tx = 4): FundEvent {
   return { eventName: "MemberAdded", args: { member }, ...position(block, tx) };
 }

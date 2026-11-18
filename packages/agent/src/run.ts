@@ -4,7 +4,7 @@ import { type Currency, servedProblem } from "./currencies";
 import { shortMessage } from "./errors";
 import type { FundEvent } from "./events";
 import { type Expense, decideExpense } from "./expense";
-import type { FundRef, FundSnapshot } from "./fund";
+import { type FundRef, type FundSnapshot, weekStartBlock } from "./fund";
 import { type AgentAction, type DailyActivity, DAY_BLOCKS, LimitError, authorize, dailyActivity, fundCurrency } from "./limits";
 import type { ConversionQuote, References } from "./market";
 import type { AgentSigner } from "./signer";
@@ -29,13 +29,19 @@ export type ChainView = {
   receipt(hash: Hash): Promise<"success" | "reverted">;
 };
 
+/**
+ * Why an expense waits, when the web has its own words for it: the agent's proposals of the week, shared among the
+ * members, have none left for this one, and it's proposed when the next week starts (spec, 8.1).
+ */
+export type WaitCode = "proposal-quota";
+
 /** A timeline entry: what the agent did, or didn't, and why (spec, 8.6). */
 export type Decision = {
   fund?: Address;
   kind: AgentAction["kind"] | "skip" | "wait" | "reject" | "blocked";
   reason: string;
-  /** Why a conversion was skipped, for the web's own words (F8). */
-  code?: SkipCode;
+  /** Why a conversion was skipped, or an expense waits, for the web's own words (F8). */
+  code?: SkipCode | WaitCode;
   action?: AgentAction;
   tx?: Hash;
   status?: "success" | "reverted";
@@ -125,6 +131,12 @@ async function act(
   }
 }
 
+/** Whether the fund's fee was sent since its current week began, as its history says. */
+function feePaidThisWeek(fund: FundSnapshot, events: readonly FundEvent[]): boolean {
+  const since = weekStartBlock(fund);
+  return events.some((e) => e.eventName === "FeePaid" && e.blockNumber >= since);
+}
+
 /** A fund's history up to its snapshot's block, and the agent's activity over the last day. */
 async function history(ctx: AgentContext, fund: FundSnapshot) {
   const events = await ctx.chain.events(fund.address, fund.block);
@@ -151,14 +163,25 @@ export async function runHeartbeat(ctx: AgentContext): Promise<Decision[]> {
   for (const ref of funds) {
     const { address } = ref;
     try {
-      // The snapshot first: a closed fund, another agent's, or one with nothing to convert costs no history read.
+      // The snapshot first: another agent's fund, one with nothing to convert and no fee to send costs no history read.
       const fund = await ctx.chain.fund(ref);
-      if (fund.closed || !isAddressEqual(fund.agent, ctx.signer.address)) continue;
+      if (!isAddressEqual(fund.agent, ctx.signer.address)) continue;
       // Anyone can deploy a fund that names this agent: one that doesn't match the table costs no history read either.
       if (servedProblem(fund) !== null) continue;
+      // The fee goes out once a week, from week 1, open fund or closed (the contract lets it: the last one is still owed).
+      const feeDue = fund.version === 2 && fund.week >= 1n && fund.feeOwed > 0n;
       // What's waiting to be converted: in version 2 only the members' pending dollars (the balance has what was sent directly).
-      if ((fund.version === 2 ? fund.totalPendingDollar : fund.dollarBalance) < MIN_CONVERSION_USDT) continue;
-      const { today } = await history(ctx, fund);
+      const converts = !fund.closed && (fund.version === 2 ? fund.totalPendingDollar : fund.dollarBalance) >= MIN_CONVERSION_USDT;
+      if (!feeDue && !converts) continue;
+      const { events, today: sentBefore } = await history(ctx, fund);
+      let today = sentBefore;
+      if (feeDue && !feePaidThisWeek(fund, events)) {
+        const fee = await act(ctx, fund, today, { kind: "pay-fee" }, `Send the fund's fee: ${inCurrency(fund, fund.feeOwed)}`);
+        decisions.push(fee);
+        // Sent, so it's one of the day's transactions the conversion below has to count (the history was read before it).
+        if (fee.tx !== undefined) today = { ...today, transactions: today.transactions + 1 };
+      }
+      if (!converts) continue;
       const plan = planConversion(fund, today);
       if (plan.kind === "none") continue;
       if (plan.kind === "skip") {
@@ -209,11 +232,14 @@ export async function handleExpense(ctx: AgentContext, address: Address, expense
     const decision = decideExpense({ expense, fund, events, today, now: ctx.now() });
     switch (decision.kind) {
       case "reject":
+        return { fund: address, kind: "reject", reason: decision.reason };
       case "wait":
-        return { fund: address, kind: decision.kind, reason: decision.reason };
-      case "proposed":
+        return { fund: address, kind: "wait", reason: decision.reason, ...(decision.code === undefined ? {} : { code: decision.code }) };
+      case "proposed": {
         // On chain already: as if this run had proposed it, in that transaction.
-        return { fund: address, kind: "propose-payment", reason: decision.reason, tx: decision.transactionHash, status: "success" };
+        const kind = fund.version === 2 && expense.kind === "give-back" ? "propose-give-back" : "propose-payment";
+        return { fund: address, kind, reason: decision.reason, tx: decision.transactionHash, status: "success" };
+      }
       case "reimburse": {
         const { member, amount, ref } = decision;
         const reason = `Pay back ${inCurrency(fund, amount)} of the agreed expense`;
@@ -222,6 +248,10 @@ export async function handleExpense(ctx: AgentContext, address: Address, expense
       case "propose-payment": {
         const { member, amount, note, reason } = decision;
         return await act(ctx, fund, today, { kind: "propose-payment", member, amount, note }, reason);
+      }
+      case "propose-give-back": {
+        const { member, amount, note, reason } = decision;
+        return await act(ctx, fund, today, { kind: "propose-give-back", member, amount, note }, reason);
       }
     }
   } catch (error) {

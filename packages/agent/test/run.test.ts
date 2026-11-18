@@ -1,11 +1,11 @@
-import { type Address, type Hash, decodeFunctionData, getAddress, pad } from "viem";
+import { type Address, type Hash, decodeFunctionData, getAddress, pad, zeroAddress } from "viem";
 import { describe, expect, it } from "vitest";
 import { fundAbi, fundV2Abi } from "../src/abi";
 import { WARS } from "../src/chain";
 import { type Currency, currencyOf, servedProblem } from "../src/currencies";
 import type { FundEvent } from "../src/events";
 import type { Expense } from "../src/expense";
-import type { FundRef, FundSnapshot } from "../src/fund";
+import { type FundRef, type FundSnapshot, weekStartBlock } from "../src/fund";
 import type { ConversionQuote, References } from "../src/market";
 import { type AgentContext, type ChainView, MIN_GAS_USDT, handleExpense, runHeartbeat } from "../src/run";
 import type { AgentSigner, AgentTransaction } from "../src/signer";
@@ -18,6 +18,7 @@ import {
   USDT_UNIT,
   WARS_UNIT,
   converted,
+  feePaid,
   fundSnapshot,
   fundSnapshotV2,
   fundSnapshotWithPending,
@@ -200,6 +201,89 @@ describe("runHeartbeat", () => {
     expect(await runHeartbeat(context(watched, signer))).toEqual([]);
     expect(sent).toEqual([]);
     // Anyone can create a fund that names this agent: those it leaves alone cost no history read.
+    expect(historiesRead).toEqual([]);
+  });
+
+  it("pays a v2 fund's fee once a week, from week 1", async () => {
+    const owing = fundSnapshotV2({ feeOwed: 40n * WARS_UNIT });
+    const { signer, sent } = fakeSigner();
+    expect(await runHeartbeat(context(fakeChain([owing]), signer))).toEqual([
+      { fund: FUND, kind: "pay-fee", reason: "Send the fund's fee: 40 wARS", action: { kind: "pay-fee" }, tx: HASH, status: "success" },
+    ]);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]?.to).toBe(FUND);
+    expect(decodeFunctionData({ abi: fundV2Abi, data: sent[0]?.data ?? "0x" })).toMatchObject({ functionName: "payFee" });
+
+    // The fee of last week's last block doesn't make this week's: the week's first block is the week's.
+    const start = weekStartBlock(owing);
+    for (const [block, pays] of [[start - 1n, true], [start, false], [BLOCK - 10n, false]] as const) {
+      const { signer: again, sent: out } = fakeSigner();
+      const decisions = await runHeartbeat(context(fakeChain([owing], { events: [feePaid(30n * WARS_UNIT, block, 9)] }), again));
+      expect(decisions.map((d) => d.kind), `a fee in block ${block}`).toEqual(pays ? ["pay-fee"] : []);
+      expect(out).toHaveLength(pays ? 1 : 0);
+    }
+
+    // Nothing in week 0, nothing when nothing is owed, nothing for another agent's fund or one the agent doesn't serve.
+    const week0 = { ...owing, week: 0n, timestamp: owing.startTime + 3_600n };
+    const others = [week0, fundSnapshotV2({ feeOwed: 0n }), fundSnapshotV2({ feeOwed: 40n * WARS_UNIT, agent: OUTSIDER }), fundSnapshotV2({ feeOwed: 40n * WARS_UNIT, pool: OUTSIDER })];
+    for (const fund of others) {
+      const { signer: quiet, sent: none } = fakeSigner();
+      expect(await runHeartbeat(context(fakeChain([fund]), quiet))).toEqual([]);
+      expect(none).toEqual([]);
+    }
+    // A v1 fund has no fee to send.
+    const v1 = fakeSigner();
+    expect(await runHeartbeat(context(fakeChain([fundSnapshot()]), v1.signer))).toEqual([]);
+  });
+
+  it("pays the fee even with nothing to convert", async () => {
+    const { signer, sent } = fakeSigner();
+    // A fund with no dollar at all, in wMXN: there's nothing to convert, ever.
+    const fund = fundSnapshotWithoutDollar("wMXN", { feeOwed: 4n * WARS_UNIT });
+    const decisions = await runHeartbeat(context(fakeChain([fund]), signer));
+    expect(decisions).toMatchObject([{ fund: FUND, kind: "pay-fee", reason: "Send the fund's fee: 4 wMXN", tx: HASH, status: "success" }]);
+    expect(sent).toHaveLength(1);
+  });
+
+  it("pays the fee and then converts, reading the history once", async () => {
+    const { signer, sent } = fakeSigner();
+    const fund = fundSnapshotWithPending([300n * USDT_UNIT, 0n, 0n], { feeOwed: 40n * WARS_UNIT });
+    const chain = fakeChain([fund]);
+    const historiesRead: Address[] = [];
+    const watched: ChainView = { ...chain, events: async (address, toBlock) => (historiesRead.push(address), chain.events(address, toBlock)) };
+    expect((await runHeartbeat(context(watched, signer))).map((d) => d.kind)).toEqual(["pay-fee", "convert"]);
+    expect(sent.map((tx) => decodeFunctionData({ abi: fundV2Abi, data: tx.data }).functionName)).toEqual(["payFee", "convert"]);
+    expect(historiesRead).toEqual([FUND]);
+  });
+
+  it("counts the fee it just sent among the day's transactions before it converts", async () => {
+    const { signer, sent } = fakeSigner();
+    const fund = fundSnapshotWithPending([300n * USDT_UNIT, 0n, 0n], { feeOwed: 40n * WARS_UNIT });
+    // The 19th of the day's 20: the fee takes it, and the conversion has none left.
+    const events = Array.from({ length: 19 }, (_, i) => proposed(AGENT, BLOCK - 100n, 100 + i));
+    const decisions = await runHeartbeat(context(fakeChain([fund], { events }), signer));
+    expect(decisions.map((d) => d.kind)).toEqual(["pay-fee", "blocked"]);
+    expect(decisions[1]?.reason).toBe("The agent already sent 20 transactions for this fund in the last day");
+    expect(sent).toHaveLength(1);
+  });
+
+  it("pays the last fee of a closed v2 fund, and doesn't go on to convert", async () => {
+    const { signer, sent } = fakeSigner();
+    // Closed, with dollars a member still has pending: the fee is owed, the conversion isn't done.
+    const fund = fundSnapshotWithPending([300n * USDT_UNIT, 0n, 0n], { closed: true, feeOwed: 40n * WARS_UNIT });
+    const quotes: bigint[] = [];
+    const chain: ChainView = { ...fakeChain([fund]), quote: async (_fund, dollarAmount) => (quotes.push(dollarAmount), { ...QUOTE, dollarAmount }) };
+    const decisions = await runHeartbeat(context(chain, signer));
+    expect(decisions).toEqual([
+      { fund: FUND, kind: "pay-fee", reason: "Send the fund's fee: 40 wARS", action: { kind: "pay-fee" }, tx: HASH, status: "success" },
+    ]);
+    expect(sent).toHaveLength(1);
+    expect(quotes).toEqual([]);
+    // Once it's paid there's nothing left to do for it, and its history isn't read.
+    const historiesRead: Address[] = [];
+    const paid = fakeChain([{ ...fund, feeOwed: 0n }]);
+    const watched: ChainView = { ...paid, events: async (address, toBlock) => (historiesRead.push(address), paid.events(address, toBlock)) };
+    expect(await runHeartbeat(context(watched, signer))).toEqual([]);
     expect(historiesRead).toEqual([]);
   });
 
@@ -397,6 +481,53 @@ describe("handleExpense", () => {
       status: "success",
     });
     expect(sent).toEqual([]);
+  });
+
+  it("proposes a give-back in a v2 fund as a GiveBack, for the members to vote on", async () => {
+    const { signer, sent } = fakeSigner();
+    const giveBack: Expense = { ...PITCH, kind: "give-back", amount: 10_000n * WARS_UNIT, note: "Deposité en otro fondo" };
+    const decision = await handleExpense(context(fakeChain([fundSnapshotV2()]), signer), FUND, giveBack);
+    expect(decision).toEqual({
+      fund: FUND,
+      kind: "propose-give-back",
+      reason: "A contribution given back is always voted on",
+      action: { kind: "propose-give-back", member: MEMBER, amount: 10_000n * WARS_UNIT, note: "Deposité en otro fondo" },
+      tx: HASH,
+      status: "success",
+    });
+    expect(decodeFunctionData({ abi: fundV2Abi, data: sent[0]?.data ?? "0x" })).toEqual({
+      functionName: "propose",
+      args: [8, MEMBER, zeroAddress, 10_000n * WARS_UNIT, "Deposité en otro fondo"],
+    });
+  });
+
+  it("takes a GiveBack it already proposed as proposed, in that transaction, and sends nothing", async () => {
+    const { signer, sent } = fakeSigner();
+    const giveBack: Expense = { ...PITCH, kind: "give-back", amount: 10_000n * WARS_UNIT, note: "Deposité" };
+    // It took the agent's last place of the week: the proposal that went out is not a "quota".
+    const earlier = proposed(AGENT, BLOCK - 30n, 42, { action: 8, a: MEMBER, amount: giveBack.amount, note: "Deposité" });
+    const chain = fakeChain([fundSnapshotV2({ agentProposalsThisWeek: 10n })], { events: [earlier] });
+    expect(await handleExpense(context(chain, signer), FUND, giveBack)).toEqual({
+      fund: FUND,
+      kind: "propose-give-back",
+      reason: `Already proposed, in transaction ${earlier.transactionHash}`,
+      tx: earlier.transactionHash,
+      status: "success",
+    });
+    expect(sent).toEqual([]);
+  });
+
+  it("waits, with the quota's code, when the agent has no proposals left for this member this week", async () => {
+    const { signer, sent } = fakeSigner();
+    const chain = fakeChain([fundSnapshotV2({ agentProposalsThisWeek: 10n })]);
+    const decision = await handleExpense(context(chain, signer), FUND, { ...PITCH, kind: "other", note: "Pelotas" });
+    expect(decision).toEqual({ fund: FUND, kind: "wait", code: "proposal-quota", reason: expect.stringContaining("proposals for this week") });
+    // An agreed expense that fits is paid back all the same.
+    expect(await handleExpense(context(chain, signer), FUND, PITCH)).toMatchObject({ kind: "reimburse", tx: HASH });
+    expect(sent).toHaveLength(1);
+    // A wait that has no code carries none.
+    const short = await handleExpense(context(fakeChain([fundSnapshot({ currencyBalance: 0n })]), signer), FUND, PITCH);
+    expect(short).toEqual({ fund: FUND, kind: "wait", reason: "The fund doesn't hold enough wARS yet" });
   });
 
   it("says a send that threw may have reached the node: the transaction may be out, so it's never a plain block", async () => {

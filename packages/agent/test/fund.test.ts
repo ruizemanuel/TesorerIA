@@ -2,7 +2,8 @@ import { type Address, getAddress, zeroAddress } from "viem";
 import { describe, expect, it, vi } from "vitest";
 import { FACTORIES, FUND_FACTORY, FUND_FACTORY_V2, POOL, USDT, WARS } from "../src/chain";
 import { CURRENCIES } from "../src/currencies";
-import { type CeloReader, type FundRef, WEEK, listFunds, readFund, weekBlockRange } from "../src/fund";
+import { type CeloReader, type FundRef, WEEK, listFunds, readFund, weekBlockRange, weekStartBlock } from "../src/fund";
+import { BLOCK, fundSnapshotV2 } from "./support/fixtures";
 
 const FUND = getAddress("0x00000000000000000000000000000000000f00d5");
 const MEMBER = getAddress("0x2F8218c7cF6d822091EDe24Db9c46B0324c21A6F");
@@ -348,5 +349,23 @@ describe("weekBlockRange: where a fund's week starts and ends on the chain (spec
   it("refuses a week that hasn't closed yet", async () => {
     const { client } = chain(oneASecond, CREATED + WEEK - 1n);
     await expect(weekBlockRange(client, { startTime: START, week: 0n, from: CREATED })).rejects.toThrow("Week 0 hasn't closed yet");
+  });
+});
+
+describe("weekStartBlock", () => {
+  it("places the week's first block by the block's own time", () => {
+    // The fixture fund is in week 2, an hour into it: with a block a second, its week began 3,600 blocks ago.
+    const fund = fundSnapshotV2();
+    expect(fund.timestamp - (fund.startTime + fund.week * WEEK)).toBe(3_600n);
+    expect(weekStartBlock(fund)).toBe(BLOCK - 3_600n);
+    // A block made at the week's first second is the week's first block.
+    expect(weekStartBlock({ ...fund, timestamp: fund.startTime + fund.week * WEEK })).toBe(BLOCK);
+    // It goes by the block's time, never the server's clock: a chain far ahead of it (the fork, the e2e) puts the week where its own time says.
+    const ahead = { ...fund, week: 40n, timestamp: fund.startTime + 40n * WEEK + 60n };
+    expect(weekStartBlock(ahead)).toBe(BLOCK - 60n);
+  });
+
+  it("is never before block 0", () => {
+    expect(weekStartBlock({ ...fundSnapshotV2(), block: 100n })).toBe(0n);
   });
 });

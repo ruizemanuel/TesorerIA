@@ -35,9 +35,10 @@ export function statusAfter(decision: Decision, before: ExpenseStatus): ExpenseS
   switch (decision.kind) {
     case "reimburse":
     case "propose-payment":
+    case "propose-give-back":
       return before; // a dry run
     case "wait":
-      return "waiting";
+      return decision.code === "proposal-quota" ? "quota" : "waiting";
     case "reject":
       // A run that died after sending, before keeping the hash: the chain already has this ref.
       return decision.reason.startsWith("Already reimbursed") ? "reimbursed" : "rejected";
@@ -46,7 +47,7 @@ export function statusAfter(decision: Decision, before: ExpenseStatus): ExpenseS
   }
 }
 
-/** What an expense's transaction did: a reimbursement, or else a payment proposal. */
+/** What an expense's transaction did: a reimbursement, or else a proposal (a give-back's too: it's kept as a payment proposal). */
 function sentAction(kind: Decision["kind"]): "reimburse" | "propose-payment" {
   return kind === "reimburse" ? "reimburse" : "propose-payment";
 }
@@ -129,7 +130,7 @@ async function processExpense(db: Db, makeContext: MakeContext, id: string, queu
 
 /**
  * Runs the agent once, under the lock (Review Focus 4): settles what earlier runs sent, handles `expenseId`
- * first, converts on a heartbeat, and then retries the queue (new and waiting; blocked too on a heartbeat),
+ * first, converts on a heartbeat, and then retries the queue (new, waiting and quota; blocked too on a heartbeat),
  * without taking `expenseId` a second time. The queue takes new expenses first and then the ones tried longest
  * ago: rows that wait for pesos or stay blocked take turns, and never keep a newer expense out.
  *
@@ -148,12 +149,13 @@ export async function runAgent(
     afterHeartbeat,
   }: { expenseId?: string; heartbeat?: boolean; txStatus: TxStatus; inFlight: InFlight; afterHeartbeat?: () => Promise<void> },
 ): Promise<AgentRun> {
-  const queued: ExpenseStatus[] = heartbeat ? ["new", "waiting", "blocked"] : ["new", "waiting"];
+  // "quota" is tried again on every run: the week may have turned over, and the agent has its proposals again.
+  const queued: ExpenseStatus[] = heartbeat ? ["new", "waiting", "quota", "blocked"] : ["new", "waiting", "quota"];
   const result = await withLock(db, AGENT_LOCK, AGENT_LOCK_TTL_MS, async () => {
     const done: Decision[] = [];
     await settleSent(db, txStatus, inFlight);
     if (expenseId !== undefined) {
-      const decision = await processExpense(db, makeContext, expenseId, ["new", "waiting", "blocked"]);
+      const decision = await processExpense(db, makeContext, expenseId, ["new", "waiting", "quota", "blocked"]);
       if (decision) done.push(decision);
     }
     if (heartbeat) {

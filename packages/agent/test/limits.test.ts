@@ -21,6 +21,7 @@ import {
   USDT_UNIT,
   WARS_UNIT,
   converted,
+  feePaid,
   fundSnapshot,
   fundSnapshotV2,
   fundSnapshotWithPending,
@@ -49,6 +50,18 @@ describe("dailyActivity", () => {
       transactions: 3,
     });
   });
+
+  it("counts the transaction of each fee sent among the day's transactions", () => {
+    const since = BLOCK - DAY_BLOCKS;
+    const events = [
+      feePaid(5n * WARS_UNIT, since, 1), // a day and a block ago: left out
+      feePaid(7n * WARS_UNIT, since + 1n, 2),
+      // The same transaction as a conversion's counts once.
+      converted(50n * USDT_UNIT, BLOCK - 5n, 3),
+      feePaid(1n * WARS_UNIT, BLOCK - 5n, 3),
+    ];
+    expect(dailyActivity(events, AGENT, since)).toEqual({ reimbursed: 0n, convertedDollar: 50n * USDT_UNIT, transactions: 2 });
+  });
 });
 
 describe("authorize", () => {
@@ -73,6 +86,64 @@ describe("authorize", () => {
       functionName: "propose",
       args: [0, MEMBER, zeroAddress, 5n * WARS_UNIT, "Pelotas"],
     });
+  });
+
+  it("encodes propose(GiveBack) and payFee", () => {
+    const fund = fundSnapshotV2({ feeOwed: 40n * WARS_UNIT });
+    // The member comes out as the contract lists it, whatever the case it was given in.
+    const giveBack = authorize(
+      { kind: "propose-give-back", member: MEMBER.toLowerCase() as Address, amount: 5n * WARS_UNIT, note: "Deposité en otro fondo" },
+      fund,
+      QUIET_DAY,
+      AGENT,
+    );
+    expect(giveBack.to).toBe(FUND);
+    expect(decodeFunctionData({ abi: fundV2Abi, data: giveBack.data })).toEqual({
+      functionName: "propose",
+      args: [8, MEMBER, zeroAddress, 5n * WARS_UNIT, "Deposité en otro fondo"],
+    });
+    const fee = authorize({ kind: "pay-fee" }, fund, QUIET_DAY, AGENT);
+    expect(fee.to).toBe(FUND);
+    expect(decodeFunctionData({ abi: fundV2Abi, data: fee.data })).toMatchObject({ functionName: "payFee" });
+  });
+
+  it("holds a give-back to what a payment proposal is held to, and the fee to the day's transactions", () => {
+    const fund = fundSnapshotV2({ feeOwed: 40n * WARS_UNIT });
+    const giveBack = (change: { member?: Address; amount?: bigint; note?: string }) => () =>
+      authorize({ kind: "propose-give-back", member: MEMBER, amount: 1n, note: "", ...change }, fund, QUIET_DAY, AGENT);
+    expect(giveBack({ member: OUTSIDER })).toThrow("is not a member");
+    expect(giveBack({ amount: 0n })).toThrow("Nothing to give back");
+    expect(giveBack({ note: "ñ".repeat(140) })).not.toThrow();
+    expect(giveBack({ note: "ñ".repeat(141) })).toThrow(LimitError);
+    const busyDay = { ...QUIET_DAY, transactions: LIMITS.maxDailyTransactions };
+    expect(() => authorize({ kind: "pay-fee" }, fund, busyDay, AGENT)).toThrow("transactions for this fund in the last day");
+    expect(() => authorize({ kind: "pay-fee" }, fundSnapshotV2({ feeOwed: 1n, agent: OUTSIDER }), QUIET_DAY, AGENT)).toThrow("not the fund's agent");
+  });
+
+  it("refuses both on a v1 fund", () => {
+    const fund = fundSnapshot({ feeOwed: 40n * WARS_UNIT });
+    expect(() => authorize({ kind: "propose-give-back", member: MEMBER, amount: 1n, note: "" }, fund, QUIET_DAY, AGENT)).toThrow(LimitError);
+    expect(() => authorize({ kind: "propose-give-back", member: MEMBER, amount: 1n, note: "" }, fund, QUIET_DAY, AGENT)).toThrow("version 2");
+    expect(() => authorize({ kind: "pay-fee" }, fund, QUIET_DAY, AGENT)).toThrow(LimitError);
+    expect(() => authorize({ kind: "pay-fee" }, fund, QUIET_DAY, AGENT)).toThrow("version 2");
+  });
+
+  it("refuses payFee when the fund owes no fee", () => {
+    expect(() => authorize({ kind: "pay-fee" }, fundSnapshotV2({ feeOwed: 0n }), QUIET_DAY, AGENT)).toThrow("owes no fee");
+  });
+
+  it("allows payFee on a closed v2 fund, and nothing else", () => {
+    // The contract lets anyone send the fee with the fund closed, and the last one is still owed.
+    const fund = fundSnapshotWithPending([3n * USDT_UNIT, 0n, 0n], { closed: true, feeOwed: 40n * WARS_UNIT });
+    expect(() => authorize({ kind: "pay-fee" }, fund, QUIET_DAY, AGENT)).not.toThrow();
+    const ana = MEMBERS[0] as Address;
+    const refused: Parameters<typeof authorize>[0][] = [
+      { kind: "convert", dollarAmount: 3n * USDT_UNIT, minCurrencyOut: 1n, members: [ana], amounts: [3n * USDT_UNIT] },
+      { kind: "reimburse", member: MEMBER, amount: 1n, ref: ref(1) },
+      { kind: "propose-payment", member: MEMBER, amount: 1n, note: "" },
+      { kind: "propose-give-back", member: MEMBER, amount: 1n, note: "" },
+    ];
+    for (const action of refused) expect(() => authorize(action, fund, QUIET_DAY, AGENT), action.kind).toThrow("The fund is closed");
   });
 
   it("encodes FundV2's convert with each member and amount", () => {
