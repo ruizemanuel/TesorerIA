@@ -166,7 +166,8 @@ export function factoryV2DeployData(artifact: FactoryArtifact): Hex {
  * run again, because the agent's wallet also signs the production heartbeat, so its nonce can move. Throws with the
  * reason, or returns when the deploy may go out.
  *
- * - `expectNonce` is the pending nonce the dry run printed: the deploy only goes out as that transaction.
+ * - `expectNonce` is the pending nonce the dry run printed. The script signs the deploy with exactly that nonce (it
+ *   does not read it again), so the contract can only land at the address the dry run printed.
  * - `pendingNonce` must equal `latestNonce`: otherwise the agent has a transaction in flight.
  * - `factories` must not list a version 2 already, unless `again`.
  */

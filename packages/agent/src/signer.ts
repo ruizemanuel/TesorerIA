@@ -5,14 +5,18 @@ import { privateKeyToAccount } from "viem/accounts";
 import { celo } from "viem/chains";
 import { USDT_FEE_ADAPTER } from "./chain";
 
-/** A transaction from the agent: a call (`to` set) or a contract creation (`to` left out). */
-export type AgentTransaction = { to?: Address; data: Hex };
+/**
+ * A transaction from the agent: a call (`to` set) or a contract creation (`to` left out). `nonce` pins the one it is
+ * signed with; left out, `send` reads the pending nonce itself, which is what the heartbeat wants.
+ */
+export type AgentTransaction = { to?: Address; data: Hex; nonce?: number };
 
 export type AgentSigner = {
   address: Address;
   /**
    * Signs and sends a CIP-64 transaction that pays its gas in USDT, through the fee-currency adapter,
-   * with TesorerIA's ERC-8021 attribution suffix appended to `data`. Returns the transaction hash.
+   * with TesorerIA's ERC-8021 attribution suffix appended to `data`. Signs with `tx.nonce` when it is given, and
+   * with the pending nonce it reads otherwise. Returns the transaction hash.
    */
   send: (tx: AgentTransaction) => Promise<Hash>;
   /**
@@ -42,9 +46,14 @@ export function createAgentSigner({ privateKey, transport }: { privateKey: Hex; 
   const wallet = createWalletClient({ account, chain: celo, transport }).extend(withAttribution(ATTRIBUTION_CODE));
   return {
     address: account.address,
-    send: async ({ to, data }) => {
+    send: async ({ to, data, nonce }) => {
       assertUntagged(data);
-      return wallet.sendTransaction({ to, data, feeCurrency: USDT_FEE_ADAPTER });
+      return wallet.sendTransaction({
+        to,
+        data,
+        feeCurrency: USDT_FEE_ADAPTER,
+        ...(nonce === undefined ? {} : { nonce }),
+      });
     },
     estimate: async ({ to, data }) => {
       assertUntagged(data);

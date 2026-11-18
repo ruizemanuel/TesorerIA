@@ -7,7 +7,8 @@
 //   pnpm deploy:factory-v2 --send --expect-nonce <n>      sends the deploy transaction as the agent's nonce n, the
 //                                                         one the dry run printed (refused if that nonce moved, if
 //                                                         the agent has a transaction in flight, or if FACTORIES
-//                                                         already lists a version 2, unless --again)
+//                                                         already lists a version 2, unless --again, or if the
+//                                                         build's runtime size isn't the one that was reviewed)
 // Reads AGENT_PRIVATE_KEY, and optionally CELO_RPC_URL (never printed), from packages/agent/.env.local.
 import { readFileSync } from "node:fs";
 import {
@@ -36,7 +37,7 @@ import {
 import { createAgentSigner } from "../src/signer";
 
 const ARTIFACT = new URL("../../../contracts/out/FundFactoryV2.sol/FundFactoryV2.json", import.meta.url);
-/** What `forge build --force` gave on 2026-11-17, and EIP-170's limit. Printed to compare, never enforced. */
+/** What `forge build --force` gave on 2026-11-17, and EIP-170's limit. The dry run prints both; `--send` needs the first. */
 const EXPECTED_RUNTIME_SIZE = 22_514;
 const MAX_RUNTIME_SIZE = 24_576;
 
@@ -72,6 +73,13 @@ async function main(): Promise<number> {
   console.log(
     `FundFactoryV2 runtime: ${runtimeSize} bytes (expected ${EXPECTED_RUNTIME_SIZE}, limit ${MAX_RUNTIME_SIZE})`,
   );
+  // A rebuild between the dry run and the send must not deploy bytecode nobody reviewed.
+  if (send && runtimeSize !== EXPECTED_RUNTIME_SIZE) {
+    console.error(
+      `The artifact's runtime is ${runtimeSize} bytes, not the ${EXPECTED_RUNTIME_SIZE} that was reviewed: refusing to send.`,
+    );
+    return 1;
+  }
   const data = factoryV2DeployData(artifact);
   console.log(`Constructor: uniswapFactory ${UNISWAP_V3_FACTORY}, feeRecipient ${FEE_RECIPIENT}`);
 
@@ -135,11 +143,17 @@ async function main(): Promise<number> {
   }
   checkFactoryV2Send({ expectNonce, pendingNonce, latestNonce, factories: FACTORIES, again });
 
-  const hash = await agent.send({ data });
+  // Signed with the nonce the user approved, not with whatever is pending by now: a heartbeat transaction from the same
+  // key landing after the guard would otherwise deploy at an address nobody approved.
+  const hash = await agent.send({ data, nonce: pendingNonce });
   console.log(`Sent: ${hash}`);
   const receipt = await publicClient.waitForTransactionReceipt({ hash });
   console.log(`Status: ${receipt.status}, block ${receipt.blockNumber}, ${receipt.gasUsed} gas`);
-  if (receipt.status !== "success" || !receipt.contractAddress) return 1;
+  if (receipt.status !== "success") return 1;
+  if (!receipt.contractAddress) {
+    console.error("Not a contract creation, or it was replaced: no contract was deployed");
+    return 1;
+  }
   console.log(`FundFactoryV2: ${receipt.contractAddress}`);
   console.log(`Block: ${receipt.blockNumber}`);
   if (!isAddressEqual(receipt.contractAddress, expectedAddress)) {

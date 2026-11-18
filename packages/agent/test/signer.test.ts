@@ -77,6 +77,23 @@ describe("createAgentSigner", () => {
     expect(tx.data).toBe(`0x6080${ATTRIBUTION_SUFFIX.slice(2)}`);
   });
 
+  it("signs with the nonce it is given, without reading the pending one", async () => {
+    const { transport, sent, calls } = fakeCelo();
+    const agent = createAgentSigner({ privateKey: generatePrivateKey(), transport });
+    await agent.send({ data: "0x6080", nonce: 52 });
+    expect(parseCip64(sent[0]).nonce).toBe(52);
+    expect(calls.some((c) => c.method === "eth_getTransactionCount")).toBe(false);
+  });
+
+  it("reads the pending nonce when none is given", async () => {
+    const { transport, sent, calls } = fakeCelo();
+    const agent = createAgentSigner({ privateKey: generatePrivateKey(), transport });
+    await agent.send({ data: "0x6080" });
+    expect(calls.find((c) => c.method === "eth_getTransactionCount")?.params[1]).toBe("pending");
+    // The fake node's pending nonce is 0: the transaction carries no explicit nonce, which parses as undefined.
+    expect(parseCip64(sent[0]).nonce ?? 0).toBe(0);
+  });
+
   it("estimates in USDT with the tagged data, without sending", async () => {
     const { transport, sent, calls } = fakeCelo();
     const agent = createAgentSigner({ privateKey: generatePrivateKey(), transport });
