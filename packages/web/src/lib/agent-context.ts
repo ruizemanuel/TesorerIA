@@ -27,9 +27,9 @@ export function agentSigner(): AgentSigner {
 
 /**
  * The agent's context for the web.
- * - It runs only the funds this web created (live in the database and listed by the factory): anyone can create
+ * - It runs only the funds this web created (live in the database and listed by one of the factories): anyone can create
  *   a fund naming our agent, and that must never cost its gas.
- * - Histories are read from the oldest of those funds' blocks, not the factory's: no fund it runs has an older
+ * - Histories are read from the oldest of those funds' blocks, not the factories': no fund it runs has an older
  *   event, and on the fork every block scanned is a request through the node.
  * - A history that doesn't add up to the contract (spentInWeek, each member's contributions, the proposal count) has
  *   a hole: the node fills it (completeHistory), or the agent never decides on it, since a missing Reimbursement
@@ -40,7 +40,7 @@ export async function agentContext(db: Db, onSent?: AgentContext["onSent"]): Pro
   const signer = agentSigner();
   const ours = await db.select({ address: funds.address, createdBlock: funds.createdBlock }).from(funds).where(eq(funds.status, "live"));
   const known = new Set(ours.flatMap((f) => (f.address ? [f.address.toLowerCase()] : [])));
-  // A live fund without its block (none should lack it) counts from the factory's.
+  // A live fund without its block (none should lack it) counts from the first factory's.
   const blocks = ours.map((f) => f.createdBlock ?? FUND_FACTORY_BLOCK);
   const fromBlock = blocks.reduce((oldest, block) => (block < oldest ? block : oldest), blocks[0] ?? FUND_FACTORY_BLOCK);
   const view = createChainView({ celo: celoClient(), base: baseClient(), logs: logReader(), agent: signer.address, fromBlock });
@@ -48,10 +48,10 @@ export async function agentContext(db: Db, onSent?: AgentContext["onSent"]): Pro
   const snapshots = new Map<string, FundSnapshot>();
   const chain: ChainView = {
     ...view,
-    funds: async () => (await view.funds()).filter((f) => known.has(f.toLowerCase())),
-    fund: async (address) => {
-      const snapshot = await view.fund(address);
-      snapshots.set(address.toLowerCase(), snapshot);
+    funds: async () => (await view.funds()).filter((f) => known.has(f.address.toLowerCase())),
+    fund: async (ref) => {
+      const snapshot = await view.fund(ref);
+      snapshots.set(ref.address.toLowerCase(), snapshot);
       return snapshot;
     },
     events: async (address, toBlock) => {

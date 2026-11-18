@@ -3,7 +3,7 @@ import { MIN_CONVERSION_USDT, type SkipCode, decideConversion, planConversion } 
 import { shortMessage } from "./errors";
 import type { FundEvent } from "./events";
 import { type Expense, decideExpense } from "./expense";
-import type { FundSnapshot } from "./fund";
+import type { FundRef, FundSnapshot } from "./fund";
 import { type AgentAction, type DailyActivity, DAY_BLOCKS, LimitError, authorize, dailyActivity } from "./limits";
 import type { ConversionQuote, References } from "./market";
 import type { AgentSigner } from "./signer";
@@ -15,9 +15,9 @@ export const MIN_GAS_USDT = 50_000n;
 export type ChainView = {
   /** The agent's own USDT, 6 decimals: it pays its gas with it. */
   gasBalance(): Promise<bigint>;
-  /** Every fund the factory created. */
-  funds(): Promise<Address[]>;
-  fund(address: Address): Promise<FundSnapshot>;
+  /** Every fund the factories created, with the version each one runs. */
+  funds(): Promise<FundRef[]>;
+  fund(ref: FundRef): Promise<FundSnapshot>;
   /** The fund's whole history, up to `toBlock`. */
   events(fund: Address, toBlock: bigint): Promise<FundEvent[]>;
   references(): Promise<References>;
@@ -134,16 +134,17 @@ async function history(ctx: AgentContext, fund: FundSnapshot) {
 export async function runHeartbeat(ctx: AgentContext): Promise<Decision[]> {
   const decisions: Decision[] = [];
   let references: References | undefined;
-  let funds: Address[];
+  let funds: FundRef[];
   try {
     funds = await ctx.chain.funds();
   } catch (error) {
     return [{ kind: "blocked", reason: `Could not list the funds: ${shortMessage(error)}` }];
   }
-  for (const address of funds) {
+  for (const ref of funds) {
+    const { address } = ref;
     try {
       // The snapshot first: a closed fund, another agent's, or one with nothing to convert costs no history read.
-      const fund = await ctx.chain.fund(address);
+      const fund = await ctx.chain.fund(ref);
       if (fund.closed || !isAddressEqual(fund.agent, ctx.signer.address)) continue;
       if (fund.dollarBalance < MIN_CONVERSION_USDT) continue;
       const { today } = await history(ctx, fund);
@@ -173,12 +174,13 @@ export async function runHeartbeat(ctx: AgentContext): Promise<Decision[]> {
 /** What the web app calls after a member enters an expense (spec, 8.1 and 8.3). */
 export async function handleExpense(ctx: AgentContext, address: Address, expense: Expense): Promise<Decision> {
   try {
-    // Only the factory's funds: for any other contract, the history and the gas cost are its own to choose.
+    // Only the factories' funds: for any other contract, the history and the gas cost are its own to choose.
     const funds = await ctx.chain.funds();
-    if (!funds.some((f) => isAddressEqual(f, address))) {
+    const ref = funds.find((f) => isAddressEqual(f.address, address));
+    if (ref === undefined) {
       return { fund: address, kind: "reject", reason: "That fund wasn't created by TesorerIA's FundFactory" };
     }
-    const fund = await ctx.chain.fund(address);
+    const fund = await ctx.chain.fund(ref);
     if (!isAddressEqual(fund.agent, ctx.signer.address)) {
       return { fund: address, kind: "reject", reason: "This agent doesn't run that fund" };
     }

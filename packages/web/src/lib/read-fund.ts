@@ -82,7 +82,7 @@ export async function loadFundScreen(
   // Read-your-writes: the viewer's own last operation is on the screen even when the node is a block behind (spec, 9.2).
   const mine = publicView || viewer === null ? null : await lastOperationBlock(db, viewer.id, getAddress(address));
   if (mine !== null) await waitForBlock(client, mine);
-  const snapshot = await readFund(client, getAddress(address));
+  const snapshot = await readFund(client, { address: getAddress(address), version: fund.version });
   // The chain says who is in: whoever it added since their request gets their row, and their request goes (spec, 9.4).
   if ((await admitMembers(db, fund.id, snapshot.members)).length > 0) {
     people = await peopleOf(db, fund.id);

@@ -1,0 +1,2 @@
+ALTER TABLE "funds" ADD COLUMN "version" integer DEFAULT 1 NOT NULL;--> statement-breakpoint
+ALTER TABLE "funds" ADD COLUMN "currency" text DEFAULT '0x0DC4F92879B7670e5f4e4e6e3c801D229129D90D' NOT NULL;

@@ -222,12 +222,12 @@ describe("chainWeekSummaryDeps: the photo of a week, from the chain", () => {
     getBlockNumber: async () => LATEST,
     getBlock: async ({ blockNumber }: { blockNumber: bigint }) => ({ number: blockNumber, timestamp: timeOf(blockNumber) }),
     multicall: async ({ contracts }: { contracts: { args?: readonly unknown[] }[] }) =>
-      contracts.length === 10
-        ? [AGENT, false, [ANA, BETO, CARO], 2, 60_000n * WARS, START, 0n, 10_000n * WARS, 10_000n * WARS, 0n]
+      contracts.length === 11
+        ? [AGENT, false, [ANA, BETO, CARO], 2, 60_000n * WARS, START, 0n, 10_000n * WARS, 450_000n * WARS, 10_000n * WARS, 0n]
         : contracts.map((call) => (call.args?.[0] === BETO ? 10_000n * WARS : 0n)),
     readContract: async ({ functionName }: { functionName: string }) => (functionName === "balanceInWars" ? 10_000n * WARS : 0n),
   } as unknown as Parameters<typeof chainWeekSummaryDeps>[0];
-  const fund = { id: "fund", address: FUND, createdBlock: CREATED, weeklyFee: 10_000n * WARS, giveBackTxs: new Set<string>() };
+  const fund = { id: "fund", address: FUND, version: 1 as const, createdBlock: CREATED, weeklyFee: 10_000n * WARS, giveBackTxs: new Set<string>() };
 
   it("counts a contribution Blockscout's history misses, read from the node, so the photo adds up", async () => {
     // 3/11: Blockscout's logs by address were a day behind while its block number was current.

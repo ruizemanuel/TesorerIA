@@ -89,6 +89,10 @@ export const funds = pgTable("funds", {
   publicView: boolean("public_view").notNull().default(false),
   /** Whether that view shows first names; if not, "Miembro 1…N". */
   publicNames: boolean("public_names").notNull().default(false),
+  /** The contract it runs: 1 is `Fund` (wARS with USDT), 2 is `FundV2` (any wFIAT). A fund that existed before version 2 is 1. */
+  version: integer("version").$type<1 | 2>().notNull().default(1),
+  /** The token it keeps its money in. The literal is wARS (WARS in the agent package), which drizzle-kit can't load here. */
+  currency: text("currency").notNull().default("0x0DC4F92879B7670e5f4e4e6e3c801D229129D90D"),
   createdAt: createdAt(),
 });
 

@@ -71,6 +71,13 @@
       "when": 1793799342442,
       "tag": "0009_fund_logs",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1795003666746,
+      "tag": "0010_fund_versions",
+      "breakpoints": true
     }
   ]
 }

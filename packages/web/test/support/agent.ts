@@ -29,7 +29,7 @@ export function fakeAgent({
   const sent: AgentTransaction[] = [];
   const chain: ChainView = {
     gasBalance: async () => 1_000_000n,
-    funds: async () => [snapshot().address],
+    funds: async () => [{ address: snapshot().address, version: snapshot().version }],
     fund: async () => snapshot(),
     events: async () => events(),
     references: async () => {

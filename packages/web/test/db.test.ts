@@ -3,6 +3,7 @@ import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } f
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { PGlite } from "@electric-sql/pglite";
+import { WARS as WARS_TOKEN } from "@tesoreria/agent";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/pglite";
 import { migrate } from "drizzle-orm/pglite/migrator";
@@ -40,6 +41,31 @@ describe("the database", () => {
     const [row] = await db.select().from(funds).where(eq(funds.id, fund.id));
     expect(row?.balanceCap).toBe(450_000n * WARS);
     expect(row?.createdBlock).toBe(79_700_000n);
+  });
+
+  it("a fund row is version 1 in wARS unless it says otherwise", async () => {
+    const db = await testDb();
+    const ema = await addUser(db, "Ema");
+    const fund = await addLiveFund(db, { creatorId: ema.id, address: randomAccount(), members: [ema.id] });
+    const [row] = await db.select().from(funds).where(eq(funds.id, fund.id));
+    expect(row).toMatchObject({ version: 1, currency: WARS_TOKEN });
+
+    const wmxn = "0x337E7456B420bD3481e7FA61fA9850343d610d34";
+    const [other] = await db
+      .insert(funds)
+      .values({
+        name: "Asado",
+        agreedExpense: "la carne",
+        weeklyFee: 10n,
+        weeklyCap: 60n,
+        balanceCap: 450n,
+        creatorId: ema.id,
+        inviteCode: "code-asado",
+        version: 2,
+        currency: wmxn,
+      })
+      .returning();
+    expect(other).toMatchObject({ version: 2, currency: wmxn });
   });
 
   it("allows one account per person", async () => {
@@ -119,20 +145,26 @@ describe("a person's passkeys", () => {
   });
 });
 
+/** A database as it was before the migration `tag`; `migrations` is the real folder, to put on top of it as a deploy does. */
+async function databaseBefore(tag: string) {
+  const migrations = path.join(process.cwd(), "drizzle");
+  const journal = JSON.parse(readFileSync(path.join(migrations, "meta", "_journal.json"), "utf8")) as { entries: { tag: string }[] };
+  const earlier = journal.entries.slice(0, journal.entries.findIndex((entry) => entry.tag === tag));
+  const before = mkdtempSync(path.join(tmpdir(), "migrations-before-"));
+  mkdirSync(path.join(before, "meta"));
+  writeFileSync(path.join(before, "meta", "_journal.json"), JSON.stringify({ ...journal, entries: earlier }));
+  for (const { tag: earlierTag } of earlier) cpSync(path.join(migrations, `${earlierTag}.sql`), path.join(before, `${earlierTag}.sql`));
+  const client = new PGlite();
+  const db = drizzle({ client });
+  await migrate(db, { migrationsFolder: before });
+  rmSync(before, { recursive: true });
+  return { client, db, migrations };
+}
+
 describe("the migration that gives each passkey its site and state", () => {
   it("puts every passkey that existed on the old site, and keeps only each person's newest active", async () => {
     // A database as it was before this migration, with passkeys in it; then the real folder on top, as a deploy does.
-    const migrations = path.join(process.cwd(), "drizzle");
-    const journal = JSON.parse(readFileSync(path.join(migrations, "meta", "_journal.json"), "utf8")) as { entries: { tag: string }[] };
-    const earlier = journal.entries.slice(0, journal.entries.findIndex((entry) => entry.tag === "0008_passkey_sites"));
-    const before = mkdtempSync(path.join(tmpdir(), "migrations-before-"));
-    mkdirSync(path.join(before, "meta"));
-    writeFileSync(path.join(before, "meta", "_journal.json"), JSON.stringify({ ...journal, entries: earlier }));
-    for (const { tag } of earlier) cpSync(path.join(migrations, `${tag}.sql`), path.join(before, `${tag}.sql`));
-    const client = new PGlite();
-    const db = drizzle({ client });
-    await migrate(db, { migrationsFolder: before });
-    rmSync(before, { recursive: true });
+    const { client, db, migrations } = await databaseBefore("0008_passkey_sites");
 
     const person = async (name: string, account: string) =>
       (await client.query<{ id: string }>("INSERT INTO users (name, account) VALUES ($1, $2) RETURNING id", [name, account])).rows[0]!.id;
@@ -158,6 +190,22 @@ describe("the migration that gives each passkey its site and state", () => {
       { id: "ema-middle", rp_id: "tesoreriaia.vercel.app", state: "retired" },
       { id: "otra-only", rp_id: "tesoreriaia.vercel.app", state: "active" },
     ]);
+  });
+});
+
+describe("the migration that gives each fund its version and currency", () => {
+  it("leaves every fund that existed as version 1, in wARS", async () => {
+    const { client, db, migrations } = await databaseBefore("0010_fund_versions");
+    const person = (await client.query<{ id: string }>("INSERT INTO users (name, account) VALUES ('Ema', '0x01') RETURNING id")).rows[0]!.id;
+    await client.query(
+      "INSERT INTO funds (name, agreed_expense, weekly_fee, weekly_cap, balance_cap, creator_id, invite_code, status, address) VALUES ('Fútbol', 'la cancha', 1, 2, 3, $1, 'code', 'live', '0x02')",
+      [person],
+    );
+
+    await migrate(db, { migrationsFolder: migrations });
+
+    const { rows } = await client.query<{ version: number; currency: string }>("SELECT version, currency FROM funds");
+    expect(rows).toEqual([{ version: 1, currency: WARS_TOKEN }]);
   });
 });
 

@@ -1,4 +1,4 @@
-import { type ChainView, FUND_FACTORY_BLOCK, type FundEvent } from "@tesoreria/agent";
+import { type ChainView, FUND_FACTORY_BLOCK, type FundEvent, type FundRef } from "@tesoreria/agent";
 import { eq } from "drizzle-orm";
 import { getAddress } from "viem";
 import { generatePrivateKey, privateKeyToAddress } from "viem/accounts";
@@ -24,9 +24,9 @@ vi.mock("@tesoreria/agent", async (importOriginal) => {
       view.options.push(options);
       return {
         gasBalance: async () => 0n,
-        funds: async () => [FUND, LATER, FOREIGN],
+        funds: async () => [FUND, LATER, FOREIGN].map((address): FundRef => ({ address, version: 1 })),
         // Nobody contributed: these histories have no Contribution, and they add up only to a fund where none was made.
-        fund: async (address) => snapshot({ address, spentThisWeek: view.spent, contributed: [0n, 0n, 0n], totalContributed: 0n }),
+        fund: async ({ address }) => snapshot({ address, spentThisWeek: view.spent, contributed: [0n, 0n, 0n], totalContributed: 0n }),
         events: async () => view.events,
         references: unused,
         quote: unused,
@@ -86,7 +86,10 @@ describe("agentContext", () => {
   it("runs only the live funds this web created, reading their histories from the oldest one's block", async () => {
     const agentContext = await load();
     const ctx = await agentContext(db);
-    expect(await ctx.chain.funds()).toEqual([FUND, LATER]);
+    expect(await ctx.chain.funds()).toEqual([
+      { address: FUND, version: 1 },
+      { address: LATER, version: 1 },
+    ]);
     expect(view.options.at(-1)?.fromBlock).toBe(79_700_000n);
 
     const empty = await testDb();
@@ -99,7 +102,7 @@ describe("agentContext", () => {
     view.spent = 45_000n * WARS; // the contract counts a reimbursement this week
     view.events = [];
     view.node = [];
-    await ctx.chain.fund(FUND);
+    await ctx.chain.fund({ address: FUND, version: 1 });
     await expect(ctx.chain.events(FUND, BLOCK)).rejects.toThrow(/spentInWeek/);
 
     view.events = [event("Reimbursement", { member: ANA, amount: 45_000n * WARS, ref: `0x${"ab".repeat(32)}`, week: 2n }, BLOCK - 10n)];
@@ -113,7 +116,7 @@ describe("agentContext", () => {
     const reimbursement = event("Reimbursement", { member: ANA, amount: 45_000n * WARS, ref: `0x${"ab".repeat(32)}`, week: 2n }, BLOCK - 10n);
     view.events = [];
     view.node = [reimbursement];
-    await ctx.chain.fund(FUND);
+    await ctx.chain.fund({ address: FUND, version: 1 });
     expect(await ctx.chain.events(FUND, BLOCK)).toEqual([reimbursement]);
   });
 

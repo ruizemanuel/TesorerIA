@@ -1,6 +1,7 @@
 import { type Address, type Hash, type Hex, getAddress, pad, toHex } from "viem";
 import type { FundEvent } from "../../src/events";
-import type { FundSnapshot } from "../../src/fund";
+import { POOL, USDT, WARS } from "../../src/chain";
+import { type FundSnapshot, WEEK } from "../../src/fund";
 
 export const WARS_UNIT = 10n ** 18n;
 export const USDT_UNIT = 10n ** 6n;
@@ -14,11 +15,15 @@ export const MEMBERS: readonly Address[] = [
 export const OUTSIDER = getAddress("0x0000000000000000000000000000000000000bad");
 export const BLOCK = 80_000_000n;
 
-/** A fund of three that each put in 30,000 wARS, in week 2, with nothing spent yet; one thing changed per test. */
+const START_TIME = 1_791_000_000n;
+
+/** A version 1 fund of three that each put in 30,000 wARS, in week 2, with nothing spent yet; one thing changed per test. */
 export function fundSnapshot(change: Partial<FundSnapshot> = {}): FundSnapshot {
   return {
     address: FUND,
+    version: 1,
     block: BLOCK,
+    timestamp: START_TIME + 2n * WEEK + 3_600n,
     agent: AGENT,
     closed: false,
     members: MEMBERS,
@@ -27,13 +32,28 @@ export function fundSnapshot(change: Partial<FundSnapshot> = {}): FundSnapshot {
     proposalCount: 0n,
     votesRequired: 2,
     weeklyCap: 60_000n * WARS_UNIT,
-    startTime: 1_791_000_000n,
+    startTime: START_TIME,
     week: 2n,
     spentThisWeek: 0n,
+    currency: WARS,
+    dollar: USDT,
+    pool: POOL,
+    feeBps: 0,
+    feeOwed: 0n,
+    balanceCap: 450_000n * WARS_UNIT,
     currencyBalance: 90_000n * WARS_UNIT,
     dollarBalance: 0n,
+    pendingDollar: [0n, 0n, 0n],
+    pendingValue: [0n, 0n, 0n],
+    totalPendingDollar: 0n,
+    agentProposalsThisWeek: 0n,
     ...change,
   };
+}
+
+/** The same fund as version 2 (wARS with USDT) with its fee of 0.25%, nothing owed and nothing pending; one thing changed per test. */
+export function fundSnapshotV2(change: Partial<FundSnapshot> = {}): FundSnapshot {
+  return fundSnapshot({ version: 2, feeBps: 25, ...change });
 }
 
 export function ref(n: number): Hex {

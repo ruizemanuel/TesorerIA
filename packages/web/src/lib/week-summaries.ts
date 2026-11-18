@@ -1,5 +1,6 @@
 import {
   FUND_FACTORY_BLOCK,
+  type FundVersion,
   type LogReader,
   type WeekSummaryFacts,
   fundAbi,
@@ -63,7 +64,14 @@ export function readFacts(stored: StoredWeekSummary): WeekSummaryFacts {
  * A live fund, as writeWeekSummaries reads it from the database. `giveBackTxs` are the transactions the agent proposed
  * its give-back expenses in (giveBackTransactions, spec 7.3), lowercase.
  */
-export type SummaryFund = { id: string; address: Address; createdBlock: bigint; weeklyFee: bigint; giveBackTxs: ReadonlySet<string> };
+export type SummaryFund = {
+  id: string;
+  address: Address;
+  version: FundVersion;
+  createdBlock: bigint;
+  weeklyFee: bigint;
+  giveBackTxs: ReadonlySet<string>;
+};
 
 /** What writeWeekSummaries reads on the chain: chainWeekSummaryDeps reads it for real, a test stands in for it. */
 export type WeekSummaryDeps = {
@@ -103,7 +111,7 @@ export function chainWeekSummaryDeps(
     },
     facts: async (fund, week, startTime) => {
       const { first, last } = await weekBlockRange(client, { startTime, week, from: fund.createdBlock });
-      const snapshot = await readFund(client, fund.address, last);
+      const snapshot = await readFund(client, { address: fund.address, version: fund.version }, last);
       if (snapshot.week !== week) throw new Error(`Block ${last} is in week ${snapshot.week}, not in week ${week}`);
       const [balance, block, events] = await Promise.all([
         client.readContract({ address: fund.address, abi: memberFundAbi, functionName: "balanceInWars", blockNumber: last }),
@@ -130,10 +138,10 @@ export function chainWeekSummaryDeps(
  * fails is logged and tried again on the next heartbeat, and the others go on: this never throws.
  */
 export async function writeWeekSummaries(db: Db, deps: WeekSummaryDeps): Promise<void> {
-  let live: { id: string; address: string | null; createdBlock: bigint | null; weeklyFee: bigint }[];
+  let live: { id: string; address: string | null; version: FundVersion; createdBlock: bigint | null; weeklyFee: bigint }[];
   try {
     live = await db
-      .select({ id: funds.id, address: funds.address, createdBlock: funds.createdBlock, weeklyFee: funds.weeklyFee })
+      .select({ id: funds.id, address: funds.address, version: funds.version, createdBlock: funds.createdBlock, weeklyFee: funds.weeklyFee })
       .from(funds)
       .where(eq(funds.status, "live"));
   } catch (error) {
@@ -147,6 +155,7 @@ export async function writeWeekSummaries(db: Db, deps: WeekSummaryDeps): Promise
       const fund: SummaryFund = {
         id: row.id,
         address: getAddress(row.address),
+        version: row.version,
         createdBlock: row.createdBlock ?? FUND_FACTORY_BLOCK,
         weeklyFee: row.weeklyFee,
         giveBackTxs: await giveBackTransactions(db, row.id),

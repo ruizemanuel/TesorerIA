@@ -6,7 +6,7 @@ export { type ChainReader, type FactoryArtifact, checkPool, factoryDeployData } 
 export { shortMessage } from "./errors";
 export { type FundEvent, type LogReader, RPC_LOG_RANGE, type RawLog, blockscoutLogReader, readFundEvents, rpcLogReader } from "./events";
 export { type Expense, type ExpenseDecision, decideExpense } from "./expense";
-export { type CeloReader, type FundSnapshot, listFunds, readFund, weekBlockRange } from "./fund";
+export { type CeloReader, type FundRef, type FundSnapshot, listFunds, readFund, weekBlockRange } from "./fund";
 export {
   type AgentAction,
   type DailyActivity,

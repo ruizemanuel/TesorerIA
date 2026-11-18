@@ -1,4 +1,4 @@
-import type { FundEvent, FundSnapshot } from "@tesoreria/agent";
+import { type FundEvent, type FundSnapshot, POOL, USDT, WARS as WARS_TOKEN } from "@tesoreria/agent";
 import { type Address, type Hash, getAddress, pad, toHex } from "viem";
 import type { BlockClock } from "../../src/lib/chain-time";
 import { USDT_UNIT, WARS_UNIT } from "../../src/lib/format";
@@ -25,7 +25,9 @@ export const START = CLOCK.timestamp - 2n * 604_800n - 3_600n;
 export function snapshot(change: Partial<FundSnapshot> = {}): FundSnapshot {
   return {
     address: FUND,
+    version: 1,
     block: BLOCK,
+    timestamp: CLOCK.timestamp,
     agent: AGENT,
     closed: false,
     members: MEMBERS,
@@ -37,8 +39,18 @@ export function snapshot(change: Partial<FundSnapshot> = {}): FundSnapshot {
     startTime: START,
     week: 2n,
     spentThisWeek: 0n,
+    currency: WARS_TOKEN,
+    dollar: USDT,
+    pool: POOL,
+    feeBps: 0,
+    feeOwed: 0n,
+    balanceCap: 450_000n * WARS,
     currencyBalance: 90_000n * WARS,
     dollarBalance: 0n,
+    pendingDollar: [0n, 0n, 0n],
+    pendingValue: [0n, 0n, 0n],
+    totalPendingDollar: 0n,
+    agentProposalsThisWeek: 0n,
     ...change,
   };
 }

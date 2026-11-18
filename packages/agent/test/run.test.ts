@@ -3,11 +3,11 @@ import { describe, expect, it } from "vitest";
 import { fundAbi } from "../src/abi";
 import type { FundEvent } from "../src/events";
 import type { Expense } from "../src/expense";
-import type { FundSnapshot } from "../src/fund";
+import type { FundRef, FundSnapshot } from "../src/fund";
 import type { ConversionQuote, References } from "../src/market";
 import { type AgentContext, type ChainView, MIN_GAS_USDT, handleExpense, runHeartbeat } from "../src/run";
 import type { AgentSigner, AgentTransaction } from "../src/signer";
-import { AGENT, BLOCK, FUND, MEMBERS, OUTSIDER, USDT_UNIT, WARS_UNIT, fundSnapshot, proposed, ref, reimbursed } from "./support/fixtures";
+import { AGENT, BLOCK, FUND, MEMBERS, OUTSIDER, USDT_UNIT, WARS_UNIT, fundSnapshot, fundSnapshotV2, proposed, ref, reimbursed } from "./support/fixtures";
 
 const NOW = 1_791_561_510n;
 const HASH: Hash = pad("0x7a", { size: 32 });
@@ -36,8 +36,8 @@ function fakeChain(
 ): ChainView {
   return {
     gasBalance: async () => gas,
-    funds: async () => funds.map((f) => f.address),
-    fund: async (address) => {
+    funds: async () => funds.map((f): FundRef => ({ address: f.address, version: f.version })),
+    fund: async ({ address }) => {
       if (failing.includes(address)) throw new Error("RPC down");
       const fund = funds.find((f) => f.address === address);
       if (fund === undefined) throw new Error(`no fund ${address}`);
@@ -188,6 +188,24 @@ describe("runHeartbeat", () => {
     expect(sent).toEqual([]);
   });
 
+  it("reads each fund as the version the list of factories gave it", async () => {
+    const { signer } = fakeSigner();
+    const base = fakeChain([fundSnapshot({ agent: OUTSIDER }), fundSnapshotV2({ address: SECOND_FUND, agent: OUTSIDER })]);
+    const read: FundRef[] = [];
+    const chain: ChainView = {
+      ...base,
+      fund: async (fund) => {
+        read.push(fund);
+        return base.fund(fund);
+      },
+    };
+    expect(await runHeartbeat(context(chain, signer))).toEqual([]);
+    expect(read).toEqual([
+      { address: FUND, version: 1 },
+      { address: SECOND_FUND, version: 2 },
+    ]);
+  });
+
   it("goes on with the next fund when one can't be read", async () => {
     const { signer, sent } = fakeSigner();
     const funds = [fundSnapshot({ dollarBalance: 300n * USDT_UNIT }), fundSnapshot({ address: SECOND_FUND, dollarBalance: 300n * USDT_UNIT })];
@@ -281,7 +299,7 @@ describe("handleExpense", () => {
     expect(before).not.toHaveProperty("sendFailed");
   });
 
-  it("rejects a fund the factory didn't create, without reading it", async () => {
+  it("rejects a fund no factory created, without reading it", async () => {
     const { signer, sent } = fakeSigner();
     const chain = fakeChain([fundSnapshot()]);
     expect(await handleExpense(context(chain, signer), SECOND_FUND, PITCH)).toEqual({
@@ -290,6 +308,25 @@ describe("handleExpense", () => {
       reason: "That fund wasn't created by TesorerIA's FundFactory",
     });
     expect(sent).toEqual([]);
+  });
+
+  it("reads the fund as the version the list of factories gave it, from the address it was handed", async () => {
+    const { signer } = fakeSigner();
+    const base = fakeChain([fundSnapshot(), fundSnapshotV2({ address: SECOND_FUND, agent: OUTSIDER })]);
+    const read: FundRef[] = [];
+    const chain: ChainView = {
+      ...base,
+      fund: async (fund) => {
+        read.push(fund);
+        return base.fund(fund);
+      },
+    };
+    expect(await handleExpense(context(chain, signer), SECOND_FUND, PITCH)).toEqual({
+      fund: SECOND_FUND,
+      kind: "reject",
+      reason: "This agent doesn't run that fund",
+    });
+    expect(read).toEqual([{ address: SECOND_FUND, version: 2 }]);
   });
 
   it("sends nothing for an expense already paid back, or a fund another agent runs", async () => {
