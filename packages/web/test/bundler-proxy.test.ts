@@ -3,7 +3,7 @@ import { ATTRIBUTION_SUFFIX, type Call, SAFE_P256_VERIFIERS, SAFE_WEBAUTHN_SHARE
 import { createFakePasskey } from "@tesoreria/wallet/testing";
 import { eq, sql } from "drizzle-orm";
 import { drizzle as drizzleNeon } from "drizzle-orm/neon-http";
-import { type Address, type Hex, concat, decodeFunctionData, encodeFunctionData, erc20Abi, getAddress, numberToHex, parseAbi, zeroAddress } from "viem";
+import { type Address, type Hex, concat, decodeFunctionData, encodeFunctionData, erc20Abi, getAddress, numberToHex, parseAbi, zeroAddress, zeroHash } from "viem";
 import { entryPoint07Address } from "viem/account-abstraction";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -369,6 +369,42 @@ describe("checkCalls", () => {
 
   it("lets a live fund's member propose adding someone who asked to join it, alone (spec, 9.4)", () => {
     expect(checkCalls(asRead(addMemberCalls({ fund: FUND, account: LUCAS })), asked)).toEqual({ ok: true, createsFund: false });
+  });
+
+  it("lets a v2 fund's member propose adding someone who asked to join it too: the same propose, alone", () => {
+    const askedV2 = { liveFunds: [V2_FUND], createFundCalls: [], joinRequests: [{ fund: FUND_V2, account: LUCAS }] };
+    expect(checkCalls(asRead(addMemberCalls({ fund: FUND_V2, account: LUCAS })), askedV2)).toEqual(allowed);
+    // Only for the fund the request is for.
+    const elsewhere = { ...askedV2, joinRequests: [{ fund: FUND, account: LUCAS }] };
+    expect(checkCalls(asRead(addMemberCalls({ fund: FUND_V2, account: LUCAS })), elsewhere)).toMatchObject({ ok: false, status: 403 });
+  });
+
+  it("refuses the rest of a v2 fund's functions: the fee, the conversion, a reimbursement, reads and any other proposal, alone or in a batch", () => {
+    const sponsorship = { ...member, liveFunds: [V2_FUND, BRL_FUND], joinRequests: [{ fund: FUND_V2, account: LUCAS }] };
+    const call = (fund: Address, data: Hex) => fundCall(fund, data);
+    const proposeV2 = (action: number, a: Address, amount = 0n) =>
+      call(FUND_V2, encodeFunctionData({ abi: fundV2Abi, functionName: "propose", args: [action, a, zeroAddress, amount, ""] }));
+    const read = (fund: Address) => call(fund, encodeFunctionData({ abi: fundV2Abi, functionName: "getProposal", args: [0n] }));
+    const payFee = call(FUND_V2, encodeFunctionData({ abi: fundV2Abi, functionName: "payFee" }));
+    const contribution = [approve(WARS, FUND_V2), v2Call(FUND_V2, "contribute")];
+    const cases: Record<string, OperationCall[]> = {
+      "a read of the fund": [read(FUND_V2)],
+      "a read of the fund in wBRL": [read(FUND_BRL)],
+      "payFee, which anyone may call": [payFee],
+      "convert": [call(FUND_V2, encodeFunctionData({ abi: fundV2Abi, functionName: "convert", args: [[ME], [1n], 0n] }))],
+      "reimburseAgreedExpense": [call(FUND_V2, encodeFunctionData({ abi: fundV2Abi, functionName: "reimburseAgreedExpense", args: [ME, 1n, zeroHash] }))],
+      "a payment proposal": [proposeV2(ProposalAction.Pay, LUCAS, 1n)],
+      "a give-back proposal": [proposeV2(ProposalAction.GiveBack, ME, 1n)],
+      "closing the fund": [proposeV2(ProposalAction.Close, zeroAddress)],
+      "a read in a batch with a contribution": [read(FUND_V2), ...contribution],
+      "payFee in a batch with a contribution": [payFee, ...contribution],
+      "a payment proposal in a batch with a contribution": [proposeV2(ProposalAction.Pay, LUCAS, 1n), ...contribution],
+      "a give-back proposal in a batch with a contribution": [proposeV2(ProposalAction.GiveBack, ME, 1n), ...contribution],
+      "the add-member proposal that is sponsored alone, in a batch with a contribution": [proposeV2(ProposalAction.AddMember, LUCAS), ...contribution],
+    };
+    for (const [why, calls] of Object.entries(cases)) expect(checkCalls(calls, sponsorship), why).toMatchObject({ ok: false, status: 403 });
+    // The one propose that goes through, alone, is the add-member one.
+    expect(checkCalls([proposeV2(ProposalAction.AddMember, LUCAS)], sponsorship)).toEqual(allowed);
   });
 
   it("refuses any other proposal, an account without a request there, a batch, and someone else's fund", () => {

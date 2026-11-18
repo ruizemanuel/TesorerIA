@@ -1,4 +1,5 @@
 import type { PGlite } from "@electric-sql/pglite";
+import type { FundVersion } from "@tesoreria/agent";
 import { drizzle } from "drizzle-orm/pglite";
 import { type Address, getAddress } from "viem";
 import { generatePrivateKey, privateKeyToAddress } from "viem/accounts";
@@ -46,7 +47,7 @@ export async function addLiveFund(
     members,
     version,
     currency,
-  }: { creatorId: string; address: Address; members: string[]; version?: 1 | 2; currency?: Address },
+  }: { creatorId: string; address: Address; members: string[]; version?: FundVersion; currency?: Address },
 ) {
   const [fund] = await db
     .insert(funds)
