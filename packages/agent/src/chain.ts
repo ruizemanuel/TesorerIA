@@ -20,6 +20,14 @@ export const AGENT_ADDRESS: Address = "0x6BE3c1eB63A4edbc6C23c281F93F81B14eF3a67
 export const FUND_FACTORY: Address = "0xdF3B0d9edCA58Aac7c9Db4F2931f3559daf82020";
 /** The block FUND_FACTORY was deployed in: no fund has older events. */
 export const FUND_FACTORY_BLOCK = 79_659_548n;
+/** Which contract a fund runs: `Fund` (1, wARS with USDT as a second way in) or `FundV2` (2, any wFIAT). */
+export type FundVersion = 1 | 2;
+/** A fund factory the app serves, and the block it was deployed in. */
+export type Factory = { address: Address; block: bigint; version: FundVersion };
+/** Where the fee of the funds the web creates goes: TesorerIA's own account (`FundFactoryV2.feeRecipient`). */
+export const FEE_RECIPIENT: Address = "0x5Dc9C76C6999C6C604b3D91C040D17b125ca4581";
+/** The factories whose funds the app serves, oldest first. Only v1 for now. */
+export const FACTORIES: readonly Factory[] = [{ address: FUND_FACTORY, block: FUND_FACTORY_BLOCK, version: 1 }];
 /** Uniswap v3 QuoterV2 on Celo (official deployment; its `factory()` is UNISWAP_V3_FACTORY). */
 export const UNISWAP_V3_QUOTER: Address = "0x82825d0554fA07f7FC52Ab63c961F330fdEFa8E8";
 /** Chainlink USD / ARS on Base: pesos per dollar, 8 decimals, updated about once a day. */

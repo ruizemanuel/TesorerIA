@@ -1,5 +1,6 @@
 export { Action, fundAbi, fundErrorAbi, fundEventAbi, fundFactoryAbi, fundFactoryV2Abi, fundV2Abi } from "./abi";
 export * from "./chain";
+export { CURRENCIES, type Currency, type DollarEntry, FEE_BPS, MIN_POOL_HISTORY, type ReferenceFeed, currencyOf } from "./currencies";
 export { type ConversionDecision, type ConversionPlan, MIN_CONVERSION_USDT, type SkipCode, decideConversion, planConversion } from "./convert";
 export { type ChainReader, type FactoryArtifact, checkPool, factoryDeployData } from "./deploy";
 export { shortMessage } from "./errors";
