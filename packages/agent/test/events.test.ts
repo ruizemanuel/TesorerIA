@@ -6,6 +6,7 @@ import {
   encodeAbiParameters,
   encodeEventTopics,
   pad,
+  parseAbi,
   parseAbiParameters,
   toHex,
 } from "viem";
@@ -248,5 +249,55 @@ describe("readFundEvents", () => {
     const truncated: RawLog = { ...reimbursementLog(5n), data: "0x1234" };
     const reader: LogReader = async () => [reimbursementLog(3n), truncated];
     await expect(readFundEvents(reader, FUND, 0n, 10n)).rejects.toThrow(DecodeLogDataMismatch);
+  });
+
+  describe("of either version", () => {
+    /** FundV2's events that Fund doesn't have, with the contract's signatures. */
+    const v2Abi = parseAbi([
+      "event Conversion(address indexed member, uint256 dollarIn, uint256 currencyOut, uint256 credited)",
+      "event ContributionGivenBack(address indexed member, uint256 amount)",
+      "event FeePaid(uint256 amount)",
+    ]);
+    const uints = (n: number) => parseAbiParameters(Array<string>(n).fill("uint256").join(", "));
+    const log = (topics: Hex[], data: Hex, index = 0): RawLog => ({
+      address: FUND,
+      topics,
+      data,
+      blockNumber: 1n,
+      transactionHash: txHash(1),
+      logIndex: index,
+    });
+    const read = (...logs: RawLog[]) => readFundEvents(async () => logs, FUND, 0n, 10n);
+
+    it("decodes a FundV2 Conversion with its member", async () => {
+      const topics = encodeEventTopics({ abi: v2Abi, eventName: "Conversion", args: { member: MEMBER } }) as Hex[];
+      const data = encodeAbiParameters(uints(3), [3_000_000n, 4_000n * 10n ** 18n, 3_990n * 10n ** 18n]);
+      const [event] = await read(log(topics, data));
+      expect(event?.eventName).toBe("Conversion");
+      expect(event?.args).toEqual({ member: MEMBER, dollarIn: 3_000_000n, currencyOut: 4_000n * 10n ** 18n, credited: 3_990n * 10n ** 18n });
+    });
+
+    it("decodes a v1 Conversion as before", async () => {
+      const topics = encodeEventTopics({ abi: fundAbi, eventName: "Conversion" }) as Hex[];
+      const data = encodeAbiParameters(uints(2), [3_000_000n, 4_000n * 10n ** 18n]);
+      const [event] = await read(log(topics, data));
+      expect(event?.eventName).toBe("Conversion");
+      expect(event?.args).toEqual({ dollarIn: 3_000_000n, currencyOut: 4_000n * 10n ** 18n });
+      expect("member" in (event?.args ?? {})).toBe(false);
+    });
+
+    it("decodes ContributionGivenBack and FeePaid", async () => {
+      const givenBack = log(
+        encodeEventTopics({ abi: v2Abi, eventName: "ContributionGivenBack", args: { member: MEMBER } }) as Hex[],
+        encodeAbiParameters(uints(1), [500n * 10n ** 18n]),
+        0,
+      );
+      const feePaid = log(encodeEventTopics({ abi: v2Abi, eventName: "FeePaid" }) as Hex[], encodeAbiParameters(uints(1), [12n * 10n ** 18n]), 1);
+      const events = await read(givenBack, feePaid);
+      expect(events.map((e) => [e.eventName, e.args])).toEqual([
+        ["ContributionGivenBack", { member: MEMBER, amount: 500n * 10n ** 18n }],
+        ["FeePaid", { amount: 12n * 10n ** 18n }],
+      ]);
+    });
   });
 });

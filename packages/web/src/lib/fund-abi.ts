@@ -29,7 +29,7 @@ export const DEFAULT_BALANCE_CAP = 450_000n * WARS_UNIT;
 /** Fund.MAX_MEMBERS: the most members a fund has, at creation and after an AddMember. */
 export const MAX_MEMBERS = 10;
 
-/** `Fund.Action`, in the contract's order (spec, 16). */
+/** `Fund.Action`, in the contract's order (spec, 16), and `GiveBack`, which `FundV2.Action` adds at the end. */
 export const ProposalAction = {
   Pay: 0,
   AddMember: 1,
@@ -39,4 +39,5 @@ export const ProposalAction = {
   SetVotesRequired: 5,
   SetAgent: 6,
   Close: 7,
+  GiveBack: 8,
 } as const;

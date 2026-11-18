@@ -50,7 +50,8 @@ const amount = (value: bigint, unit: bigint) => Number(formatUnits(value, decima
  */
 export function llmsTxt(origin: string, publicFund: Address | null): string {
   // An error's selector is its signature's hash, cut to 4 bytes, as a function's is.
-  const errors = fundErrorAbi.map((error) => {
+  // Fund's 20 come first in fundErrorAbi; the five after them are FundV2's, which this page doesn't publish yet.
+  const errors = fundErrorAbi.slice(0, 20).map((error) => {
     const signature = formatAbiItem(error);
     return `- \`${signature}\` ${toFunctionSelector(signature)}`;
   });
@@ -127,6 +128,8 @@ And what they read, which anyone can:
 ${functions.reads.join("\n")}
 
 \`propose\`'s \`action\` is \`Fund.Action\`: ${Object.entries(ProposalAction)
+    // GiveBack is FundV2's only: Fund.Action ends at Close.
+    .filter(([, value]) => value !== ProposalAction.GiveBack)
     .map(([name, value]) => `${value} ${name}`)
     .join(", ")}.
 

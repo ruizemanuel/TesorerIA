@@ -7,7 +7,7 @@ import {
   type PublicClient,
   decodeEventLog,
 } from "viem";
-import { fundAbi } from "./abi";
+import { fundEventAbi } from "./abi";
 import { shortMessage } from "./errors";
 
 /** A log as the agent needs it: where it is, and what it says. */
@@ -23,8 +23,8 @@ export type RawLog = {
 /** Reads every log an address emitted between two blocks, both included. */
 export type LogReader = (query: { address: Address; fromBlock: bigint; toBlock: bigint }) => Promise<RawLog[]>;
 
-/** A fund's decoded event, with where it happened. */
-export type FundEvent = DecodeEventLogReturnType<typeof fundAbi> & {
+/** A fund's decoded event, of either version, with where it happened. */
+export type FundEvent = DecodeEventLogReturnType<typeof fundEventAbi> & {
   blockNumber: bigint;
   transactionHash: Hash;
   logIndex: number;
@@ -154,7 +154,7 @@ export function blockscoutLogReader({
 
 /**
  * A fund's events between two blocks, decoded and in chain order. Logs with an event signature that isn't in
- * fundAbi are left out; a known event that fails to decode throws, so the history is never read with a hole.
+ * fundEventAbi are left out; a known event that fails to decode throws, so the history is never read with a hole.
  */
 export async function readFundEvents(
   reader: LogReader,
@@ -166,11 +166,11 @@ export async function readFundEvents(
   for (const log of await reader({ address: fund, fromBlock, toBlock })) {
     if (log.address.toLowerCase() !== fund.toLowerCase()) continue;
     try {
-      const decoded = decodeEventLog({ abi: fundAbi, data: log.data, topics: log.topics as [Hex, ...Hex[]] });
+      const decoded = decodeEventLog({ abi: fundEventAbi, data: log.data, topics: log.topics as [Hex, ...Hex[]] });
       events.push({ ...decoded, blockNumber: log.blockNumber, transactionHash: log.transactionHash, logIndex: log.logIndex });
     } catch (error) {
       // An unknown topic is not one of the fund's events. Anything else is a known event that doesn't match
-      // fundAbi: dropping it would leave a hole in the history, so it stops the read.
+      // fundEventAbi: dropping it would leave a hole in the history, so it stops the read.
       if (!(error instanceof AbiEventSignatureNotFoundError)) throw error;
     }
   }

@@ -171,6 +171,8 @@ export function conversionLoss(events: readonly FundEvent[]): ConversionLoss {
         break;
       }
       case "Conversion": {
+        // FundV2's names its member and credits what it got: nothing to charge. Only Fund's has a loss to work out.
+        if ("member" in event.args) break;
         const { dollarIn, currencyOut } = event.args;
         let left = dollarIn;
         let difference = 0n;

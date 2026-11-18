@@ -151,6 +151,11 @@ describe("/llms.txt: the site for an agent that reads it (llmstxt.org)", () => {
     expect(text).toContain("anyone can call `execute` once a proposal has the votes it needs");
     expect(text).toContain("an ERC-20 `approve`");
     expect(text).toContain("0 Pay, 1 AddMember, 2 RemoveMember, 3 ReplaceMember, 4 SetWeeklyCap, 5 SetVotesRequired, 6 SetAgent, 7 Close");
+    // FundV2's GiveBack action and its five new errors aren't published yet: the page is Fund's.
+    expect(text).not.toContain("8 GiveBack");
+    for (const error of ["NoDollar()", "InsufficientPending()", "GiveBackTooLarge()", "TooManyProposals()", "NoteTooLong()"]) {
+      expect(text, error).not.toContain(error);
+    }
   });
 
   it("gives this site's addresses for a fund's public page, its movements, a week's summary and a receipt, and how it picks a language", async () => {
