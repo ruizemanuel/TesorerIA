@@ -3,11 +3,26 @@ import { describe, expect, it } from "vitest";
 import { fundAbi } from "../src/abi";
 import type { FundEvent } from "../src/events";
 import type { Expense } from "../src/expense";
+import { servedProblem } from "../src/currencies";
 import type { FundRef, FundSnapshot } from "../src/fund";
 import type { ConversionQuote, References } from "../src/market";
 import { type AgentContext, type ChainView, MIN_GAS_USDT, handleExpense, runHeartbeat } from "../src/run";
 import type { AgentSigner, AgentTransaction } from "../src/signer";
-import { AGENT, BLOCK, FUND, MEMBERS, OUTSIDER, USDT_UNIT, WARS_UNIT, fundSnapshot, fundSnapshotV2, proposed, ref, reimbursed } from "./support/fixtures";
+import {
+  AGENT,
+  BLOCK,
+  FUND,
+  MEMBERS,
+  OUTSIDER,
+  USDT_UNIT,
+  WARS_UNIT,
+  fundSnapshot,
+  fundSnapshotV2,
+  fundSnapshotWithoutDollar,
+  proposed,
+  ref,
+  reimbursed,
+} from "./support/fixtures";
 
 const NOW = 1_791_561_510n;
 const HASH: Hash = pad("0x7a", { size: 32 });
@@ -206,6 +221,19 @@ describe("runHeartbeat", () => {
     ]);
   });
 
+  it("leaves a v2 fund it doesn't serve alone in the heartbeat", async () => {
+    const { signer, sent } = fakeSigner();
+    // The same fund as a served one, except for a balance cap above the table's: with its USDT waiting, it would be converted.
+    const fund = fundSnapshotV2({ dollarBalance: 300n * USDT_UNIT, balanceCap: 450_000n * WARS_UNIT + 1n });
+    expect(servedProblem(fund)).not.toBeNull();
+    const historiesRead: Address[] = [];
+    const chain = fakeChain([fund]);
+    const watched: ChainView = { ...chain, events: async (address, toBlock) => (historiesRead.push(address), chain.events(address, toBlock)) };
+    expect(await runHeartbeat(context(watched, signer))).toEqual([]);
+    expect(sent).toEqual([]);
+    expect(historiesRead).toEqual([]);
+  });
+
   it("goes on with the next fund when one can't be read", async () => {
     const { signer, sent } = fakeSigner();
     const funds = [fundSnapshot({ dollarBalance: 300n * USDT_UNIT }), fundSnapshot({ address: SECOND_FUND, dollarBalance: 300n * USDT_UNIT })];
@@ -253,6 +281,28 @@ describe("handleExpense", () => {
     expect(decodeFunctionData({ abi: fundAbi, data: sent[0]?.data ?? "0x" })).toEqual({
       functionName: "reimburseAgreedExpense",
       args: [MEMBER, 45_000n * WARS_UNIT, ref(7)],
+    });
+  });
+
+  it("blocks an expense of a v2 fund it doesn't serve, saying why", async () => {
+    const { signer, sent } = fakeSigner();
+    const fund = fundSnapshotV2({ pool: OUTSIDER });
+    const problem = servedProblem(fund);
+    expect(problem).toMatch(/dollar and pool/);
+    // Blocked, never rejected: a rejection is terminal, and the fund may be served once the table says so.
+    expect(await handleExpense(context(fakeChain([fund]), signer), FUND, PITCH)).toEqual({ fund: FUND, kind: "blocked", reason: problem });
+    expect(sent).toEqual([]);
+  });
+
+  it("says the fund's currency", async () => {
+    const { signer, sent } = fakeSigner();
+    const fund = fundSnapshotWithoutDollar("wMXN");
+    const pitch: Expense = { ...PITCH, amount: 1_100n * WARS_UNIT };
+    const decision = await handleExpense(context(fakeChain([fund]), signer), FUND, pitch);
+    expect(decision).toMatchObject({ kind: "reimburse", reason: "Pay back 1100 wMXN of the agreed expense", tx: HASH });
+    expect(decodeFunctionData({ abi: fundAbi, data: sent[0]?.data ?? "0x" })).toEqual({
+      functionName: "reimburseAgreedExpense",
+      args: [MEMBER, 1_100n * WARS_UNIT, ref(7)],
     });
   });
 

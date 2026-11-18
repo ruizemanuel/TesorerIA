@@ -2,7 +2,7 @@ import { type Address, type Hash, type Hex, formatUnits, isAddressEqual } from "
 import { Action } from "./abi";
 import type { FundEvent } from "./events";
 import type { FundSnapshot } from "./fund";
-import { type DailyActivity, LIMITS, MAX_NOTE_LENGTH } from "./limits";
+import { type DailyActivity, MAX_NOTE_LENGTH, fundCurrency, reimbursementLimits } from "./limits";
 
 /**
  * An expense a member entered in the web app. `member` is the account that entered it, never an address
@@ -10,7 +10,7 @@ import { type DailyActivity, LIMITS, MAX_NOTE_LENGTH } from "./limits";
  */
 export type Expense = {
   member: Address;
-  /** In wARS (18 decimals). */
+  /** In the fund's currency, in its token's units (18 decimals for every wFIAT). */
   amount: bigint;
   /**
    * "agreed" is the expense the fund pays back without a vote, up to the weekly cap. "give-back" is part of what the
@@ -128,14 +128,14 @@ export function decideExpense({
   };
   if (expense.kind === "give-back") return propose("A contribution given back is always voted on");
   if (expense.kind === "other") return propose("Only the agreed expense is paid back without a vote");
+  const { symbol, decimals } = fundCurrency(fund);
   const left = fund.weeklyCap > fund.spentThisWeek ? fund.weeklyCap - fund.spentThisWeek : 0n;
   if (amount > left) {
-    return propose(`It doesn't fit in what's left of this week's cap (${formatUnits(left, 18)} wARS)`);
+    return propose(`It doesn't fit in what's left of this week's cap (${formatUnits(left, decimals)} ${symbol})`);
   }
-  if (amount > LIMITS.maxReimbursementWars) return propose("It's above the agent's per-reimbursement limit");
-  if (today.reimbursed + amount > LIMITS.maxDailyReimbursedWars) {
-    return propose("It's above the agent's daily reimbursement limit");
-  }
-  if (amount > fund.currencyBalance) return { kind: "wait", reason: "The fund doesn't hold enough wARS yet" };
+  const { perReimbursement, perDay } = reimbursementLimits(fund);
+  if (amount > perReimbursement) return propose("It's above the agent's per-reimbursement limit");
+  if (today.reimbursed + amount > perDay) return propose("It's above the agent's daily reimbursement limit");
+  if (amount > fund.currencyBalance) return { kind: "wait", reason: `The fund doesn't hold enough ${symbol} yet` };
   return { kind: "reimburse", member, amount, ref };
 }

@@ -1,22 +1,19 @@
 import { type Address, type Hash, type Hex, encodeFunctionData, isAddressEqual, zeroAddress } from "viem";
 import { Action, fundAbi } from "./abi";
+import { type Currency, currencyOf } from "./currencies";
 import type { FundEvent } from "./events";
 import type { FundSnapshot } from "./fund";
 import type { AgentTransaction } from "./signer";
 
-const WARS_UNIT = 10n ** 18n;
-const USDT_UNIT = 10n ** 6n;
-
 /**
- * The agent's own limits, on top of the contract's (members only, weekly cap). They hold per fund, and
- * "a day" is the last DAY_BLOCKS blocks. A reimbursement over a limit becomes a proposal for the members
- * to vote on, never a payment.
+ * The agent's own limits that don't depend on a fund's currency, on top of the contract's (members only, weekly
+ * cap). They hold per fund, and "a day" is the last DAY_BLOCKS blocks. A reimbursement over a limit becomes a
+ * proposal for the members to vote on, never a payment. The dollar ones are in whole dollars: `conversionLimits` gives
+ * them in the fund's dollar token, and each currency's reimbursement limits are in `CURRENCIES`.
  */
 export const LIMITS = {
-  maxReimbursementWars: 100_000n * WARS_UNIT,
-  maxDailyReimbursedWars: 150_000n * WARS_UNIT,
-  maxConversionUsdt: 500n * USDT_UNIT,
-  maxDailyConvertedUsdt: 1_000n * USDT_UNIT,
+  maxConversionDollar: 500n,
+  maxDailyConvertedDollar: 1_000n,
   /** Transactions per fund and day, so a bug can't spend the agent's gas money. */
   maxDailyTransactions: 20,
 } as const;
@@ -61,6 +58,27 @@ export class LimitError extends Error {
   override name = "LimitError";
 }
 
+/** The table's entry for the fund's currency, or a LimitError: the agent has no limits for a currency it doesn't know. */
+export function fundCurrency(fund: FundSnapshot): Currency {
+  const currency = currencyOf(fund.currency);
+  if (currency === undefined) throw new LimitError(`The fund's currency ${fund.currency} isn't in the agent's table`);
+  return currency;
+}
+
+/** What the agent may reimburse in one transaction and in a day, in the fund's currency (its token's units). */
+export function reimbursementLimits(fund: FundSnapshot): { perReimbursement: bigint; perDay: bigint } {
+  const { limits } = fundCurrency(fund);
+  return { perReimbursement: limits.reimbursement, perDay: limits.dailyReimbursed };
+}
+
+/** What the agent may convert in one transaction and in a day, in the fund's dollar token's units. */
+export function conversionLimits(fund: FundSnapshot): { perConversion: bigint; perDay: bigint } {
+  const { dollar } = fundCurrency(fund);
+  if (fund.dollar === null || dollar === null) throw new LimitError("The fund has no dollar to convert");
+  const unit = 10n ** BigInt(dollar.decimals);
+  return { perConversion: LIMITS.maxConversionDollar * unit, perDay: LIMITS.maxDailyConvertedDollar * unit };
+}
+
 /** The member as the contract lists it: the agent never takes an address from anywhere else. */
 function listedMember(fund: FundSnapshot, address: Address): Address {
   const member = fund.members.find((m) => isAddressEqual(m, address));
@@ -88,8 +106,9 @@ export function authorize(
       const { dollarAmount, minCurrencyOut } = action;
       if (dollarAmount <= 0n || minCurrencyOut <= 0n) throw new LimitError("Nothing to convert");
       if (dollarAmount > fund.dollarBalance) throw new LimitError("The fund doesn't hold that much USDT");
-      if (dollarAmount > LIMITS.maxConversionUsdt) throw new LimitError("Above the agent's per-conversion limit");
-      if (today.convertedDollar + dollarAmount > LIMITS.maxDailyConvertedUsdt) {
+      const { perConversion, perDay } = conversionLimits(fund);
+      if (dollarAmount > perConversion) throw new LimitError("Above the agent's per-conversion limit");
+      if (today.convertedDollar + dollarAmount > perDay) {
         throw new LimitError("Above the agent's daily conversion limit");
       }
       return {
@@ -101,12 +120,13 @@ export function authorize(
       const member = listedMember(fund, action.member);
       const { amount, ref } = action;
       if (amount <= 0n) throw new LimitError("Nothing to reimburse");
-      if (amount > LIMITS.maxReimbursementWars) throw new LimitError("Above the agent's per-reimbursement limit");
-      if (today.reimbursed + amount > LIMITS.maxDailyReimbursedWars) {
+      const { perReimbursement, perDay } = reimbursementLimits(fund);
+      if (amount > perReimbursement) throw new LimitError("Above the agent's per-reimbursement limit");
+      if (today.reimbursed + amount > perDay) {
         throw new LimitError("Above the agent's daily reimbursement limit");
       }
       if (fund.spentThisWeek + amount > fund.weeklyCap) throw new LimitError("Above what's left of this week's cap");
-      if (amount > fund.currencyBalance) throw new LimitError("The fund doesn't hold that much wARS");
+      if (amount > fund.currencyBalance) throw new LimitError(`The fund doesn't hold that much ${fundCurrency(fund).symbol}`);
       return {
         to: fund.address,
         data: encodeFunctionData({ abi: fundAbi, functionName: "reimburseAgreedExpense", args: [member, amount, ref] }),

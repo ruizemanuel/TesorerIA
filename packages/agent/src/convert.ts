@@ -1,5 +1,5 @@
 import type { FundSnapshot } from "./fund";
-import { type DailyActivity, LIMITS } from "./limits";
+import { type DailyActivity, conversionLimits } from "./limits";
 import type { ConversionQuote, References } from "./market";
 
 /** Under 5 USDT, the agent leaves the USDT where it is (spec, 8.1). */
@@ -29,9 +29,10 @@ export type ConversionPlan = { kind: "none" } | { kind: "skip"; code: SkipCode; 
 /** How much of the fund's USDT to convert now: all of it, within the agent's limits. */
 export function planConversion(fund: FundSnapshot, today: DailyActivity): ConversionPlan {
   if (fund.dollarBalance < MIN_CONVERSION_USDT) return { kind: "none" };
+  const { perConversion, perDay } = conversionLimits(fund);
   let dollarAmount = fund.dollarBalance;
-  if (dollarAmount > LIMITS.maxConversionUsdt) dollarAmount = LIMITS.maxConversionUsdt;
-  const leftToday = LIMITS.maxDailyConvertedUsdt - today.convertedDollar;
+  if (dollarAmount > perConversion) dollarAmount = perConversion;
+  const leftToday = perDay - today.convertedDollar;
   if (dollarAmount > leftToday) dollarAmount = leftToday;
   if (dollarAmount < MIN_CONVERSION_USDT) {
     return { kind: "skip", code: "daily-limit", reason: "The agent reached its daily conversion limit for this fund" };

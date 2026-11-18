@@ -1,5 +1,7 @@
-import { type Address, isAddressEqual } from "viem";
+import { type Address, formatUnits, isAddressEqual } from "viem";
 import { POOL, POOL_FEE, USDT, USD_ARS_FEED, WARS } from "./chain";
+// Type only, so the two files have no import cycle at runtime.
+import type { FundSnapshot } from "./fund";
 
 /** A Chainlink price the agent checks a currency against. */
 export type ReferenceFeed = {
@@ -119,4 +121,30 @@ export const CURRENCIES: readonly Currency[] = [
 /** The currency whose token is `token`, whatever the address's case, or undefined for any other token. */
 export function currencyOf(token: Address): Currency | undefined {
   return CURRENCIES.find((c) => isAddressEqual(c.token, token));
+}
+
+/**
+ * Why the agent doesn't serve this fund, or null when it does. A v1 fund always is: they're the ones the agent has run
+ * since the start. A v2 fund is only if it matches the table: its currency is in it, its dollar and pool are both the
+ * currency's or both missing, and its balance cap is no more than the currency's. Anyone can deploy a fund that names
+ * this agent, with a pool of their own or a cap the agent's limits weren't sized for. The fee isn't compared: the
+ * contract caps it at 1 %, so a fund stays served when the table's FEE_BPS changes for the funds created after.
+ */
+export function servedProblem(fund: FundSnapshot): string | null {
+  if (fund.version === 1) return null;
+  const currency = currencyOf(fund.currency);
+  if (currency === undefined) return `The fund's currency ${fund.currency} isn't in the agent's table`;
+  const { dollar } = currency;
+  const noDollar = fund.dollar === null && fund.pool === null;
+  const tablesDollar =
+    dollar !== null &&
+    fund.dollar !== null &&
+    isAddressEqual(fund.dollar, dollar.token) &&
+    fund.pool !== null &&
+    isAddressEqual(fund.pool, dollar.pool);
+  if (!noDollar && !tablesDollar) return `The fund's dollar and pool aren't the ones the agent uses for ${currency.symbol}`;
+  if (fund.balanceCap > currency.limits.balanceCap) {
+    return `The fund's balance cap is above the ${formatUnits(currency.limits.balanceCap, currency.decimals)} ${currency.symbol} the agent serves`;
+  }
+  return null;
 }

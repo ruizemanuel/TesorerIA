@@ -1,9 +1,9 @@
 import type { Address } from "viem";
 import { describe, expect, it } from "vitest";
 import { type Expense, decideExpense } from "../src/expense";
-import { LIMITS } from "../src/limits";
+import { reimbursementLimits } from "../src/limits";
 import type { FundEvent } from "../src/events";
-import { AGENT, BLOCK, MEMBERS, OUTSIDER, WARS_UNIT, fundSnapshot, proposed, ref, reimbursed } from "./support/fixtures";
+import { AGENT, BLOCK, MEMBERS, OUTSIDER, WARS_UNIT, fundSnapshot, fundSnapshotWithoutDollar, proposed, ref, reimbursed } from "./support/fixtures";
 
 const MEMBER = MEMBERS[1] as Address;
 const QUIET_DAY = { reimbursed: 0n, convertedDollar: 0n, transactions: 0 };
@@ -55,9 +55,10 @@ describe("decideExpense", () => {
 
   it("proposes what's above the agent's own limits, even under the fund's cap", () => {
     const bigCap = { weeklyCap: 1_000_000n * WARS_UNIT, currencyBalance: 1_000_000n * WARS_UNIT };
-    const overOne = decide({ ...PITCH, amount: LIMITS.maxReimbursementWars + 1n }, bigCap);
+    const { perReimbursement, perDay } = reimbursementLimits(fundSnapshot());
+    const overOne = decide({ ...PITCH, amount: perReimbursement + 1n }, bigCap);
     expect(overOne).toMatchObject({ kind: "propose-payment", reason: "It's above the agent's per-reimbursement limit" });
-    const busy = { ...QUIET_DAY, reimbursed: LIMITS.maxDailyReimbursedWars - 1n };
+    const busy = { ...QUIET_DAY, reimbursed: perDay - 1n };
     expect(decide(PITCH, bigCap, [], busy)).toMatchObject({
       kind: "propose-payment",
       reason: "It's above the agent's daily reimbursement limit",
@@ -82,6 +83,34 @@ describe("decideExpense", () => {
     expect(decide(PITCH, { currencyBalance: 44_999n * WARS_UNIT })).toEqual({
       kind: "wait",
       reason: "The fund doesn't hold enough wARS yet",
+    });
+  });
+
+  it("waits when a wMXN fund doesn't hold enough wMXN yet", () => {
+    const fund = fundSnapshotWithoutDollar("wMXN", { currencyBalance: 1_099n * WARS_UNIT });
+    const pitch = { ...PITCH, amount: 1_100n * WARS_UNIT };
+    expect(decideExpense({ expense: pitch, fund, events: [], today: QUIET_DAY, now: NOW })).toEqual({
+      kind: "wait",
+      reason: "The fund doesn't hold enough wMXN yet",
+    });
+  });
+
+  it("says wMXN in the week's cap and holds the agent's limits in wMXN", () => {
+    const decideMxn = (amount: bigint, change: Parameters<typeof fundSnapshotWithoutDollar>[1] = {}, today = QUIET_DAY) =>
+      decideExpense({
+        expense: { ...PITCH, amount },
+        fund: fundSnapshotWithoutDollar("wMXN", { weeklyCap: 10_000n * WARS_UNIT, currencyBalance: 10_000n * WARS_UNIT, ...change }),
+        events: [],
+        today,
+        now: NOW,
+      });
+    expect(decideMxn(1_100n * WARS_UNIT)).toMatchObject({ kind: "reimburse", amount: 1_100n * WARS_UNIT });
+    expect(decideMxn(1_101n * WARS_UNIT)).toMatchObject({ kind: "propose-payment", reason: "It's above the agent's per-reimbursement limit" });
+    const busy = { ...QUIET_DAY, reimbursed: 1_000n * WARS_UNIT };
+    expect(decideMxn(1_100n * WARS_UNIT, {}, busy)).toMatchObject({ kind: "propose-payment", reason: "It's above the agent's daily reimbursement limit" });
+    expect(decideMxn(1_100n * WARS_UNIT, { spentThisWeek: 9_500n * WARS_UNIT })).toMatchObject({
+      kind: "propose-payment",
+      reason: "It doesn't fit in what's left of this week's cap (500 wMXN)",
     });
   });
 

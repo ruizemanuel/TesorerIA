@@ -1,5 +1,6 @@
 import { type Address, type Hex, type Log, encodeFunctionData, formatUnits, isAddressEqual, parseAbi, parseEventLogs } from "viem";
-import { AGENT_ADDRESS, CELO_CHAIN_ID, FUND_FACTORY, IDENTITY_REGISTRY } from "./chain";
+import { AGENT_ADDRESS, CELO_CHAIN_ID, FUND_FACTORY, IDENTITY_REGISTRY, WARS } from "./chain";
+import { currencyOf } from "./currencies";
 import { LIMITS } from "./limits";
 
 export const identityRegistryAbi = parseAbi([
@@ -35,6 +36,9 @@ function amount(value: bigint, decimals: number): string {
 
 /** The ERC-8004 registration file (registration-v1): who the agent is, what it does and its limits. */
 export function agentRegistration() {
+  // The file still describes the funds in wARS with USDT, the only ones that existed when it was written.
+  const wars = currencyOf(WARS);
+  if (wars === undefined) throw new Error("wARS is not in CURRENCIES");
   return {
     type: "https://eips.ethereum.org/EIPS/eip-8004#registration-v1",
     name: "TesorerIA",
@@ -46,10 +50,10 @@ export function agentRegistration() {
       "to share in the group's chat. A contract " +
       `deployed by FundFactory ${FUND_FACTORY} enforces its limits: it can only pay members, never above the ` +
       "weekly cap, and it can't change the rules. Its own code adds more: at most " +
-      `${amount(LIMITS.maxReimbursementWars, 18)} wARS per reimbursement and ` +
-      `${amount(LIMITS.maxDailyReimbursedWars, 18)} wARS a day per fund, ` +
-      `${amount(LIMITS.maxConversionUsdt, 6)} USDT per conversion and ` +
-      `${amount(LIMITS.maxDailyConvertedUsdt, 6)} USDT a day, and ${LIMITS.maxDailyTransactions} transactions a ` +
+      `${amount(wars.limits.reimbursement, wars.decimals)} wARS per reimbursement and ` +
+      `${amount(wars.limits.dailyReimbursed, wars.decimals)} wARS a day per fund, ` +
+      `${amount(LIMITS.maxConversionDollar, 0)} USDT per conversion and ` +
+      `${amount(LIMITS.maxDailyConvertedDollar, 0)} USDT a day, and ${LIMITS.maxDailyTransactions} transactions a ` +
       `day per fund. Its wallet, ${AGENT_ADDRESS}, pays gas in USDT and tags every transaction with ` +
       "celo_fbe4d00a2cb4.",
     image: AGENT_IMAGE,

@@ -1,10 +1,11 @@
 import { type Address, type Hash, formatUnits, isAddressEqual } from "viem";
 import { MIN_CONVERSION_USDT, type SkipCode, decideConversion, planConversion } from "./convert";
+import { servedProblem } from "./currencies";
 import { shortMessage } from "./errors";
 import type { FundEvent } from "./events";
 import { type Expense, decideExpense } from "./expense";
 import type { FundRef, FundSnapshot } from "./fund";
-import { type AgentAction, type DailyActivity, DAY_BLOCKS, LimitError, authorize, dailyActivity } from "./limits";
+import { type AgentAction, type DailyActivity, DAY_BLOCKS, LimitError, authorize, dailyActivity, fundCurrency } from "./limits";
 import type { ConversionQuote, References } from "./market";
 import type { AgentSigner } from "./signer";
 
@@ -59,8 +60,10 @@ export type AgentContext = {
   onSent?: (sent: { fund: Address; action: AgentAction; tx: Hash }) => Promise<void>;
 };
 
-function wholeWars(amount: bigint): string {
-  return (amount / 10n ** 18n).toString();
+/** An amount of the fund's currency in whole units, with its symbol: "1100 wMXN". */
+function inCurrency(fund: FundSnapshot, amount: bigint): string {
+  const { symbol, decimals } = fundCurrency(fund);
+  return `${amount / 10n ** BigInt(decimals)} ${symbol}`;
 }
 
 /** Authorizes an action, checks that it would go through and that the agent can pay the gas, and sends it. */
@@ -128,8 +131,9 @@ async function history(ctx: AgentContext, fund: FundSnapshot) {
 }
 
 /**
- * The periodic run (spec, 8.3): converts the USDT waiting in each open fund this agent runs. A fund that fails
- * to load becomes a "blocked" entry and the others go on.
+ * The periodic run (spec, 8.3): converts the USDT waiting in each open fund this agent runs and serves (a v2 fund
+ * that doesn't match the table is left alone, with no entry). A fund that fails to load becomes a "blocked" entry
+ * and the others go on.
  */
 export async function runHeartbeat(ctx: AgentContext): Promise<Decision[]> {
   const decisions: Decision[] = [];
@@ -146,6 +150,8 @@ export async function runHeartbeat(ctx: AgentContext): Promise<Decision[]> {
       // The snapshot first: a closed fund, another agent's, or one with nothing to convert costs no history read.
       const fund = await ctx.chain.fund(ref);
       if (fund.closed || !isAddressEqual(fund.agent, ctx.signer.address)) continue;
+      // Anyone can deploy a fund that names this agent: one that doesn't match the table costs no history read either.
+      if (servedProblem(fund) !== null) continue;
       if (fund.dollarBalance < MIN_CONVERSION_USDT) continue;
       const { today } = await history(ctx, fund);
       const plan = planConversion(fund, today);
@@ -162,7 +168,7 @@ export async function runHeartbeat(ctx: AgentContext): Promise<Decision[]> {
         continue;
       }
       const { dollarAmount, minCurrencyOut } = decision;
-      const reason = `Convert ${formatUnits(dollarAmount, 6)} USDT to at least ${wholeWars(minCurrencyOut)} wARS`;
+      const reason = `Convert ${formatUnits(dollarAmount, 6)} USDT to at least ${inCurrency(fund, minCurrencyOut)}`;
       decisions.push(await act(ctx, fund, today, { kind: "convert", dollarAmount, minCurrencyOut }, reason));
     } catch (error) {
       decisions.push({ fund: address, kind: "blocked", reason: `Could not run the fund: ${shortMessage(error)}` });
@@ -184,6 +190,9 @@ export async function handleExpense(ctx: AgentContext, address: Address, expense
     if (!isAddressEqual(fund.agent, ctx.signer.address)) {
       return { fund: address, kind: "reject", reason: "This agent doesn't run that fund" };
     }
+    // Blocked, not rejected: a rejection is final, and the fund is served once the table says so.
+    const problem = servedProblem(fund);
+    if (problem !== null) return { fund: address, kind: "blocked", reason: problem };
     const { events, today } = await history(ctx, fund);
     const decision = decideExpense({ expense, fund, events, today, now: ctx.now() });
     switch (decision.kind) {
@@ -195,7 +204,7 @@ export async function handleExpense(ctx: AgentContext, address: Address, expense
         return { fund: address, kind: "propose-payment", reason: decision.reason, tx: decision.transactionHash, status: "success" };
       case "reimburse": {
         const { member, amount, ref } = decision;
-        const reason = `Pay back ${wholeWars(amount)} wARS of the agreed expense`;
+        const reason = `Pay back ${inCurrency(fund, amount)} of the agreed expense`;
         return await act(ctx, fund, today, { kind: "reimburse", member, amount, ref }, reason);
       }
       case "propose-payment": {

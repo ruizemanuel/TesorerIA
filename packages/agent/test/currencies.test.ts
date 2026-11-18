@@ -10,7 +10,8 @@ import {
   POOL,
   USDT,
 } from "../src/chain";
-import { CURRENCIES, FEE_BPS, MIN_POOL_HISTORY, currencyOf } from "../src/currencies";
+import { CURRENCIES, FEE_BPS, MIN_POOL_HISTORY, currencyOf, servedProblem } from "../src/currencies";
+import { OUTSIDER, fundSnapshot, fundSnapshotV2, fundSnapshotWithoutDollar } from "./support/fixtures";
 
 const UNIT = 10n ** 18n;
 
@@ -113,6 +114,45 @@ describe("currencyOf", () => {
     expect(currencyOf(wars.token)).toBe(wars);
     expect(currencyOf(wars.token.toLowerCase() as Address)).toBe(wars);
     expect(currencyOf(USDT)).toBeUndefined();
+  });
+});
+
+describe("servedProblem", () => {
+  it("serves a v2 fund in wARS with USDT, like the ones the web creates, whatever its fee and a lower balance cap", () => {
+    expect(servedProblem(fundSnapshotV2())).toBeNull();
+    // The contract caps the fee at 1 %: the table's 25 bps are for the funds created from now on, not a condition.
+    expect(servedProblem(fundSnapshotV2({ feeBps: 30 }))).toBeNull();
+    expect(servedProblem(fundSnapshotV2({ feeBps: 100 }))).toBeNull();
+    expect(servedProblem(fundSnapshotV2({ balanceCap: 400_000n * UNIT }))).toBeNull();
+  });
+
+  it("serves a v2 fund without a dollar, in any currency", () => {
+    expect(servedProblem(fundSnapshotV2({ dollar: null, pool: null }))).toBeNull();
+    expect(servedProblem(fundSnapshotWithoutDollar("wMXN", { balanceCap: 5_000n * UNIT }))).toBeNull();
+    for (const { symbol } of CURRENCIES) expect(servedProblem(fundSnapshotWithoutDollar(symbol)), symbol).toBeNull();
+  });
+
+  it("doesn't serve a v2 fund whose balance cap is above the table's", () => {
+    expect(servedProblem(fundSnapshotV2({ balanceCap: 450_000n * UNIT + 1n }))).toMatch(/balance cap.*wARS/);
+    expect(servedProblem(fundSnapshotWithoutDollar("wMXN", { balanceCap: 5_000n * UNIT + 1n }))).toMatch(/balance cap.*wMXN/);
+  });
+
+  it("doesn't serve a v2 fund whose dollar and pool aren't the table's, or both missing", () => {
+    expect(servedProblem(fundSnapshotV2({ pool: OUTSIDER }))).toMatch(/dollar and pool/);
+    expect(servedProblem(fundSnapshotV2({ dollar: OUTSIDER }))).toMatch(/dollar and pool/);
+    expect(servedProblem(fundSnapshotV2({ pool: null }))).toMatch(/dollar and pool/);
+    expect(servedProblem(fundSnapshotV2({ dollar: null }))).toMatch(/dollar and pool/);
+    // wMXN has no dollar in the table: a fund of it with one isn't the table's.
+    expect(servedProblem(fundSnapshotWithoutDollar("wMXN", { dollar: USDT, pool: POOL }))).toMatch(/dollar and pool/);
+  });
+
+  it("doesn't serve a v2 fund in a currency the table doesn't have", () => {
+    expect(servedProblem(fundSnapshotV2({ currency: USDT }))).toMatch(/currency/);
+  });
+
+  it("serves any v1 fund: they are the ones the agent always ran", () => {
+    expect(servedProblem(fundSnapshot())).toBeNull();
+    expect(servedProblem(fundSnapshot({ currency: USDT, dollar: null, pool: null, balanceCap: 10n ** 30n }))).toBeNull();
   });
 });
 

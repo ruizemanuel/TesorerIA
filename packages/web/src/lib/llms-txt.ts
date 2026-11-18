@@ -12,6 +12,7 @@ import {
   TWAP_WINDOW,
   USDT,
   WARS,
+  currencyOf,
   fundAbi,
   fundErrorAbi,
 } from "@tesoreria/agent";
@@ -57,6 +58,9 @@ export function llmsTxt(origin: string, publicFund: Address | null): string {
   });
   const fund = publicFund === null ? null : getAddress(publicFund);
   const functions = fundFunctions();
+  // The agent's own limits this page gives are wARS's, from the table: it is still about the funds in wARS with USDT.
+  const wars = currencyOf(WARS);
+  if (wars === undefined) throw new Error("wARS is not in CURRENCIES");
   return `# TesorerIA
 
 > A group's shared fund in Argentine pesos (wARS) on Celo, run by an agent within limits that a contract enforces. Members contribute wARS or USDT; the agent converts the USDT to wARS, pays members back for the expense the group agreed on, up to a weekly cap, and turns every other payment into a proposal the members vote on.
@@ -107,8 +111,8 @@ ${
 
 On top of the contract's, in each fund, where a day is the last ${Number(DAY_BLOCKS).toLocaleString("en-US")} blocks. A reimbursement over a limit becomes a proposal for the members to vote on, never a payment. They live in the agent's code, not in the contract, so the chain can't check them the way it checks the contract's.
 
-- At most ${amount(LIMITS.maxReimbursementWars, WARS_UNIT)} wARS per reimbursement, and ${amount(LIMITS.maxDailyReimbursedWars, WARS_UNIT)} wARS a day
-- At most ${amount(LIMITS.maxConversionUsdt, USDT_UNIT)} USDT per conversion, and ${amount(LIMITS.maxDailyConvertedUsdt, USDT_UNIT)} USDT a day
+- At most ${amount(wars.limits.reimbursement, WARS_UNIT)} wARS per reimbursement, and ${amount(wars.limits.dailyReimbursed, WARS_UNIT)} wARS a day
+- At most ${LIMITS.maxConversionDollar.toLocaleString("en-US")} USDT per conversion, and ${LIMITS.maxDailyConvertedDollar.toLocaleString("en-US")} USDT a day
 - At most ${LIMITS.maxDailyTransactions} transactions a day
 
 ## The week

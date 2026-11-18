@@ -1,6 +1,7 @@
 import { type Address, type Hash, type Hex, getAddress, pad, toHex } from "viem";
 import type { FundEvent } from "../../src/events";
 import { POOL, USDT, WARS } from "../../src/chain";
+import { CURRENCIES, type Currency } from "../../src/currencies";
 import { type FundSnapshot, WEEK } from "../../src/fund";
 
 export const WARS_UNIT = 10n ** 18n;
@@ -54,6 +55,23 @@ export function fundSnapshot(change: Partial<FundSnapshot> = {}): FundSnapshot {
 /** The same fund as version 2 (wARS with USDT) with its fee of 0.25%, nothing owed and nothing pending; one thing changed per test. */
 export function fundSnapshotV2(change: Partial<FundSnapshot> = {}): FundSnapshot {
   return fundSnapshot({ version: 2, feeBps: 25, ...change });
+}
+
+/**
+ * A version 2 fund in one of the table's currencies, with no dollar and that currency's balance cap (the table has a
+ * dollar for wARS only, and a fund may go without one); the balances are the wARS fund's, as plain numbers. One thing
+ * changed per test.
+ */
+export function fundSnapshotWithoutDollar(symbol: Currency["symbol"], change: Partial<FundSnapshot> = {}): FundSnapshot {
+  const currency = CURRENCIES.find((c) => c.symbol === symbol);
+  if (currency === undefined) throw new Error(`No ${symbol} in the table`);
+  return fundSnapshotV2({
+    currency: currency.token,
+    dollar: null,
+    pool: null,
+    balanceCap: currency.limits.balanceCap,
+    ...change,
+  });
 }
 
 export function ref(n: number): Hex {

@@ -1,6 +1,15 @@
 export { Action, fundAbi, fundErrorAbi, fundEventAbi, fundFactoryAbi, fundFactoryV2Abi, fundV2Abi } from "./abi";
 export * from "./chain";
-export { CURRENCIES, type Currency, type DollarEntry, FEE_BPS, MIN_POOL_HISTORY, type ReferenceFeed, currencyOf } from "./currencies";
+export {
+  CURRENCIES,
+  type Currency,
+  type DollarEntry,
+  FEE_BPS,
+  MIN_POOL_HISTORY,
+  type ReferenceFeed,
+  currencyOf,
+  servedProblem,
+} from "./currencies";
 export { type ConversionDecision, type ConversionPlan, MIN_CONVERSION_USDT, type SkipCode, decideConversion, planConversion } from "./convert";
 export { type ChainReader, type FactoryArtifact, checkPool, factoryDeployData } from "./deploy";
 export { shortMessage } from "./errors";
@@ -15,7 +24,9 @@ export {
   LimitError,
   MAX_NOTE_LENGTH,
   authorize,
+  conversionLimits,
   dailyActivity,
+  reimbursementLimits,
 } from "./limits";
 export { type ConversionQuote, type ContractReader, type Feed, type References, quoteConversion, readReferences } from "./market";
 export { AGENT_ID, AGENT_URI, agentRegistration, identityRegistryAbi } from "./registration";

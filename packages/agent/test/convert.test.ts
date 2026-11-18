@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import { MAX_CLOCK_SKEW, MAX_REFERENCE_AGE, decideConversion, planConversion } from "../src/convert";
-import { LIMITS } from "../src/limits";
 import type { ConversionQuote, References } from "../src/market";
 import { USDT_UNIT, WARS_UNIT, fundSnapshot } from "./support/fixtures";
 
@@ -30,15 +29,15 @@ describe("planConversion", () => {
     });
     expect(planConversion(fundSnapshot({ dollarBalance: 800n * USDT_UNIT }), QUIET_DAY)).toEqual({
       kind: "quote",
-      dollarAmount: LIMITS.maxConversionUsdt,
+      dollarAmount: 500n * USDT_UNIT,
     });
   });
 
   it("converts only what the daily limit leaves, and says so when that's under 5 USDT", () => {
     const fund = fundSnapshot({ dollarBalance: 300n * USDT_UNIT });
-    const afterMost = { ...QUIET_DAY, convertedDollar: LIMITS.maxDailyConvertedUsdt - 100n * USDT_UNIT };
+    const afterMost = { ...QUIET_DAY, convertedDollar: 1_000n * USDT_UNIT - 100n * USDT_UNIT };
     expect(planConversion(fund, afterMost)).toEqual({ kind: "quote", dollarAmount: 100n * USDT_UNIT });
-    const afterAll = { ...QUIET_DAY, convertedDollar: LIMITS.maxDailyConvertedUsdt - 4n * USDT_UNIT };
+    const afterAll = { ...QUIET_DAY, convertedDollar: 1_000n * USDT_UNIT - 4n * USDT_UNIT };
     expect(planConversion(fund, afterAll)).toEqual({ kind: "skip", code: "daily-limit", reason: expect.stringContaining("daily conversion limit") });
   });
 });
