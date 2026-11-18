@@ -11,6 +11,7 @@
 //                                                         build's runtime size isn't the one that was reviewed)
 // Reads AGENT_PRIVATE_KEY, and optionally CELO_RPC_URL (never printed), from packages/agent/.env.local.
 import { readFileSync } from "node:fs";
+import { setTimeout as sleep } from "node:timers/promises";
 import {
   BaseError,
   type Hex,
@@ -40,6 +41,8 @@ const ARTIFACT = new URL("../../../contracts/out/FundFactoryV2.sol/FundFactoryV2
 /** What `forge build --force` gave on 2026-11-17, and EIP-170's limit. The dry run prints both; `--send` needs the first. */
 const EXPECTED_RUNTIME_SIZE = 22_514;
 const MAX_RUNTIME_SIZE = 24_576;
+const READ_BACK_ATTEMPTS = 5;
+const READ_BACK_WAIT_MS = 2_000;
 
 /** The value after `--expect-nonce`, as a whole number; undefined when the flag is not there. */
 function expectNonceFrom(argv: readonly string[]): number | undefined {
@@ -160,7 +163,17 @@ async function main(): Promise<number> {
     console.error(`The contract is not at the address the dry run expected (${expectedAddress}).`);
     return 1;
   }
-  await checkFactoryV2(publicClient, receipt.contractAddress);
+  // The RPC may answer from a node that is a block behind the one that gave the receipt, and then the read fails
+  // ("returned no data", or the block is out of range): try again a few times. A mismatch is not a read failure.
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await checkFactoryV2(publicClient, receipt.contractAddress, receipt.blockNumber);
+      break;
+    } catch (error) {
+      if (!(error instanceof BaseError) || attempt === READ_BACK_ATTEMPTS) throw error;
+      await sleep(READ_BACK_WAIT_MS);
+    }
+  }
   console.log("Read back: uniswapFactory() and feeRecipient() are the expected ones, fundCount() is 0");
   return 0;
 }

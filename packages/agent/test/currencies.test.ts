@@ -1,6 +1,15 @@
 import type { Address } from "viem";
 import { describe, expect, it } from "vitest";
-import { FACTORIES, FEE_RECIPIENT, FUND_FACTORY, FUND_FACTORY_BLOCK, POOL, USDT } from "../src/chain";
+import {
+  FACTORIES,
+  FEE_RECIPIENT,
+  FUND_FACTORY,
+  FUND_FACTORY_BLOCK,
+  FUND_FACTORY_V2,
+  FUND_FACTORY_V2_BLOCK,
+  POOL,
+  USDT,
+} from "../src/chain";
 import { CURRENCIES, FEE_BPS, MIN_POOL_HISTORY, currencyOf } from "../src/currencies";
 
 const UNIT = 10n ** 18n;
@@ -115,8 +124,13 @@ describe("the fund constants", () => {
 });
 
 describe("FACTORIES", () => {
-  it("lists FundFactory as version 1", () => {
-    expect(FACTORIES).toEqual([{ address: FUND_FACTORY, block: FUND_FACTORY_BLOCK, version: 1 }]);
+  it("lists FundFactory as version 1, then FundFactoryV2 as version 2", () => {
+    expect(FACTORIES).toEqual([
+      { address: FUND_FACTORY, block: FUND_FACTORY_BLOCK, version: 1 },
+      { address: "0x1337a61CF7fDeF412E04894FE705d4341878d4d3", block: 83_102_288n, version: 2 },
+    ]);
+    expect(FACTORIES.map((f) => f.address)).toEqual([FUND_FACTORY, FUND_FACTORY_V2]);
+    expect(FACTORIES.map((f) => f.block)).toEqual([FUND_FACTORY_BLOCK, FUND_FACTORY_V2_BLOCK]);
   });
 
   it("names the account that receives v2's fee", () => {

@@ -202,13 +202,18 @@ export function checkFactoryV2Send(args: {
 
 /**
  * Reads back a FundFactoryV2 that was just deployed: it has the Uniswap factory and the fee recipient it was meant
- * to, and no funds yet. Throws on the first mismatch.
+ * to, and no funds yet. Throws on the first mismatch (a plain `Error`; a read that fails throws viem's own).
+ * `blockNumber` is the block it was deployed in: read there, a fund created since doesn't count against it.
  */
-export async function checkFactoryV2(client: Pick<PublicClient, "readContract">, address: Address): Promise<void> {
+export async function checkFactoryV2(
+  client: Pick<PublicClient, "readContract">,
+  address: Address,
+  blockNumber?: bigint,
+): Promise<void> {
   const [uniswapFactory, feeRecipient, fundCount] = await Promise.all([
-    client.readContract({ address, abi: fundFactoryV2Abi, functionName: "uniswapFactory" }),
-    client.readContract({ address, abi: fundFactoryV2Abi, functionName: "feeRecipient" }),
-    client.readContract({ address, abi: fundFactoryV2Abi, functionName: "fundCount" }),
+    client.readContract({ address, abi: fundFactoryV2Abi, functionName: "uniswapFactory", blockNumber }),
+    client.readContract({ address, abi: fundFactoryV2Abi, functionName: "feeRecipient", blockNumber }),
+    client.readContract({ address, abi: fundFactoryV2Abi, functionName: "fundCount", blockNumber }),
   ]);
   if (!isAddressEqual(uniswapFactory, UNISWAP_V3_FACTORY)) {
     throw new Error(`The factory's uniswapFactory() is ${uniswapFactory}, not ${UNISWAP_V3_FACTORY}`);

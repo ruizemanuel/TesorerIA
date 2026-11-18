@@ -22,7 +22,7 @@ import {
   factoryV2DeployData,
 } from "../src/deploy";
 
-type Read = { address: Address; functionName: string; args?: readonly unknown[] };
+type Read = { address: Address; functionName: string; args?: readonly unknown[]; blockNumber?: bigint };
 
 /** Celo as it was on 2026-10-09 (slot0 included), with one thing changed per test. Keeps every read it gets. */
 function fakeCelo(
@@ -289,6 +289,13 @@ describe("checkFactoryV2", () => {
       [deployed, "feeRecipient"],
       [deployed, "fundCount"],
     ]);
+  });
+
+  it("reads at the block it is given, so a later fund or a node a block behind can't change the answer", async () => {
+    const reads: Read[] = [];
+    await checkFactoryV2(fakeFactory({}, reads), deployed, 83_102_288n);
+    expect(reads).toHaveLength(3);
+    expect(reads.every((r) => r.blockNumber === 83_102_288n)).toBe(true);
   });
 
   it("refuses another Uniswap factory, another fee recipient and a factory with funds", async () => {
