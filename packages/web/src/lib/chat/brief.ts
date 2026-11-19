@@ -1,4 +1,4 @@
-import { TIME_ZONE, formatPesos, formatWhen, intlLocale } from "../format";
+import { TIME_ZONE, formatPercent, formatPesos, formatWhen, intlLocale } from "../format";
 import type { FundView } from "../fund-view";
 import type { Messages } from "../i18n/messages";
 import type { FundScreen } from "../read-fund";
@@ -90,6 +90,8 @@ export function fundBrief(screen: FundScreen, viewerName: string, now: Date, m: 
       view.votesRequired,
       view.rows.length,
     ),
+    // A version 2 fund's fee: what makes Aportar ask for more than the dues.
+    ...(view.feeBps > 0 ? [brief.fee(formatPercent(view.feeBps, locale))] : []),
     brief.speaking(briefText(viewerName, m)),
     ...yours(view, m),
     brief.weekList,

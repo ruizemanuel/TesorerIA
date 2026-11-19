@@ -6,6 +6,7 @@ import { Card, CardTitle, Logo } from "../../../../components/ui";
 import { currentUser } from "../../../../lib/current-user";
 import { getDb } from "../../../../lib/db/client";
 import { env } from "../../../../lib/env";
+import { formatPercent } from "../../../../lib/format";
 import { MIN_MEMBERS, draftById } from "../../../../lib/funds";
 import { getMessages } from "../../../../lib/i18n/server";
 import { safeNext } from "../../../../lib/safe-next";
@@ -51,6 +52,7 @@ export default async function DraftPage({ params }: { params: Promise<{ id: stri
         />
       </Card>
       <Card className="grid gap-3">
+        {draft.feeBps > 0 && <p className="text-muted">{m.deploy.feeNote(formatPercent(draft.feeBps, m.locale))}</p>}
         {canDeploy && <DeployForm fundId={draft.id} memberCount={draft.members.length} chosenVotes={draft.votesRequired} />}
         {isCreator && !canDeploy && <p className="text-muted">{m.deploy.waitingForMembers}</p>}
         {!isCreator && <p className="text-muted">{m.deploy.waitingForCreator(draft.creatorName)}</p>}

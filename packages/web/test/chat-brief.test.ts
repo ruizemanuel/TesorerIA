@@ -1,6 +1,7 @@
+import { FEE_BPS } from "@tesoreria/agent";
 import { describe, expect, it } from "vitest";
 import { BRIEF_MOVEMENTS, BRIEF_TAG, briefText, fundBrief } from "../src/lib/chat/brief";
-import { NBSP, formatPesos } from "../src/lib/format";
+import { NBSP, formatPercent, formatPesos } from "../src/lib/format";
 import { buildFundView } from "../src/lib/fund-view";
 import { en } from "../src/lib/i18n/en";
 import { es } from "../src/lib/i18n/es";
@@ -146,15 +147,17 @@ describe("fundBrief: what the model reads of the fund (spec, 8.2)", () => {
 /** The same fund as the one above, with names and notes that have no accents, as the page of `m` shows it. */
 function screenIn(
   m: Messages,
-  { timeline = [], contributed = [30_000n * WARS, 20_000n * WARS, 30_000n * WARS], viewer = ANA, closed = false }: Partial<{
+  { timeline = [], contributed = [30_000n * WARS, 20_000n * WARS, 30_000n * WARS], viewer = ANA, closed = false, feeBps = 0 }: Partial<{
     timeline: TimelineItem[];
     contributed: bigint[];
     viewer: typeof ANA;
     closed: boolean;
+    /** A version 2 fund's fee; 0 is a version 1 fund, as the fixture's. */
+    feeBps: number;
   }> = {},
 ): FundScreen {
   const view = buildFundView({
-    snapshot: snapshot({ contributed, spentThisWeek: 45_000n * WARS, closed }),
+    snapshot: snapshot({ contributed, spentThisWeek: 45_000n * WARS, closed, ...(feeBps > 0 ? { version: 2, feeBps } : {}) }),
     name: "Thursday football",
     agreedExpense: "the pitch",
     balance: 80_000n * WARS,
@@ -307,5 +310,22 @@ describe("briefText", () => {
     expect(briefText("<b>hola</b>", es)).toBe("‹b›hola‹/b›");
     expect(briefText("0x000000000000000000000000000000000000aaa1.", es)).toBe("una cuenta.");
     expect(briefText("0x000000000000000000000000000000000000aaa1.", en)).toBe("an account.");
+  });
+});
+
+describe("fundBrief of a version 2 fund", () => {
+  it("says its fee right after the rules, so the model can say why Aportar asks for more than the dues (spec, 5.5)", () => {
+    for (const m of [es, en]) {
+      const lines = fundBrief(screenIn(m, { feeBps: FEE_BPS }), "Ana", NOW, m).split("\n");
+      const rules = lines.findIndex((line) => line.startsWith(m === es ? "Reglas:" : "Rules:"));
+      expect(lines[rules + 1], m.locale).toBe(m.chat.brief.fee(formatPercent(FEE_BPS, m.locale)));
+    }
+    expect(fundBrief(screenIn(es, { feeBps: FEE_BPS }), "Ana", NOW, es)).toContain(
+      `\nComisión: el 0,25${NBSP}% de cada aporte va a la cuenta de TesorerIA, una vez por semana, para cubrir lo que cuestan las operaciones del fondo. El monto que pide Aportar ya la incluye: lo demás cuenta como aporte.\n`,
+    );
+  });
+
+  it("says no fee for a version 1 fund, which has none", () => {
+    for (const m of [es, en]) expect(fundBrief(screenIn(m), "Ana", NOW, m), m.locale).not.toContain("TesorerIA");
   });
 });

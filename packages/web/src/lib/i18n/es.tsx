@@ -231,6 +231,8 @@ export const es = {
     waitingForCreator: (creator: string) => `Cuando estén todos, ${creator} crea el fondo y empieza a andar.`,
     votesNeeded: "Votos necesarios para lo que no es el gasto acordado",
     votesOption: (n: number, members: number) => `${n} de ${members}`,
+    /** A version 2 draft's fee (spec, 5.5), before it's created: `percent` is what createFund will name, as formatPercent writes it. */
+    feeNote: (percent: string) => `De cada aporte, el ${percent} va a TesorerIA para cubrir lo que cuestan las operaciones del fondo. Queda fijo cuando se crea.`,
     creating: "Creando fondo…",
     submit: "Crear fondo",
   },
@@ -281,6 +283,8 @@ export const es = {
         el agente.
       </>
     ),
+    /** A version 2 fund's fee, before joining it (spec, 5.5): the same words as deploy.feeNote. */
+    feeNote: (percent: string) => `De cada aporte, el ${percent} va a TesorerIA para cubrir lo que cuestan las operaciones del fondo. Queda fijo cuando se crea.`,
     passkeyNote: "Tu cuenta se protege con una passkey: tu huella, tu cara o el PIN del teléfono. No hay contraseña ni frase para guardar.",
     join: "Sumarme",
     alreadyJoined: (names: string) => `Ya se sumaron: ${names}.`,
@@ -436,6 +440,9 @@ export const es = {
         cambiar esto solo, ni el agente.
       </>
     ),
+    /** After the text, in a version 2 fund (spec, 5.5): its fee, `percent` as formatPercent writes it. */
+    fee: (percent: string) =>
+      `El ${percent} de cada aporte va a TesorerIA para cubrir lo que cuestan las operaciones del fondo. Sale una vez por semana, sin votación, y nadie puede cambiarlo.`,
   },
   /** The bars that take you around a fund (spec, 9.2). */
   nav: {
@@ -715,6 +722,9 @@ export const es = {
       closed: " El fondo está cerrado.",
       rules: (fee: string, cap: string, expense: string, spent: string, left: string, votes: number, members: number) =>
         `Reglas: cada uno pone ${fee} por semana. El agente devuelve hasta ${cap} por semana por ${expense}, el gasto acordado: esta semana devolvió ${spent} y quedan ${left}. Todo lo demás necesita ${votes} de ${members} votos. Nadie puede cambiar esto solo, ni el agente.`,
+      /** After the rules, in a version 2 fund: its fee, so the model can say why Aportar asks for more than the dues. */
+      fee: (percent: string) =>
+        `Comisión: el ${percent} de cada aporte va a la cuenta de TesorerIA, una vez por semana, para cubrir lo que cuestan las operaciones del fondo. El monto que pide Aportar ya la incluye: lo demás cuenta como aporte.`,
       speaking: (name: string) => `Te habla: ${name}.`,
       owe: (amount: string) => `Debés ${amount}.`,
       upToDateAhead: (amount: string) => `Estás al día, con ${amount} adelantados.`,

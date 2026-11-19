@@ -197,6 +197,7 @@ export const en: Messages = {
     waitingForCreator: (creator: string) => `When everyone is in, ${creator} creates the fund and it gets going.`,
     votesNeeded: "Votes needed for anything that isn't the agreed expense",
     votesOption: (n: number, members: number) => `${n} of ${members}`,
+    feeNote: (percent: string) => `${percent} of each contribution goes to TesorerIA to cover what the fund's operations cost. It's fixed once the fund is created.`,
     creating: "Creating fund…",
     submit: "Create fund",
   },
@@ -235,6 +236,7 @@ export const en: Messages = {
         alone, not even the agent.
       </>
     ),
+    feeNote: (percent: string) => `${percent} of each contribution goes to TesorerIA to cover what the fund's operations cost. It's fixed once the fund is created.`,
     passkeyNote: "Your account is protected by a passkey: your fingerprint, your face or your phone's PIN. There's no password or phrase to keep.",
     join: "Join",
     alreadyJoined: (names: string) => `Already joined: ${names}.`,
@@ -353,6 +355,8 @@ export const en: Messages = {
         one can change this alone, not even the agent.
       </>
     ),
+    fee: (percent: string) =>
+      `${percent} of each contribution goes to TesorerIA to cover what the fund's operations cost. It goes out once a week, without a vote, and nobody can change it.`,
   },
   nav: {
     home: "Home",
@@ -564,6 +568,8 @@ export const en: Messages = {
       closed: " The fund is closed.",
       rules: (fee: string, cap: string, expense: string, spent: string, left: string, votes: number, members: number) =>
         `Rules: each person puts in ${fee} per week. The agent pays back up to ${cap} per week for “${expense}”, the agreed expense: this week it has paid back ${spent} and ${left} is left. Everything else needs ${votes} of ${members} votes. No one can change this alone, not even the agent.`,
+      fee: (percent: string) =>
+        `Fee: ${percent} of each contribution goes to TesorerIA's account, once a week, to cover what the fund's operations cost. The amount Contribute asks for already includes it: the rest counts as the contribution.`,
       speaking: (name: string) => `Who's asking: ${name}.`,
       owe: (amount: string) => `You owe ${amount}.`,
       upToDateAhead: (amount: string) => `You're up to date, ${amount} ahead.`,

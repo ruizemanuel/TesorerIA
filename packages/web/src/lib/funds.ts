@@ -72,6 +72,12 @@ export type DraftSummary = {
   status: "draft" | "deploying" | "live";
   /** The contract it runs: the one it was frozen with once it's `deploying`; while it's a draft, the one it'd have if frozen then, or an older one. */
   version: FundVersion;
+  /**
+   * What each contribution leaves for TesorerIA, in basis points (FundV2.feeBps): V2_TERMS' fee if it runs version 2
+   * (findDeployed takes a v2 fund live only with those terms), and 0 in version 1. While it's a draft, it's that of
+   * NEW_FUND_VERSION, which deployCall freezes it with.
+   */
+  feeBps: number;
   address: Address | null;
   inviteCode: string;
   creatorId: string;
@@ -139,6 +145,7 @@ async function summarize(db: Db, where: SQL): Promise<DraftSummary | null> {
   if (fund === undefined) return null;
   const members = await membersOf(db, fund.id);
   const creator = members.find((member) => member.userId === fund.creatorId);
+  const runs = fund.status === "draft" ? NEW_FUND_VERSION : fund.version;
   return {
     id: fund.id,
     name: fund.name,
@@ -148,6 +155,7 @@ async function summarize(db: Db, where: SQL): Promise<DraftSummary | null> {
     votesRequired: fund.votesRequired,
     status: fund.status,
     version: fund.version,
+    feeBps: runs === 2 ? V2_TERMS.feeBps : 0,
     address: fund.address === null ? null : getAddress(fund.address),
     inviteCode: fund.inviteCode,
     creatorId: fund.creatorId,

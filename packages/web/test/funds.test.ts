@@ -402,6 +402,24 @@ describe("the fund's version: v1 `Fund` or v2 `FundV2`, taken when the draft is 
     expect(await versionOf(db, fundId)).toBe(1);
   });
 
+  it("gives a draft the fee its fund will have, to show before anyone joins it or creates it, and none in version 1", async () => {
+    const db = await testDb();
+    const { people, fundId, inviteCode } = await group(db);
+    // Still open, it's created on FundFactoryV2 with the fee deployCall names.
+    expect(await draftById(db, fundId)).toMatchObject({ status: "draft", version: 2, feeBps: FEE_BPS });
+    expect(await draftByInvite(db, inviteCode)).toMatchObject({ feeBps: FEE_BPS });
+    // A draft made when new funds were v1 and still open is frozen as v2 all the same, with the fee.
+    await db.update(funds).set({ version: 1 }).where(eq(funds.id, fundId));
+    expect(await draftById(db, fundId)).toMatchObject({ status: "draft", version: 1, feeBps: FEE_BPS });
+    // Frozen as v1, it has none, and neither has a live v1 fund (the football and barbecue funds); a live v2 one has it.
+    await deploy(db, fundId, people[0]!.id, 1);
+    expect(await draftById(db, fundId)).toMatchObject({ status: "deploying", version: 1, feeBps: 0 });
+    const v1 = await addLiveFund(db, { creatorId: people[0]!.id, address: randomAccount(), members: [people[0]!.id] });
+    expect(await draftById(db, v1.id)).toMatchObject({ status: "live", version: 1, feeBps: 0 });
+    const v2 = await addLiveFund(db, { creatorId: people[0]!.id, address: randomAccount(), members: [people[0]!.id], version: 2 });
+    expect(await draftById(db, v2.id)).toMatchObject({ status: "live", version: 2, feeBps: FEE_BPS });
+  });
+
   it("refuses to freeze as v2 a draft whose weekly cap is above the fund's cap, which FundV2 would revert", async () => {
     const db = await testDb();
     const { people, fundId } = await group(db);

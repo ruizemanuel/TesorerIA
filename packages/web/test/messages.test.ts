@@ -1,7 +1,7 @@
 import { type ReactNode, createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { NBSP, WARS_UNIT, parsePesos } from "../src/lib/format";
+import { NBSP, WARS_UNIT, formatPercent, parsePesos } from "../src/lib/format";
 import { en } from "../src/lib/i18n/en";
 import { es } from "../src/lib/i18n/es";
 import { LOCALES, LOCALE_NAMES } from "../src/lib/i18n/locales";
@@ -464,6 +464,26 @@ describe("the dictionaries", () => {
     ]);
     expect(s.movementsCut(50, 60)).toBe("Movimientos, del más nuevo al más viejo (los 50 más nuevos de 60; los anteriores no los ves):");
     expect(e.movementsCut(50, 60)).toBe("Activity, newest first (the newest 50 of 60; you can't see the older ones):");
+    expect(s.fee(formatPercent(25, "es"))).toBe(
+      `Comisión: el 0,25${NBSP}% de cada aporte va a la cuenta de TesorerIA, una vez por semana, para cubrir lo que cuestan las operaciones del fondo. El monto que pide Aportar ya la incluye: lo demás cuenta como aporte.`,
+    );
+    expect(e.fee(formatPercent(25, "en"))).toBe(
+      "Fee: 0.25% of each contribution goes to TesorerIA's account, once a week, to cover what the fund's operations cost. The amount Contribute asks for already includes it: the rest counts as the contribution.",
+    );
+  });
+
+  it("say a version 2 fund's fee before it's created, before joining it and in its rules (spec, 5.5)", () => {
+    const [percentEs, percentEn] = [formatPercent(25, "es"), formatPercent(25, "en")];
+    const beforeEs = `De cada aporte, el 0,25${NBSP}% va a TesorerIA para cubrir lo que cuestan las operaciones del fondo. Queda fijo cuando se crea.`;
+    const beforeEn = "0.25% of each contribution goes to TesorerIA to cover what the fund's operations cost. It's fixed once the fund is created.";
+    expect([es.deploy.feeNote(percentEs), es.invitation.feeNote(percentEs)]).toEqual([beforeEs, beforeEs]);
+    expect([en.deploy.feeNote(percentEn), en.invitation.feeNote(percentEn)]).toEqual([beforeEn, beforeEn]);
+    expect(es.rules.fee(percentEs)).toBe(
+      `El 0,25${NBSP}% de cada aporte va a TesorerIA para cubrir lo que cuestan las operaciones del fondo. Sale una vez por semana, sin votación, y nadie puede cambiarlo.`,
+    );
+    expect(en.rules.fee(percentEn)).toBe(
+      "0.25% of each contribution goes to TesorerIA to cover what the fund's operations cost. It goes out once a week, without a vote, and nobody can change it.",
+    );
   });
 
   it("ask a member to update their passkey, in each language", () => {

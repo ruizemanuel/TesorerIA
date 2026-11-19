@@ -6,6 +6,7 @@ import { ButtonLink, Card, Logo, Money } from "../../../components/ui";
 import { celoClient } from "../../../lib/chain";
 import { currentUser } from "../../../lib/current-user";
 import { getDb } from "../../../lib/db/client";
+import { formatPercent } from "../../../lib/format";
 import { draftByInvite } from "../../../lib/funds";
 import { getLocale, getMessages } from "../../../lib/i18n/server";
 import { invitationFor } from "../../../lib/invitation";
@@ -48,6 +49,7 @@ export default async function InvitePage({ params }: { params: Promise<{ code: s
             draft.agreedExpense,
           )}
         </p>
+        {draft.feeBps > 0 && <p>{m.invitation.feeNote(formatPercent(draft.feeBps, locale))}</p>}
         {invitation.kind === "closed" ? (
           <>
             <p role="status" className="font-semibold">
