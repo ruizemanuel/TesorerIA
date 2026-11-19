@@ -1,5 +1,5 @@
 import { type Address, type Hex, type Log, encodeFunctionData, formatUnits, isAddressEqual, parseAbi, parseEventLogs } from "viem";
-import { AGENT_ADDRESS, CELO_CHAIN_ID, FUND_FACTORY, FUND_FACTORY_V2, IDENTITY_REGISTRY, WARS } from "./chain";
+import { AGENT_ADDRESS, CELO_CHAIN_ID, FEE_RECIPIENT, FUND_FACTORY, FUND_FACTORY_V2, IDENTITY_REGISTRY, WARS } from "./chain";
 import { FEE_BPS, currencyOf } from "./currencies";
 import { LIMITS } from "./limits";
 
@@ -49,8 +49,10 @@ export function agentRegistration() {
       "At the close of each week it writes the group a summary of who owes what and what happened, for a member " +
       "to share in the group's chat. A contract " +
       `deployed by FundFactory ${FUND_FACTORY} or FundFactoryV2 ${FUND_FACTORY_V2} enforces its limits: it can only ` +
-      "pay members, never above the weekly cap, and it can't change the rules. New funds are created in " +
-      `FundFactoryV2, today in wARS, with a ${FEE_BPS / 100}% fee that pays for gas. Its own code adds more: at most ` +
+      "pay members, never above the weekly cap, and, in a FundFactoryV2 fund, send the fee the fund sets aside to " +
+      `TesorerIA's account, ${FEE_RECIPIENT}, which anyone can do; and it can't change the rules. Each FundFactoryV2 ` +
+      "fund sets its own fee, fixed when it's created: new funds are created in FundFactoryV2, today in wARS, and the " +
+      `app gives them a ${FEE_BPS / 100}% fee, which pays for gas. Its own code adds more: at most ` +
       `${amount(wars.limits.reimbursement, wars.decimals)} wARS per reimbursement and ` +
       `${amount(wars.limits.dailyReimbursed, wars.decimals)} wARS a day per fund (limits in other currencies are set per currency), ` +
       `${amount(LIMITS.maxConversionDollar, 0)} USDT per conversion and ` +

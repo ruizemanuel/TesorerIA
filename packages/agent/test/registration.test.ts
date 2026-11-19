@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { type Hex, type Log, decodeFunctionData, encodeAbiParameters, encodeEventTopics, pad } from "viem";
 import { describe, expect, it } from "vitest";
-import { AGENT_ADDRESS, FUND_FACTORY, FUND_FACTORY_V2, IDENTITY_REGISTRY } from "../src/chain";
+import { AGENT_ADDRESS, FEE_RECIPIENT, FUND_FACTORY, FUND_FACTORY_V2, IDENTITY_REGISTRY } from "../src/chain";
 import {
   AGENT_IMAGE,
   AGENT_URI,
@@ -56,11 +56,17 @@ describe("the ERC-8004 registration", () => {
     expect(file.active).toBe(true);
   });
 
-  it("names both factories, says new funds are created in FundFactoryV2 in wARS with a 0.25% fee, and promises no other currency", () => {
+  it("names both factories, says each FundFactoryV2 fund sets its own fee, new ones in wARS at 0.25%, and promises no other currency", () => {
     const { description } = agentRegistration();
     expect(description).toContain(`FundFactory ${FUND_FACTORY}`);
     expect(description).toContain(`FundFactoryV2 ${FUND_FACTORY_V2}`);
-    expect(description).toContain("New funds are created in FundFactoryV2, today in wARS, with a 0.25% fee that pays for gas");
+    expect(description).toContain(
+      "Each FundFactoryV2 fund sets its own fee, fixed when it's created: new funds are created in FundFactoryV2, today in wARS, and the app gives them a 0.25% fee, which pays for gas.",
+    );
+    // The fee goes to TesorerIA's account, not to a member: the agent sends it, as anyone may.
+    expect(description).toContain(
+      `it can only pay members, never above the weekly cap, and, in a FundFactoryV2 fund, send the fee the fund sets aside to TesorerIA's account, ${FEE_RECIPIENT}, which anyone can do; and it can't change the rules.`,
+    );
     // wARS's limits, and the other currencies' set per currency.
     expect(description).toContain("100,000 wARS per reimbursement and 150,000 wARS a day per fund");
     expect(description).toContain("limits in other currencies are set per currency");

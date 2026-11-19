@@ -2,7 +2,7 @@
 
 **The group's treasury, without a treasurer.**
 
-TesorerIA is an AI treasurer for a group's shared fund in Argentine pesos (wARS) on Celo. Members contribute to a smart contract. The agent converts USDT to wARS, reimburses the expense the group agreed on (up to a weekly cap), keeps track of who is behind, writes the group a summary of each week, and puts everything else to a vote. The contract enforces the limits: the agent can only pay members, never above the cap, and can't change the rules.
+TesorerIA is an AI treasurer for a group's shared fund in Argentine pesos (wARS) on Celo. Members contribute to a smart contract. The agent converts USDT to wARS, reimburses the expense the group agreed on (up to a weekly cap), keeps track of who is behind, writes the group a summary of each week, and puts everything else to a vote. The contract enforces the limits: the agent can only pay members, never above the cap, and, in a `FundFactoryV2` fund, send the fee that fund sets aside (each one sets its own; the app creates them at 0.25%) to TesorerIA's account, which anyone can do; and it can't change the rules.
 
 **Where the AI is, and where it isn't.** The part that signs and moves money is deterministic code with no language model ([the agent](#the-agent)): the same inputs always lead to the same transaction, and every rule it follows has a test. The AI is how the group talks to it: a chat with Claude that reads what the member sees on their screen, answers in their language, and can only offer a card to enter an expense, which the member confirms. The chat never signs anything.
 

@@ -199,6 +199,13 @@ describe("/llms.txt: the site for an agent that reads it (llmstxt.org)", () => {
     expect(section(text, "## Errors").split("\n").filter((line) => line.startsWith("- `"))).toHaveLength(25);
   });
 
+  it("says what the agent can do with a fund's money: pay members, and in a FundFactoryV2 fund send its own fee to TesorerIA", async () => {
+    const text = await GET().text();
+    expect(text).toContain(
+      "The agent can only pay members, never above the weekly cap, and, in a FundFactoryV2 fund, send the fee that fund sets aside (each one sets its own; the web creates them at 0.25 %) to TesorerIA's account, which anyone can do; and it can't change the rules.",
+    );
+  });
+
   it("says new funds keep 0.25 % for gas, and who sends it where", async () => {
     const v2 = section(await GET().text(), "## Version 2");
     expect(v2).toContain("New funds keep 0.25 % for gas");
