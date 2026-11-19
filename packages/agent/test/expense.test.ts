@@ -1,4 +1,4 @@
-import { type Address, getAddress } from "viem";
+import { type Address, type Hash, getAddress } from "viem";
 import { describe, expect, it } from "vitest";
 import { type Expense, decideExpense } from "../src/expense";
 import { type FundSnapshot, proposalQuota, weekStartBlock } from "../src/fund";
@@ -153,6 +153,27 @@ describe("decideExpense", () => {
     for (const [why, event] of Object.entries(others)) expect(decide(BALLS, {}, [event]), why).toMatchObject({ kind: "propose-payment" });
     // Five minutes before it was entered still count, for clocks that don't agree.
     expect(decide(BALLS, {}, [proposed(AGENT, BLOCK - 3_600n - 300n, 50, ours)])).toMatchObject({ kind: "proposed" });
+  });
+
+  it("proposes an identical expense of its own when the proposal it finds is recorded as another expense's", () => {
+    // Two identical expenses entered while the member had no proposals left: the first was proposed once the week turned
+    // over, after both were entered, and the web app recorded its transaction on the first.
+    const BALLS: Expense = { ...PITCH, kind: "other", note: "Pelotas nuevas" };
+    const ours = { a: MEMBER, amount: PITCH.amount, note: "Pelotas nuevas" };
+    const first = proposed(AGENT, BLOCK - 600n, 42, ours);
+    const decideWith = (events: FundEvent[], claimed: readonly Hash[]) =>
+      decideExpense({ expense: BALLS, fund: fundSnapshot(), events, today: QUIET_DAY, now: NOW, claimed });
+    expect(decideWith([first], [first.transactionHash])).toEqual({
+      kind: "propose-payment",
+      member: MEMBER,
+      amount: PITCH.amount,
+      note: "Pelotas nuevas",
+      reason: "Only the agreed expense is paid back without a vote",
+    });
+    // Its own proposal, from a send that threw before its hash was recorded, it still finds, and only that one.
+    expect(decideWith([first], [])).toMatchObject({ kind: "proposed", transactionHash: first.transactionHash });
+    const own = proposed(AGENT, BLOCK - 300n, 43, ours);
+    expect(decideWith([first, own], [first.transactionHash])).toMatchObject({ kind: "proposed", transactionHash: own.transactionHash });
   });
 
   describe("an expense short of what the fund holds by less than half a centavo, what a screen in centavos can't show", () => {

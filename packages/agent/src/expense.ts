@@ -69,6 +69,8 @@ const ENTRY_MARGIN_BLOCKS = 300n;
  * what it pays: `action` (Pay, or GiveBack for a give-back in a version 2 fund), to the same member, the same amount,
  * with the same note, proposed by the agent, from about the block the expense was entered in (`now` and the snapshot's
  * block place it, at a block a second). An identical expense entered later is another one, and gets its own proposal.
+ * So does one entered before: an expense can wait days for the agent's weekly proposals, and a proposal made in a
+ * transaction the web app recorded for another of the fund's expenses (`claimed`) is that one's.
  * "The same amount" takes in what the fund held then (`payable`), up to CURRENCY_SPECK less: the fund may hold more by
  * the retry. Amounts are entered in centavos, so another expense's is at least a centavo away.
  */
@@ -82,12 +84,15 @@ function earlierProposal(
     note,
     enteredAt,
     now,
-  }: { fund: FundSnapshot; action: number; member: Address; amount: bigint; note: string; enteredAt: bigint; now: bigint },
+    claimed,
+  }: { fund: FundSnapshot; action: number; member: Address; amount: bigint; note: string; enteredAt: bigint; now: bigint; claimed: readonly Hash[] },
 ): FundEvent | undefined {
   const since = fund.block - (now > enteredAt ? now - enteredAt : 0n) - ENTRY_MARGIN_BLOCKS;
+  const taken = new Set(claimed.map((hash) => hash.toLowerCase()));
   return events.find(
     (e) =>
       e.eventName === "ProposalCreated" &&
+      !taken.has(e.transactionHash.toLowerCase()) &&
       e.blockNumber >= since &&
       e.args.action === action &&
       isAddressEqual(e.args.proposer, fund.agent) &&
@@ -132,6 +137,7 @@ export function decideExpense({
   events,
   today,
   now,
+  claimed = [],
 }: {
   expense: Expense;
   fund: FundSnapshot;
@@ -140,6 +146,8 @@ export function decideExpense({
   today: DailyActivity;
   /** Unix seconds. */
   now: bigint;
+  /** The transactions the web app recorded for the fund's other expenses: a proposal made in one of them is never this expense's. */
+  claimed?: readonly Hash[];
 }): ExpenseDecision {
   if (fund.closed) return { kind: "reject", reason: "The fund is closed" };
   const member = fund.members.find((m) => isAddressEqual(m, expense.member));
@@ -160,7 +168,7 @@ export function decideExpense({
   const propose = (reason: string): ExpenseDecision => {
     const note = clip(expense.note);
     const action = giveBack ? Action.GiveBack : Action.Pay;
-    const proposed = earlierProposal(events, { fund, action, member, amount: expense.amount, note, enteredAt: expense.enteredAt, now });
+    const proposed = earlierProposal(events, { fund, action, member, amount: expense.amount, note, enteredAt: expense.enteredAt, now, claimed });
     if (proposed !== undefined) {
       const { transactionHash } = proposed;
       return { kind: "proposed", transactionHash, reason: `Already proposed, in transaction ${transactionHash}` };

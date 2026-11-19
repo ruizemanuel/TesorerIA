@@ -1,5 +1,5 @@
 import { type AgentContext, type Decision, handleExpense, runHeartbeat, shortMessage } from "@tesoreria/agent";
-import { and, asc, eq, inArray, ne, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, ne, sql } from "drizzle-orm";
 import { type Address, type Hash, type Hex, getAddress } from "viem";
 import type { Db } from "./db/client";
 import { withLock } from "./db/lock";
@@ -138,14 +138,26 @@ async function processExpense(db: Db, makeContext: MakeContext, id: string, queu
     await db.update(expenses).set({ status: "rejected", reason: "No live fund", updatedAt: new Date() }).where(eq(expenses.id, id));
     return null;
   }
-  const decision = await handleExpense(ctx, getAddress(fund.address) as Address, {
-    member: getAddress(owner.account),
-    amount: expense.amount,
-    kind: expense.kind,
-    ref: expense.ref as Hex,
-    note: expense.note,
-    enteredAt: BigInt(Math.floor(expense.createdAt.getTime() / 1000)),
-  });
+  // What the fund's other expenses went out in: a proposal in one of those is theirs, even one identical to this
+  // expense's, made after it was entered (both waited for the agent's weekly proposals).
+  const others = await db
+    .select({ tx: expenses.tx })
+    .from(expenses)
+    .where(and(eq(expenses.fundId, expense.fundId), ne(expenses.id, id), isNotNull(expenses.tx)));
+  const claimed = others.flatMap(({ tx }) => (tx === null ? [] : [tx as Hash]));
+  const decision = await handleExpense(
+    ctx,
+    getAddress(fund.address) as Address,
+    {
+      member: getAddress(owner.account),
+      amount: expense.amount,
+      kind: expense.kind,
+      ref: expense.ref as Hex,
+      note: expense.note,
+      enteredAt: BigInt(Math.floor(expense.createdAt.getTime() / 1000)),
+    },
+    claimed,
+  );
   // The hash and what it was, again: if onSent couldn't keep them, settleSent still needs both.
   const sent = decision.tx === undefined ? {} : { tx: decision.tx, sentAction: sentAction(decision.kind) };
   await db

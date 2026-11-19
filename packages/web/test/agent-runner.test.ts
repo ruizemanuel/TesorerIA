@@ -8,7 +8,7 @@ import { submitExpense } from "../src/lib/expenses";
 import { es } from "../src/lib/i18n/es";
 import { SENT_HASH, fakeAgent } from "./support/agent";
 import { addLiveFund, addUser, testDb } from "./support/db";
-import { ANA, FUND, USDT_UNIT, WARS, snapshot } from "./support/fixtures";
+import { AGENT, ANA, BLOCK, FUND, USDT_UNIT, WARS, event, snapshot } from "./support/fixtures";
 
 describe("saveDecisions", () => {
   it("keeps a skipped conversion's code, and none for a decision without one", async () => {
@@ -107,7 +107,7 @@ describe("runAgent: the agent's weekly proposals and the give-backs of a v2 fund
     const db = await testDb();
     const ana = await addUser(db, "Ana", ANA);
     const fund = await addLiveFund(db, { creatorId: ana.id, address: FUND, members: [ana.id] });
-    const load = async (input: { clientKey: string; kind: "agreed" | "other" | "give-back"; amount: bigint; note: string }) => {
+    const load = async (input: { clientKey: string; kind: "agreed" | "other" | "give-back"; amount: bigint; note: string; confirmDuplicate?: boolean }) => {
       const result = await submitExpense(db, { userId: ana.id, fundId: fund.id, input, m: es });
       if (!result.ok) throw new Error(result.error);
       return result.id;
@@ -143,6 +143,30 @@ describe("runAgent: the agent's weekly proposals and the give-backs of a v2 fund
     await runAgent(db, makeContext, options);
     expect(await statusOf(db, id)).toMatchObject({ status: "proposed", tx: SENT_HASH, sentAction: "propose-payment" });
     expect(sent).toHaveLength(1);
+  });
+
+  it("proposes each of two identical expenses that waited for next week, not one for both", async () => {
+    const { db, load } = await setup();
+    const input = { kind: "other", amount: 5_000n * WARS, note: "la pelota nueva" } as const;
+    // Two balls bought: the second is entered as the duplicate it looks like, and the member confirms it.
+    const first = await load({ clientKey: "k1", ...input });
+    const second = await load({ clientKey: "k2", ...input, confirmDuplicate: true });
+    expect(second).not.toBe(first);
+    let proposals = 10n;
+    // Once one is proposed, the history has that proposal, in the transaction the runner recorded on its expense.
+    const sentProposal = () => event("ProposalCreated", { id: 0n, action: 0, a: ANA, b: zeroAddress, amount: input.amount, proposer: AGENT, note: input.note }, BLOCK, 0x7a);
+    const { makeContext, sent } = fakeAgent({ snapshot: () => v2(proposals), events: () => (sent.length === 0 ? [] : [sentProposal()]) });
+    expect(sentProposal().transactionHash).toBe(SENT_HASH);
+    await runAgent(db, makeContext, options);
+    expect([(await statusOf(db, first)).status, (await statusOf(db, second)).status]).toEqual(["quota", "quota"]);
+
+    // The week turned over: each gets a proposal of its own, not the first's for both (the fake answers every send with SENT_HASH).
+    proposals = 0n;
+    const run = await runAgent(db, makeContext, options);
+    const proposedNow = { kind: "propose-payment", reason: "Only the agreed expense is paid back without a vote", tx: SENT_HASH };
+    expect(run).toMatchObject({ ran: true, decisions: [proposedNow, proposedNow] });
+    expect(sent).toHaveLength(2);
+    for (const id of [first, second]) expect(await statusOf(db, id)).toMatchObject({ status: "proposed", tx: SENT_HASH, sentAction: "propose-payment" });
   });
 
   it("proposes a give-back in a v2 fund as a GiveBack, and keeps it as a proposal", async () => {

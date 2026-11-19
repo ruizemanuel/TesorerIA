@@ -212,8 +212,11 @@ export async function runHeartbeat(ctx: AgentContext): Promise<Decision[]> {
   return decisions;
 }
 
-/** What the web app calls after a member enters an expense (spec, 8.1 and 8.3). */
-export async function handleExpense(ctx: AgentContext, address: Address, expense: Expense): Promise<Decision> {
+/**
+ * What the web app calls after a member enters an expense (spec, 8.1 and 8.3). `claimed` are the transactions it
+ * recorded for the fund's other expenses: a proposal made in one of them is never this expense's (decideExpense).
+ */
+export async function handleExpense(ctx: AgentContext, address: Address, expense: Expense, claimed: readonly Hash[] = []): Promise<Decision> {
   try {
     // Only the factories' funds: for any other contract, the history and the gas cost are its own to choose.
     const funds = await ctx.chain.funds();
@@ -229,7 +232,7 @@ export async function handleExpense(ctx: AgentContext, address: Address, expense
     const problem = servedProblem(fund);
     if (problem !== null) return { fund: address, kind: "blocked", reason: problem };
     const { events, today } = await history(ctx, fund);
-    const decision = decideExpense({ expense, fund, events, today, now: ctx.now() });
+    const decision = decideExpense({ expense, fund, events, today, now: ctx.now(), claimed });
     switch (decision.kind) {
       case "reject":
         return { fund: address, kind: "reject", reason: decision.reason };
