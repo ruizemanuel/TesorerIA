@@ -12,7 +12,8 @@ import { celo } from "viem/chains";
 
 /**
  * Fixed gas limits. The call limit has room for `FundFactory.createFund`: the Fund's ~14.7 KB of runtime
- * costs ~2.95M gas in code deposit alone. The verification limit is generous for a Safe's first operation
+ * costs ~2.95M gas in code deposit alone. It has room for `FundFactoryV2.createFund` too: with the Safe's deployment,
+ * it used up to 4.33M gas on the fork (19/11/2026). The verification limit is generous for a Safe's first operation
  * (deploy + batch used ~543k on mainnet). The prefund is these limits times the fee, a few CELO at most.
  */
 const GAS_LIMITS = { callGasLimit: 8_000_000n, verificationGasLimit: 2_000_000n, preVerificationGas: 100_000n };

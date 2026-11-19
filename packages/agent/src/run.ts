@@ -74,6 +74,12 @@ function inCurrency(fund: FundSnapshot, amount: bigint): string {
   return `${amount / 10n ** BigInt(decimals)} ${symbol}`;
 }
 
+/** An amount of the fund's currency with all its decimals, and its symbol: "0.25 wARS", where whole units would say 0. */
+function exactlyInCurrency(fund: FundSnapshot, amount: bigint): string {
+  const { symbol, decimals } = fundCurrency(fund);
+  return `${formatUnits(amount, decimals)} ${symbol}`;
+}
+
 /** Authorizes an action, checks that it would go through and that the agent can pay the gas, and sends it. */
 async function act(
   ctx: AgentContext,
@@ -176,7 +182,7 @@ export async function runHeartbeat(ctx: AgentContext): Promise<Decision[]> {
       const { events, today: sentBefore } = await history(ctx, fund);
       let today = sentBefore;
       if (feeDue && !feePaidThisWeek(fund, events)) {
-        const fee = await act(ctx, fund, today, { kind: "pay-fee" }, `Send the fund's fee: ${inCurrency(fund, fund.feeOwed)}`);
+        const fee = await act(ctx, fund, today, { kind: "pay-fee" }, `Send the fund's fee: ${exactlyInCurrency(fund, fund.feeOwed)}`);
         decisions.push(fee);
         // Sent, so it's one of the day's transactions the conversion below has to count (the history was read before it).
         if (fee.tx !== undefined) today = { ...today, transactions: today.transactions + 1 };

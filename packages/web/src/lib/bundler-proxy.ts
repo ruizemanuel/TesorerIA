@@ -332,9 +332,9 @@ export const MAX_CREATE_FUND_GAS = 10_000_000n;
 /**
  * Every other operation. The heaviest measured on the fork, a first contribution in USDT with the Safe's deployment,
  * used up to 705k gas on a FundV2 (19/11/2026) and 642k on a Fund (a first FundV2 contribution in wARS with the
- * deployment, 594k; vote and execute with it, 626k; once deployed, a contribution 224k on a FundV2 and 230k on a Fund,
- * and a vote 176k): nearly three times the heaviest leaves room for Pimlico's estimate, and keeps what one operation
- * can take small.
+ * deployment, 594k; vote and execute with it on a Fund, 626k; once deployed, a contribution 224k on a FundV2 and 230k
+ * on a Fund, and a vote 176k): nearly three times the heaviest leaves room for Pimlico's estimate, and keeps what one
+ * operation can take small.
  */
 export const MAX_OPERATION_GAS = 2_000_000n;
 

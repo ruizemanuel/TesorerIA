@@ -48,7 +48,9 @@ async function main(): Promise<number> {
       `USDT / USD ${formatUnits(dollarUsd.answer, dollarUsd.decimals)} (${age(dollarUsd.updatedAt)})`,
   );
   console.log(`The agent holds ${formatUnits(await chain.gasBalance(), 6)} USDT for gas.`);
-  console.log(`FundFactory has created ${(await chain.funds()).length} fund(s).`);
+  const funds = await chain.funds();
+  const v1 = funds.filter((fund) => fund.version === 1).length;
+  console.log(`FundFactory has created ${v1} fund(s), and FundFactoryV2 ${funds.length - v1}.`);
 
   const decisions = await runHeartbeat({ chain, signer, now: unixNow, send });
   for (const { fund, kind, reason, tx, status } of decisions) {

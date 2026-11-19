@@ -236,6 +236,17 @@ describe("runHeartbeat", () => {
     expect(await runHeartbeat(context(fakeChain([fundSnapshot()]), v1.signer))).toEqual([]);
   });
 
+  it("says the fee it sends with its decimals, even one under a whole wARS", async () => {
+    for (const [feeOwed, said] of [
+      [WARS_UNIT / 4n, "0.25 wARS"],
+      [25n * WARS_UNIT + WARS_UNIT / 16n, "25.0625 wARS"],
+    ] as const) {
+      const { signer } = fakeSigner();
+      const decisions = await runHeartbeat(context(fakeChain([fundSnapshotV2({ feeOwed })]), signer));
+      expect(decisions).toMatchObject([{ kind: "pay-fee", reason: `Send the fund's fee: ${said}` }]);
+    }
+  });
+
   it("pays the fee even with nothing to convert", async () => {
     const { signer, sent } = fakeSigner();
     // A fund with no dollar at all, in wMXN: there's nothing to convert, ever.

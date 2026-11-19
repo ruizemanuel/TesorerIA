@@ -108,6 +108,36 @@ describe("checkHistory", () => {
       expect(() => checkHistory(v2({ pendingDollar: [0n, 0n, 5n * USDT_UNIT] }), history)).toThrow(HistoryGapError);
     });
 
+    it("a v2 history moves a replaced member's pending dollars to who took their place", () => {
+      // Diego sent 18 USDT and was replaced by Beto before they were converted: the contract has them pending for Beto.
+      const replaced = [
+        event("Contribution", { member: ANA, token: WARS_TOKEN, amount: 30_000n * WARS, credited: 29_925n * WARS }, BLOCK - 900n),
+        dollarIn(DIEGO, 18n * USDT_UNIT, BLOCK - 850n),
+        event("MemberReplaced", { oldMember: DIEGO, newMember: BETO }, BLOCK - 750n),
+        paidIn(CARO, 20_000n * WARS, BLOCK - 500n),
+      ];
+      const pendingForBeto = v2({
+        contributed: [29_925n * WARS, 0n, 20_000n * WARS],
+        totalContributed: 49_925n * WARS,
+        pendingDollar: [0n, 18n * USDT_UNIT, 0n],
+        pendingValue: [0n, 30_060n * WARS, 0n],
+        totalPendingDollar: 18n * USDT_UNIT,
+        dollarBalance: 18n * USDT_UNIT,
+      });
+      expect(() => checkHistory(pendingForBeto, replaced)).not.toThrow();
+      // Converted later, they're credited to Beto, and nothing is pending.
+      const converted = [...replaced, convertedFor(BETO, 18n * USDT_UNIT, 29_900n * WARS, BLOCK - 400n)];
+      const creditedToBeto = v2({
+        contributed: [29_925n * WARS, 29_900n * WARS, 20_000n * WARS],
+        totalContributed: 79_825n * WARS,
+        pendingDollar: [0n, 0n, 0n],
+        pendingValue: [0n, 0n, 0n],
+        totalPendingDollar: 0n,
+        dollarBalance: 0n,
+      });
+      expect(() => checkHistory(creditedToBeto, converted)).not.toThrow();
+    });
+
     it("a v2 history missing a Conversion has a hole", () => {
       expect(() => checkHistory(v2(), history.filter((e) => e.eventName !== "Conversion"))).toThrow(HistoryGapError);
     });
