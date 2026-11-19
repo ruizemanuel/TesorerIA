@@ -324,14 +324,17 @@ export function checkCalls(
 /** The operation's fee may be this many times Pimlico's current "fast" price: the client prices at "fast", the rest is room for the price to move before the paymaster signs. */
 export const MAX_FEE_MULTIPLE = 2n;
 /**
- * The creator's createFund: a first Safe deployment plus FundFactory.createFund used 3.85M gas on the fork (the
- * Fund's code deposit alone is ~2.95M). This leaves room for Pimlico's estimate and still caps what it can take.
+ * The creator's createFund: a first Safe deployment plus FundFactoryV2.createFund, which the web sends, used up to
+ * 4.33M gas on the fork (19/11/2026; the FundV2's code deposit alone is ~3.4M); with FundFactory.createFund it was
+ * 3.85M (the Fund's deposit, ~2.95M). This leaves room for Pimlico's estimate and still caps what it can take.
  */
 export const MAX_CREATE_FUND_GAS = 10_000_000n;
 /**
  * Every other operation. The heaviest measured on the fork, a first contribution in USDT with the Safe's deployment,
- * used 642k gas (vote and execute with the deployment, 626k; once deployed, a contribution 230k and a vote 176k):
- * about three times that leaves room for Pimlico's estimate, and keeps what one operation can take small.
+ * used up to 705k gas on a FundV2 (19/11/2026) and 642k on a Fund (a first FundV2 contribution in wARS with the
+ * deployment, 594k; vote and execute with it, 626k; once deployed, a contribution 224k on a FundV2 and 230k on a Fund,
+ * and a vote 176k): nearly three times the heaviest leaves room for Pimlico's estimate, and keeps what one operation
+ * can take small.
  */
 export const MAX_OPERATION_GAS = 2_000_000n;
 

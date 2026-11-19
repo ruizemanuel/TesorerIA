@@ -2,7 +2,20 @@
 // (their TypeScript imports have no extensions), and the addresses are repeated from @tesoreria/agent. A unit
 // test (test/e2e-addresses.test.ts) checks they are the same. Playwright comes in for its types only.
 import type { BrowserContext, Locator, Page } from "@playwright/test";
-import { type Address, createPublicClient, createTestClient, createWalletClient, erc20Abi, http, parseEther } from "viem";
+import {
+  type Address,
+  type Hex,
+  createPublicClient,
+  createTestClient,
+  createWalletClient,
+  erc20Abi,
+  getAbiItem,
+  getContract,
+  http,
+  parseAbi,
+  parseEther,
+} from "viem";
+import { entryPoint07Abi, entryPoint07Address } from "viem/account-abstraction";
 import { celo } from "viem/chains";
 
 export const FORK_PORT = 8548;
@@ -87,4 +100,57 @@ export async function give(account: Address, { usdt = 0n, wars = 0n }: { usdt?: 
 /** The wARS `account` holds on the fork. */
 export async function warsOf(account: Address): Promise<bigint> {
   return client.readContract({ address: WARS, abi: erc20Abi, functionName: "balanceOf", args: [account] });
+}
+
+/** The USDT `account` holds on the fork. */
+export async function usdtOf(account: Address): Promise<bigint> {
+  return client.readContract({ address: USDT, abi: erc20Abi, functionName: "balanceOf", args: [account] });
+}
+
+/** The parts of FundV2 (contracts/src/FundV2.sol) the test reads, and calls the web doesn't offer. */
+export const fundV2Abi = parseAbi([
+  "function currency() view returns (address)",
+  "function feeBps() view returns (uint16)",
+  "function pendingDollar(address member) view returns (uint256)",
+  "function proposalCount() view returns (uint256)",
+  "function propose(uint8 action, address a, address b, uint256 amount, string note) returns (uint256 id)",
+  "function vote(uint256 id)",
+  "function execute(uint256 id)",
+]);
+
+/** The FundV2 at `fund` on the fork, to read: `fundV2(fund).read.feeBps()`. */
+export function fundV2(fund: Address) {
+  return getContract({ address: fund, abi: fundV2Abi, client });
+}
+
+/**
+ * Sends `data` to `to` from `account`, a member's Safe, impersonated on the fork and given CELO for the gas: a call the
+ * web doesn't offer, as the member would make it from any wallet. Throws if it reverts.
+ */
+export async function asAccount(account: Address, to: Address, data: Hex): Promise<void> {
+  await test.setBalance({ address: account, value: parseEther("10") });
+  await test.impersonateAccount({ address: account });
+  try {
+    const hash = await wallet.sendTransaction({ account, to, data });
+    const { status } = await client.waitForTransactionReceipt({ hash });
+    if (status !== "success") throw new Error(`The call from ${account} to ${to} reverted: ${hash}`);
+  } finally {
+    await test.stopImpersonatingAccount({ address: account });
+  }
+}
+
+/** The fork's latest block. */
+export async function latestBlock(): Promise<bigint> {
+  return client.getBlockNumber({ cacheTime: 0 });
+}
+
+const userOperationEvent = getAbiItem({ abi: entryPoint07Abi, name: "UserOperationEvent" });
+
+/**
+ * The gas each operation `account` sent from `fromBlock` on used, oldest first: the gasUsed of the handleOps transaction
+ * that ran it, which the fork bundler sends with that operation alone.
+ */
+export async function operationsGas(account: Address, fromBlock: bigint): Promise<bigint[]> {
+  const logs = await client.getLogs({ address: entryPoint07Address, event: userOperationEvent, args: { sender: account }, fromBlock });
+  return Promise.all(logs.map(async ({ transactionHash }) => (await client.getTransactionReceipt({ hash: transactionHash })).gasUsed));
 }

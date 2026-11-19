@@ -1,6 +1,58 @@
-import { type Page, type Request, type Route, expect, test } from "@playwright/test";
+import { type Page, type Request, type Response, type Route, expect, test } from "@playwright/test";
+import { type Address, encodeFunctionData, getAddress, zeroAddress } from "viem";
 import { generatePrivateKey, privateKeyToAddress } from "viem/accounts";
-import { HEARTBEAT_SECRET, accountOf, advanceClock, give, onScreen, open, phone, warsOf } from "./support";
+import {
+  HEARTBEAT_SECRET,
+  WARS,
+  accountOf,
+  advanceClock,
+  asAccount,
+  fundV2,
+  fundV2Abi,
+  give,
+  latestBlock,
+  onScreen,
+  open,
+  operationsGas,
+  phone,
+  usdtOf,
+  warsOf,
+} from "./support";
+
+/** FundV2's Action.RemoveMember (contracts/src/FundV2.sol). */
+const REMOVE_MEMBER = 2;
+
+/**
+ * What credits `net` wARS whole after the fund's 0,25 % fee, to the unit: what Aportar sends for a week (contribute.ts'
+ * withFee), and shows rounded up to the centavo.
+ */
+const withFee = (net: bigint) => (net * 10_000n + 9_975n - 1n) / 9_975n;
+
+/**
+ * Prints the gas used by `account`'s one operation from `fromBlock` on, as measured for MAX_CREATE_FUND_GAS and
+ * MAX_OPERATION_GAS (src/lib/bundler-proxy.ts).
+ */
+async function printOperationGas(what: string, account: Address, fromBlock: bigint): Promise<void> {
+  const gas = await operationsGas(account, fromBlock);
+  expect(gas).toHaveLength(1);
+  console.log(`Gas used by ${what}: ${gas[0]}`);
+}
+
+/**
+ * Waits for the run of the agent that `page` asks for after a member's operation to end, so that the next step finds
+ * the agent free. The route answers 202 once it ran (or found the agent busy), and 429 when its once-a-minute limit
+ * refuses it: then the page asks once more when the minute ends (askAgentToRun), and that run is waited for too, or it
+ * could take the agent from under the next step. Call it before the operation; it resolves with the route's first answer.
+ */
+function agentRunEnds(page: Page): Promise<number> {
+  const isRun = (response: Response) => response.url().endsWith("/api/agent/run");
+  const first = page.waitForResponse(isRun, { timeout: 30_000 });
+  return (async () => {
+    const status = (await first).status();
+    if (status === 429) await page.waitForResponse(isRun, { timeout: 90_000 });
+    return status;
+  })();
+}
 
 /** The server renders (React Server Components) a page asks for while `act` runs; a link's prefetch isn't one. */
 async function serverRenders(page: Page, act: () => Promise<void>): Promise<string[]> {
@@ -18,7 +70,7 @@ async function serverRenders(page: Page, act: () => Promise<void>): Promise<stri
   return asked;
 }
 
-test("three friends create a fund, contribute, get the agreed expense back, vote on and execute others, and pass what they got back on to Ripio, and a fourth asks to join the live fund and is voted in", async ({ browser }) => {
+test("three friends create a fund, contribute, get the agreed expense back, vote on and execute others, and pass what they got back on to Ripio, and a fourth asks to join the live fund, is voted in, and leaves with her pending USDT", async ({ browser }) => {
   const ana = await phone(await browser.newContext());
   const beto = await phone(await browser.newContext());
   const caro = await phone(await browser.newContext());
@@ -41,14 +93,21 @@ test("three friends create a fund, contribute, get the agreed expense back, vote
     await expect(page).toHaveURL(/\/f\/borrador\//);
   }
 
-  // 2. Ana deploys it, 2 votes of 3, signing with her passkey.
-  await give(await accountOf(ana));
+  // 2. Ana deploys it, 2 votes of 3, signing with her passkey. It's a FundV2, in wARS with a 0,25 % fee. Its createFund
+  // is her first operation, so her Safe is deployed in it.
+  const anaAccount = await accountOf(ana);
+  await give(anaAccount);
   await ana.reload({ waitUntil: "networkidle" });
   await ana.getByLabel(/Votos necesarios/).selectOption("2");
+  const beforeCreating = await latestBlock();
   await ana.getByRole("button", { name: "Crear fondo" }).click();
   await expect(ana).toHaveURL(/\/f\/0x[0-9a-fA-F]{40}$/);
   await expect(onScreen(ana, /debe/)).toHaveCount(3); // the fund's inicio, with nobody paid yet
   const fund = new URL(ana.url()).pathname;
+  const fundAddress = getAddress(fund.slice("/f/".length));
+  expect(await fundV2(fundAddress).read.feeBps()).toBe(25);
+  expect(await fundV2(fundAddress).read.currency()).toBe(WARS);
+  await printOperationGas("Ana's createFund on FundFactoryV2, with her Safe deployed in it", anaAccount, beforeCreating);
 
   // Ana leaves, and comes back to the fund by entering with her passkey (spec, 11: "entrar"). On the way out, Tu cuenta
   // lists her funds (spec, 9.4 C): this one, marked, and the way to create another; and below them, the link the fund
@@ -87,9 +146,11 @@ test("three friends create a fund, contribute, get the agreed expense back, vote
   await open(ana, "/");
   await expect(ana).toHaveURL(new RegExp(`${fund}$`));
 
-  // 3. Beto contributes 10 USDT; the run after it converts them. Aportar offers what covers his week (a little over
-  // 6 USDT at the fork's price), and he puts in all 10: what goes over is paid ahead.
-  await give(await accountOf(beto), { usdt: 10_000_000n });
+  // 3. Beto contributes 10 USDT, his first operation (his Safe is deployed in it); the run after it converts them, and
+  // says they were his. Aportar offers what covers his week (a little over 6 USDT at the fork's price), and he puts in
+  // all 10: what goes over is paid ahead.
+  const betoAccount = await accountOf(beto);
+  await give(betoAccount, { usdt: 10_000_000n });
   await open(beto, `${fund}?p=aportar`);
   await expect(onScreen(beto, /Cubre los \$\s10\.000, al precio de ahora\./)).toBeVisible();
   // It fits the phone: the amount, written large, takes only the room its currency leaves it (spec, 9.7).
@@ -100,22 +161,26 @@ test("three friends create a fund, contribute, get the agreed expense back, vote
   expect(outside).toBe(0);
   await beto.getByLabel("Cuánto aportás").fill("10");
   await expect(onScreen(beto, /Son unos \$\s[\d.]+(,\d{1,2})? al precio de ahora\./)).toBeVisible();
+  const beforeBetosContribution = await latestBlock();
   await beto.getByRole("button", { name: /Aportar 10\sUSDT/ }).click();
   await expect(beto).toHaveURL(/\?aporte=/);
+  await printOperationGas("Beto's contributeDollar of 10 USDT, with his Safe deployed in it", betoAccount, beforeBetosContribution);
   await expect(beto.getByRole("img", { name: "pagó" })).toHaveCount(1); // Beto's; Ana and Caro still owe
   await expect(onScreen(beto, /Estás al día, con \$\s[\d.]+(,\d{1,2})? adelantados\./)).toBeVisible();
   await expect(async () => {
     await beto.goto(`${fund}/movimientos`);
-    await expect(onScreen(beto, /Pasé a pesos los 10\sUSDT/)).toBeVisible({ timeout: 5_000 });
+    await expect(onScreen(beto, /Pasé a pesos los 10\sUSDT de Beto/)).toBeVisible({ timeout: 5_000 });
   }).toPass({ timeout: 120_000 });
   // Ana's inicio, open all along and never reloaded, catches up by itself (spec, 9.2).
   await expect(ana.getByRole("img", { name: "pagó" })).toHaveCount(1);
-  await expect(onScreen(ana, /Pasé a pesos los 10\sUSDT/)).toBeVisible();
+  await expect(onScreen(ana, /Pasé a pesos los 10\sUSDT de Beto/)).toBeVisible();
   // With nothing new on the chain, it doesn't ask the server again: a look (one every 15 s) reads only the chain.
   expect(await serverRenders(ana, () => ana.waitForTimeout(20_000))).toEqual([]);
 
-  // 4. Ana contributes $ 10.000 in wARS. Aportar opens from her inicio without asking the server again.
-  await give(await accountOf(ana), { wars: 10_000n * 10n ** 18n });
+  // 4. Ana contributes her week in wARS: Aportar asks what credits her $ 10.000 whole after the fee, $ 10.025,07, and
+  // says the fee it includes. It sends that to the unit, which is what she's given: her account is left with nothing,
+  // so step 11 passes on only what the agent pays her back. Aportar opens from her inicio without asking the server again.
+  await give(anaAccount, { wars: withFee(10_000n * 10n ** 18n) });
   const openingAportar = await serverRenders(ana, async () => {
     // The header's (the empty timeline has one too).
     await ana.getByRole("link", { name: "Aportar" }).first().click();
@@ -124,13 +189,15 @@ test("three friends create a fund, contribute, get the agreed expense back, vote
   expect(openingAportar).toEqual([]);
   await expect(ana).toHaveURL(/\?p=aportar$/);
   await ana.getByRole("tab", { name: "Tengo pesos en Ripio" }).click();
-  // The run after a contribution must end before Ana's expense, which then finds the agent free. The route answers
-  // 202 once it ran (or found the agent busy), and 429 when the once-a-minute limit refuses it.
-  const runAfterContribution = ana.waitForResponse((response) => response.url().endsWith("/api/agent/run"), { timeout: 30_000 });
-  await ana.getByRole("button", { name: /Aportar \$\s10\.000/ }).click();
+  await expect(onScreen(ana, /Incluye el 0,25\s% que cubre lo que cuestan las operaciones del fondo: lo demás cuenta como tu aporte\./)).toBeVisible();
+  // The run after a contribution must end before Ana's expense, which then finds the agent free (agentRunEnds).
+  const runAfterContribution = agentRunEnds(ana);
+  const beforeAnasContribution = await latestBlock();
+  await ana.getByRole("button", { name: /Aportar \$\s10\.025,07/ }).click();
   await expect(ana).toHaveURL(/\?aporte=/);
+  await printOperationGas("Ana's contribute of $ 10.025,07", anaAccount, beforeAnasContribution);
   await expect(ana.getByRole("img", { name: "pagó" })).toHaveCount(2);
-  expect([202, 429]).toContain((await runAfterContribution).status());
+  expect([202, 429]).toContain(await runAfterContribution);
 
   // 5. Ana enters the pitch: the agent pays it back. Its panel closes by its own button and by the browser's back,
   // and opens again, all without the server.
@@ -166,21 +233,21 @@ test("three friends create a fund, contribute, get the agreed expense back, vote
   await expect(caro.getByText(/el agente lo propuso/)).toBeVisible();
 
   // 7. Ana votes (1 of 2); Beto's vote completes the count and executes it in the same operation. Each vote fires a
-  // run of the agent that nobody waits for: the expenses of step 8 must find the agent free (see 4).
-  const agentRunOf = (page: Page) => page.waitForResponse((response) => response.url().endsWith("/api/agent/run"), { timeout: 30_000 });
+  // run of the agent that nobody waits for: the expenses of step 8 must find the agent free (agentRunEnds).
   await open(ana, `${fund}/movimientos`);
-  const runAfterAnasVote = agentRunOf(ana);
+  const runAfterAnasVote = agentRunEnds(ana);
   await ana.getByRole("button", { name: "Votar" }).click();
   await expect(onScreen(ana, "Votaste")).toBeVisible();
   await open(beto, `${fund}/movimientos`);
-  const runAfterBetosVote = agentRunOf(beto);
+  const runAfterBetosVote = agentRunEnds(beto);
   await beto.getByRole("button", { name: "Votar" }).click();
   await expect(onScreen(beto, /El fondo le pagó \$\s3\.000 a Caro/)).toBeVisible();
   await expect(onScreen(beto, /pelota nueva\. Se aprobó\./)).toBeVisible();
   await Promise.all([runAfterAnasVote, runAfterBetosVote]);
 
   // 8. Two more of Caro's expenses, $ 12.000 each: the fund can pay one of them, not both. The first is approved and
-  // paid; the vote that completes the second can't pay it, so it goes alone, and the proposal waits for pesos.
+  // paid; the vote that completes the second can't pay it, so it goes alone, and the proposal waits for pesos. The
+  // agent's proposals of the week, shared among the members, leave her room for these and her give-back in step 9.
   for (const note of ["el asado", "las camisetas"]) {
     await open(caro, `${fund}?p=gasto`);
     await caro.getByLabel("Otro gasto (se vota)").check();
@@ -204,12 +271,16 @@ test("three friends create a fund, contribute, get the agreed expense back, vote
   await expect(onScreen(beto, /las camisetas\. Tiene los votos, pero al fondo le faltan/)).toBeVisible();
   await expect(beto.getByRole("button", { name: "Ejecutar" })).toHaveCount(0);
 
-  // 9. Caro puts in her $ 10.000, and Ana executes the proposal that was waiting.
-  await give(await accountOf(caro), { wars: 10_000n * 10n ** 18n });
+  // 9. Caro puts in her week, $ 10.025,07 with the fee as Ana's (her first operation: her Safe is deployed in it), and
+  // Ana executes the proposal that was waiting.
+  const caroAccount = await accountOf(caro);
+  await give(caroAccount, { wars: withFee(10_000n * 10n ** 18n) });
   await open(caro, `${fund}?p=aportar`);
   await caro.getByRole("tab", { name: "Tengo pesos en Ripio" }).click();
-  await caro.getByRole("button", { name: /Aportar \$\s10\.000/ }).click();
+  const beforeCarosContribution = await latestBlock();
+  await caro.getByRole("button", { name: /Aportar \$\s10\.025,07/ }).click();
   await expect(caro).toHaveURL(/\?aporte=/);
+  await printOperationGas("Caro's contribute of $ 10.025,07, with her Safe deployed in it", caroAccount, beforeCarosContribution);
   await open(ana, `${fund}/movimientos`);
   await expect(onScreen(ana, /las camisetas\. Tiene los votos: falta ejecutarla\./)).toBeVisible();
   await proposal(ana, "las camisetas").getByRole("button", { name: "Ejecutar" }).click();
@@ -227,11 +298,11 @@ test("three friends create a fund, contribute, get the agreed expense back, vote
   await expect(caro.getByText("El agente propuso devolvértelo y ahora lo vota el grupo.")).toBeVisible();
   await open(ana, `${fund}/movimientos`);
   await expect(onScreen(ana, /^Propuse devolverle \$\s1\.000 de su aporte a Caro \(puse de más\)\./)).toBeVisible();
-  const runAfterAnasGiveBackVote = agentRunOf(ana);
+  const runAfterAnasGiveBackVote = agentRunEnds(ana);
   await proposal(ana, "puse de más").getByRole("button", { name: "Votar" }).click();
   await expect(proposal(ana, "puse de más").getByText("Votaste")).toBeVisible();
   await open(beto, `${fund}/movimientos`);
-  const runAfterBetosGiveBackVote = agentRunOf(beto);
+  const runAfterBetosGiveBackVote = agentRunEnds(beto);
   await proposal(beto, "puse de más").getByRole("button", { name: "Votar" }).click();
   await expect(onScreen(beto, /El fondo le devolvió \$\s1\.000 de su aporte a Caro: la propuesta se aprobó\./)).toBeVisible();
   await Promise.all([runAfterAnasGiveBackVote, runAfterBetosGiveBackVote]);
@@ -374,7 +445,7 @@ test("three friends create a fund, contribute, get the agreed expense back, vote
 
   // 14. A week later (the fork's clock moves on), the heartbeat closes the fund's week 0: the agent leaves its summary
   // in Movimientos, and its panel shows it as it goes to the group, with WhatsApp's link carrying that same text
-  // (spec, 9.4). Last, because the clock doesn't come back. Everything above happened in week 0.
+  // (spec, 9.4). Everything above happened in week 0; from here on, the clock doesn't come back.
   await advanceClock(604_800);
   await expect(async () => {
     const beat = await ana.request.post("/api/agent/heartbeat", { headers: { authorization: `Bearer ${HEARTBEAT_SECRET}` } });
@@ -387,8 +458,8 @@ test("three friends create a fund, contribute, get the agreed expense back, vote
   const written = (await summary.locator("p", { hasText: "TesorerIA ·" }).textContent()) ?? "";
   expect(written).toMatch(/^TesorerIA · Fútbol de los jueves\nResumen de la semana 1 \(del \d{1,2}\/\d{1,2} al \d{1,2}\/\d{1,2}\)\n/);
   expect(written).toMatch(/\nEn el fondo hay \$\s[\d.]+(,\d{2})?\.\n/);
-  // Ana, Beto and Caro paid week 1 (the contract's week 0): Ana and Caro $ 10.000 each, Beto 10 USDT. Caro was given
-  // $ 1.000 of hers back (step 9), so she owes it. Dani joined in it and didn't pay.
+  // Ana, Beto and Caro paid week 1 (the contract's week 0): Ana and Caro $ 10.000 each after the fee, Beto 10 USDT.
+  // Caro was given $ 1.000 of hers back (step 9), so she owes it. Dani joined in it and didn't pay.
   expect(written).toMatch(/\nPagaron la cuota 2 de 4\. Deben, en total:\n· Caro, \$\s1\.000\n· Dani, \$\s10\.000\n/);
   expect(written).toMatch(/\n· Se aprobó devolverle \$\s1\.000 de su aporte a Caro\.\n/);
   expect(written).toContain("\n· Se sumó Dani al fondo.\n");
@@ -406,4 +477,35 @@ test("three friends create a fund, contribute, get the agreed expense back, vote
   await summary.getByRole("button", { name: "Copiar" }).click();
   await expect(summary.getByRole("button", { name: "Copiado" })).toBeVisible();
   expect((await ana.evaluate(() => navigator.clipboard.readText())).replaceAll("\r\n", "\n")).toBe(written);
+
+  // 15. With week 0 closed, the heartbeat also sent TesorerIA the fee the fund set aside from each contribution. It goes
+  // once a week, from the contract's week 1 on. Checked once: the fork's jump in time breaks the block a second the
+  // agent finds a week's start by (weekStartBlock).
+  await open(ana, `${fund}/movimientos`);
+  await expect(onScreen(ana, /Pasé \$\s[\d.,]+ de la comisión/)).toBeVisible();
+
+  // 16. Dani puts in 2 USDT. Under the 5 USDT the agent converts at least, they stay hers, pending, through a run of the
+  // agent. Then she leaves by a vote the web doesn't offer, each member from their own account: Ana proposes taking her
+  // out (which is Ana's vote too), Beto votes, and Caro executes it. Dani takes her part: her pending USDT, all of it,
+  // since she put in no pesos.
+  const daniAccount = await accountOf(dani);
+  await give(daniAccount, { usdt: 2_000_000n });
+  await open(dani, `${fund}?p=aportar`);
+  await dani.getByLabel("Cuánto aportás").fill("2");
+  await dani.getByRole("button", { name: /Aportar 2\sUSDT/ }).click();
+  await expect(dani).toHaveURL(/\?aporte=/);
+  await expect(async () => {
+    const beat = await ana.request.post("/api/agent/heartbeat", { headers: { authorization: `Bearer ${HEARTBEAT_SECRET}` } });
+    expect(beat.status()).toBe(200); // 202 while the run after her contribution holds the agent
+  }).toPass({ timeout: 60_000 });
+  expect(await fundV2(fundAddress).read.pendingDollar([daniAccount])).toBe(2_000_000n);
+  expect(await usdtOf(daniAccount)).toBe(0n);
+  const removal = await fundV2(fundAddress).read.proposalCount();
+  const removeDani = encodeFunctionData({ abi: fundV2Abi, functionName: "propose", args: [REMOVE_MEMBER, daniAccount, zeroAddress, 0n, ""] });
+  await asAccount(anaAccount, fundAddress, removeDani);
+  await asAccount(betoAccount, fundAddress, encodeFunctionData({ abi: fundV2Abi, functionName: "vote", args: [removal] }));
+  await asAccount(caroAccount, fundAddress, encodeFunctionData({ abi: fundV2Abi, functionName: "execute", args: [removal] }));
+  expect(await usdtOf(daniAccount)).toBe(2_000_000n);
+  await open(ana, `${fund}/movimientos`);
+  await expect(onScreen(ana, /Dani dejó el fondo y se llevó su parte\./)).toBeVisible();
 });
