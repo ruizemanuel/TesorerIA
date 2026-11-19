@@ -63,6 +63,24 @@ describe("parseEnv", () => {
     expect(problem({ ...base, CHAIN_MODE: "fork" })).toBe("");
   });
 
+  it("reads EXTRA_COUNTRIES as a list of country codes", () => {
+    expect(parseEnv({ ...base, EXTRA_COUNTRIES: "MX" }).EXTRA_COUNTRIES).toEqual(["MX"]);
+    expect(parseEnv({ ...base, EXTRA_COUNTRIES: "AR, MX" }).EXTRA_COUNTRIES).toEqual(["AR", "MX"]);
+    expect(parseEnv(base).EXTRA_COUNTRIES).toEqual([]);
+    expect(parseEnv({ ...base, EXTRA_COUNTRIES: "" }).EXTRA_COUNTRIES).toEqual([]);
+    expect(problem({ ...base, EXTRA_COUNTRIES: "BR" })).toContain("EXTRA_COUNTRIES");
+    expect(problem({ ...base, EXTRA_COUNTRIES: "MX,BR" })).toContain("EXTRA_COUNTRIES");
+    expect(problem({ ...base, EXTRA_COUNTRIES: "Brazil" })).not.toContain("Brazil");
+  });
+
+  it("refuses EXTRA_COUNTRIES on a Vercel deployment, where Mexico stays off until it's offered in the table", () => {
+    const message = problem({ ...base, EXTRA_COUNTRIES: "MX", VERCEL: "1" });
+    expect(message).toContain("EXTRA_COUNTRIES");
+    expect(message).toContain("deployment");
+    expect(problem({ ...base, EXTRA_COUNTRIES: "MX", VERCEL: "" })).toBe("");
+    expect(problem({ ...base, VERCEL: "1" })).toBe("");
+  });
+
   it("keeps the agent's kill switch off unless it is exactly 'on'", () => {
     expect(parseEnv({ ...base, AGENT_SEND: "on" }).AGENT_SEND).toBe("on");
     expect(parseEnv({ ...base, AGENT_SEND: "off" }).AGENT_SEND).toBe("off");

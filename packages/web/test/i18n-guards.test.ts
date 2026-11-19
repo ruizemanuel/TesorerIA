@@ -38,6 +38,7 @@ describe("no Spanish outside the dictionaries (spec, 11)", () => {
   // Text members wrote isn't in the code; what's here is the Spanish that has a reason to stay in code.
   const ALLOWED = new Set([
     "lib/chat/scripted-model.ts", // the e2e's stand-in model, which runs in Spanish
+    "lib/countries.ts", // each country's words in Spanish (its clock's name, "hora de Ciudad de México"): data of the table, not UI text
     "lib/chat/instructions.ts", // the Spanish variant of the chat model's instructions: a prompt, not UI, pinned literally by chat-request.test.ts
   ]);
 

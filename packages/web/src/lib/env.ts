@@ -1,5 +1,6 @@
 import { type Address, getAddress } from "viem";
 import { z } from "zod";
+import { COUNTRY_CODES, type CountryCode, isCountryCode } from "./countries";
 import { hashSchema } from "./schemas";
 
 /** An empty value counts as missing, so a copied .env.example (`NAME=`) behaves like one without the line. */
@@ -57,6 +58,26 @@ const schema = z
      * or two a day; raise it when many people will create one at once, like the judges on judging day.
      */
     CREATE_FUND_DAILY_LIMIT: blank(z.coerce.number().int().positive().default(10)),
+    /**
+     * Countries to offer on top of the ones the agent's table offers, as "MX" or "AR,MX", for a local run to try one
+     * before it goes live. Empty when missing.
+     */
+    EXTRA_COUNTRIES: blank(
+      z
+        .string()
+        .optional()
+        .transform((value, ctx): CountryCode[] => {
+          const codes = (value ?? "")
+            .split(",")
+            .map((code) => code.trim())
+            .filter((code) => code !== "");
+          if (!codes.every(isCountryCode)) {
+            ctx.issues.push({ code: "custom", message: `Must be a comma-separated list of: ${COUNTRY_CODES.join(", ")}`, input: value });
+            return [];
+          }
+          return codes;
+        }),
+    ),
     /** Set by Vercel on its builds and deployments: there, the fork (an anvil on this machine) is never right. */
     VERCEL: blank(z.string().optional()),
   })
@@ -67,6 +88,10 @@ const schema = z
   .refine((settings) => settings.CHAIN_MODE !== "fork" || settings.VERCEL === undefined, {
     path: ["CHAIN_MODE"],
     message: "fork is for local runs only, never on a Vercel deployment",
+  })
+  .refine((settings) => settings.EXTRA_COUNTRIES.length === 0 || settings.VERCEL === undefined, {
+    path: ["EXTRA_COUNTRIES"],
+    message: "EXTRA_COUNTRIES is for local runs only, never on a Vercel deployment",
   })
   .refine((settings) => settings.CHAT_MODEL !== "mock" || settings.CHAIN_MODE === "fork", {
     path: ["CHAT_MODEL"],
