@@ -18,13 +18,20 @@ import { celo } from "viem/chains";
 const GAS_LIMITS = { callGasLimit: 8_000_000n, verificationGasLimit: 2_000_000n, preVerificationGas: 100_000n };
 
 /**
+ * How long a request to the fork may take: as long as /api/bundler gives Pimlico. On a fork that hasn't read yet the
+ * state an operation touches, anvil fetches it from the forked chain before it answers: a first createFund on
+ * FundFactoryV2, with the Safe's deployment and the pool's history check, took 11 s on 19/11/2026, past viem's default 10 s.
+ */
+const FORK_TIMEOUT_MS = 30_000;
+
+/**
  * A stand-in for Pimlico on an anvil fork of Celo, for the web's end-to-end tests and local runs: it answers
  * the JSON-RPC methods viem and Pimlico's client use, and runs each UserOperation with `handleOps` from one
  * of anvil's unlocked accounts. There is no paymaster: an account pays its gas with its own CELO, which
  * the tests give it with `anvil_setBalance`. Never point it at a real network.
  */
 export function createForkBundler({ rpcUrl }: { rpcUrl: string }) {
-  const transport = http(rpcUrl);
+  const transport = http(rpcUrl, { timeout: FORK_TIMEOUT_MS });
   const publicClient = createPublicClient({ chain: celo, transport });
   const walletClient = createWalletClient({ chain: celo, transport });
   const sent = new Map<Hash, Hash>(); // userOpHash → transaction hash
