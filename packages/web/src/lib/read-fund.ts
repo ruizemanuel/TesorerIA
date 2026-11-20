@@ -15,12 +15,14 @@ import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { type Address, getAddress, isAddressEqual, zeroAddress } from "viem";
 import { celoClient, logReader, nodeLogReader } from "./chain";
 import { blockTime, weekAt } from "./chain-time";
+import type { CountryCode } from "./countries";
 import type { CurrentUser } from "./current-user";
 import { type Db, getDb } from "./db/client";
 import { decisions, expenses, funds, memberships, users, weekSummaries } from "./db/schema";
 import { env } from "./env";
 import { MAX_MEMBERS, memberFundAbi } from "./fund-abi";
 import { readBalance } from "./fund-balance";
+import { countryCodeOf } from "./fund-country";
 import { type FundView, buildFundView } from "./fund-view";
 import { giveBackTransactions, proposalsIn } from "./give-backs";
 import { completeHistory } from "./history";
@@ -37,6 +39,8 @@ export type FundScreen = {
   fundId: string;
   /** The block everything on the screen was read at. */
   block: bigint;
+  /** The country of the fund's currency (spec, 6): what the screen's sentences, amounts and times are written for. */
+  country: CountryCode;
   view: FundView;
   timeline: TimelineItem[];
   /** The agent's summary of each week that closed (spec, 9.4), newest first: the text that goes to the group. */
@@ -79,20 +83,22 @@ function peopleOf(db: Db, fundId: string) {
 /**
  * Everything one screen of a live fund needs (spec, 9.2). Null when the fund isn't ours, isn't live, or the
  * viewer may not see it: a member sees their fund; anyone sees a fund whose public view is on. What the server writes
- * on it (the movements, the names of a public view) is in `locale`, the page's language (spec, 9.3).
+ * on it (the movements, the names of a public view) is in `locale`, the page's language (spec, 9.3), for the country of
+ * the fund's currency (spec, 6), whoever looks at it from wherever.
  */
 export async function loadFundScreen(
   address: Address,
   viewer: CurrentUser | null,
   { publicView = false, locale }: { publicView?: boolean; locale: Locale },
 ): Promise<FundScreen | null> {
-  const m = messagesFor(locale, "AR");
   const db = await getDb();
   const [fund] = await db
     .select()
     .from(funds)
     .where(and(eq(funds.address, getAddress(address)), eq(funds.status, "live")));
   if (fund === undefined || (publicView && !fund.publicView)) return null;
+  const country = countryCodeOf(getAddress(fund.currency));
+  const m = messagesFor(locale, country);
   let people = await peopleOf(db, fund.id);
   let viewerIsMember = viewer !== null && people.some((p) => p.userId === viewer.id);
   // Someone the group just voted in may open the fund before anyone admitted them (below), from another device: only
@@ -228,6 +234,7 @@ export async function loadFundScreen(
   return {
     fundId: fund.id,
     block: snapshot.block,
+    country,
     view,
     timeline,
     weekSummaries: summaryTexts,
@@ -246,7 +253,8 @@ export async function loadFundScreen(
  * and /publico are open to anyone, and every hit would otherwise read the chain. It's the same for every viewer of a
  * language, which is why only it is kept; a member's screens are always read fresh. The key carries the language
  * because the screen's sentences are written on the server (spec, 9.3): without it, a visitor in English could be
- * handed the one written in Spanish for someone else.
+ * handed the one written in Spanish for someone else. The country needs no place in it: it's the fund's, so the address
+ * already says it (spec, 6).
  */
 const publicFundScreen = ttlMemo("public-fund-screen", 45_000, (key) => {
   const [locale, address] = key.split(":") as [Locale, Address];

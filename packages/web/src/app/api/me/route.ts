@@ -7,8 +7,7 @@ import { getDb } from "../../../lib/db/client";
 import { credentials } from "../../../lib/db/schema";
 import { env } from "../../../lib/env";
 import { jsonError } from "../../../lib/http";
-import { localeOf } from "../../../lib/i18n/locales";
-import { messagesFor } from "../../../lib/i18n/messages";
+import { messagesOf } from "../../../lib/i18n/request";
 import { confirmKeyChange, keyChangeOf } from "../../../lib/key-change";
 import { getSession } from "../../../lib/session";
 
@@ -16,7 +15,7 @@ import { getSession } from "../../../lib/session";
 const CHAIN_READ_MS = 3_000;
 
 export async function GET(request: Request) {
-  const m = messagesFor(localeOf(request), "AR");
+  const m = messagesOf(request);
   const user = await currentUser();
   if (user === null) return jsonError(401, m.errors.logIn);
   const db = await getDb();

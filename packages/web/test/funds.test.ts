@@ -16,11 +16,13 @@ import { generatePrivateKey, privateKeyToAddress } from "viem/accounts";
 import { describe, expect, it, vi } from "vitest";
 import { agentAddress } from "../src/lib/agent-address";
 import type { UserOperationFinder } from "../src/lib/chain";
+import { COUNTRIES } from "../src/lib/countries";
 import { claimCreateFundNonce } from "../src/lib/create-fund-cap";
 import type { Db } from "../src/lib/db/client";
 import { createFundNonces, funds, memberships, operations } from "../src/lib/db/schema";
 import { MAX_PESOS, formatMoney } from "../src/lib/format";
 import { DEFAULT_BALANCE_CAP } from "../src/lib/fund-abi";
+import { countryCodeOf, fundCountryOf } from "../src/lib/fund-country";
 import {
   NEW_FUND_VERSION,
   cancelDeploy,
@@ -188,6 +190,12 @@ describe("drafts and invitations", () => {
     ]);
   });
 
+  it("summarizes a draft with its currency", async () => {
+    const db = await testDb();
+    const { fundId: draftId } = await group(db);
+    expect((await draftById(db, draftId))!.currency).toBe(WARS_TOKEN);
+  });
+
   it("finds nothing for an id that isn't one, instead of failing", async () => {
     const db = await testDb();
     expect(await draftById(db, "nope")).toBeNull();
@@ -238,6 +246,31 @@ describe("drafts and invitations", () => {
     for (let i = 0; i < 6; i++) ids.push((await addLiveFund(db, { creatorId: ana.id, address: randomAccount(), members: [ana.id] })).id);
     await db.update(memberships).set({ joinedAt: new Date(Date.UTC(2026, 9, 10, 12, 0)) }).where(eq(memberships.userId, ana.id));
     expect((await fundsOf(db, ana.id)).map((fund) => fund.id)).toEqual([...ids].sort());
+  });
+});
+
+describe("a fund's country (spec, 6)", () => {
+  const MXN = COUNTRIES.MX.currency.token;
+
+  it("is its currency's, whatever its status, and Argentina for an address no fund has", async () => {
+    const db = await testDb();
+    const ana = await addUser(db, "Ana");
+    const [mexican, argentine] = [randomAccount(), randomAccount()];
+    await addLiveFund(db, { creatorId: ana.id, address: mexican, members: [ana.id], version: 2, currency: MXN });
+    await addLiveFund(db, { creatorId: ana.id, address: argentine, members: [ana.id] });
+    expect(await fundCountryOf(db, mexican)).toBe("MX");
+    expect(await fundCountryOf(db, mexican.toLowerCase() as Address)).toBe("MX");
+    expect(await fundCountryOf(db, argentine)).toBe("AR");
+    expect(await fundCountryOf(db, randomAccount())).toBe("AR");
+    await db.update(funds).set({ status: "deploying" }).where(eq(funds.address, mexican));
+    expect(await fundCountryOf(db, mexican)).toBe("MX");
+  });
+
+  it("is Argentina for a currency without a country here", () => {
+    expect(countryCodeOf(MXN)).toBe("MX");
+    expect(countryCodeOf(MXN.toLowerCase() as Address)).toBe("MX");
+    expect(countryCodeOf(WARS_TOKEN)).toBe("AR");
+    expect(countryCodeOf(USDT)).toBe("AR");
   });
 });
 

@@ -2,8 +2,7 @@ import { z } from "zod";
 import { currentUser } from "../../../../lib/current-user";
 import { getDb } from "../../../../lib/db/client";
 import { jsonError, readJson } from "../../../../lib/http";
-import { localeOf } from "../../../../lib/i18n/locales";
-import { messagesFor } from "../../../../lib/i18n/messages";
+import { messagesOf } from "../../../../lib/i18n/request";
 import { finishOperation } from "../../../../lib/operations";
 import { hashSchema } from "../../../../lib/schemas";
 
@@ -19,7 +18,7 @@ const Done = z.object({
 });
 
 export async function POST(request: Request) {
-  const m = messagesFor(localeOf(request), "AR");
+  const m = messagesOf(request);
   const user = await currentUser();
   if (user === null) return jsonError(401, m.errors.logIn);
   const body = await readJson(request, Done);

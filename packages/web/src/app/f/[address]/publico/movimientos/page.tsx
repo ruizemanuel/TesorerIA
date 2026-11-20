@@ -23,10 +23,10 @@ export default async function PublicMovementsPage({ params }: { params: Promise<
   await connection(); // it reads the database and the chain, so it's never prerendered at build time
   const { address } = await params;
   if (!isAddress(address, { strict: false })) notFound();
-  const m = await getMessages();
   const locale = await getLocale();
   const screen = await loadPublicFundScreen(address, locale);
   if (screen === null) notFound();
+  const m = await getMessages(screen.country);
   const { view } = screen;
   const home = `/f/${view.address}/publico`;
   return (

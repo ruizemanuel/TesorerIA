@@ -1,9 +1,11 @@
 import { FUND_FACTORY_V2 } from "@tesoreria/agent";
+import { eq } from "drizzle-orm";
 import { getAddress } from "viem";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { COUNTRIES } from "../src/lib/countries";
 import type { CurrentUser } from "../src/lib/current-user";
 import type { Db } from "../src/lib/db/client";
-import { operations } from "../src/lib/db/schema";
+import { funds, operations } from "../src/lib/db/schema";
 import { NBSP } from "../src/lib/format";
 import { draftById } from "../src/lib/funds";
 import { PENDING_FOR_MS, recordOperation } from "../src/lib/operations";
@@ -53,6 +55,8 @@ beforeAll(async () => {
   vi.stubEnv("RP_ID", "localhost");
   vi.stubEnv("ORIGIN", "http://localhost:3000");
   vi.stubEnv("SESSION_SECRET", "a-session-secret-for-tests-only-0123456789");
+  // Mexico on, as a local run turns it on: only a request that comes from there (x-vercel-ip-country) sees it.
+  vi.stubEnv("EXTRA_COUNTRIES", "MX");
   db = await testDb();
   state.db = db;
   people = [asUser(await addUser(db, "Ana")), asUser(await addUser(db, "Beto")), asUser(await addUser(db, "Caro"))];
@@ -184,5 +188,49 @@ describe("in the language of the request", () => {
     });
     state.user = null;
     expect(await answer(await deployed(english({ transactionHash: "0x1234" }), params({ id })))).toEqual({ status: 401, error: "Log in with your passkey." });
+  });
+});
+
+describe("in the draft's country, and outside one in the IP's (spec, 6)", () => {
+  const MXN = COUNTRIES.MX.currency.token;
+  /** A browser in Mexico: Vercel says so in x-vercel-ip-country, and this run offers Mexico (EXTRA_COUNTRIES). */
+  const fromMexico = (body: unknown) =>
+    new Request("http://localhost:3000/api", { method: "POST", headers: { "content-type": "application/json", "x-vercel-ip-country": "MX" }, body: JSON.stringify(body) });
+  const answer = async (response: Response) => ({ status: response.status, ...((await response.json()) as { error?: string }) });
+
+  it("answers a draft's deploy and invitation in the draft's Spanish, not the IP's", async () => {
+    const id = await draftOfThree();
+    const { inviteCode } = (await draftById(db, id))!;
+    state.user = asUser(await addUser(db, "Dani"));
+    await join(json({}), params({ code: inviteCode }));
+    state.user = people[0]!;
+    expect((await deploy(json({ votesRequired: 2 }), params({ id }))).status).toBe(200);
+    // An Argentine draft speaks Rioplatense to a browser in Mexico.
+    expect(await answer(await deploy(fromMexico({ votesRequired: 3 }), params({ id })))).toEqual({
+      status: 409,
+      error: "Ya empezaste a crear el fondo con 2 votos necesarios: elegí 2 para seguir.",
+    });
+    // The same draft in wMXN speaks neutral Spanish to anyone.
+    await db.update(funds).set({ currency: MXN }).where(eq(funds.id, id));
+    expect(await answer(await deploy(json({ votesRequired: 3 }), params({ id })))).toEqual({
+      status: 409,
+      error: "Ya empezaste a crear el fondo con 2 votos necesarios: elige 2 para continuar.",
+    });
+    state.user = asUser(await addUser(db, "Eli"));
+    expect(await answer(await join(json({}), params({ code: inviteCode })))).toEqual({
+      status: 409,
+      error: "El fondo se está creando en este momento. Inténtalo en un rato.",
+    });
+  });
+
+  it("reads a new draft's amounts as the page that sent them writes them, the IP's country's", async () => {
+    // /crear speaks the IP's country (the root layout's), so its form sends Mexico's way to write an amount.
+    expect(await answer(await createDraftRoute(fromMexico(DRAFT)))).toEqual({
+      status: 400,
+      error: "No entendimos la cuota. Escríbela como 10,000 o 10,000.50.",
+    });
+    const created = await createDraftRoute(fromMexico({ ...DRAFT, weeklyFee: "1,000.50", weeklyCap: "6,000" }));
+    const { id } = (await created.json()) as { id: string };
+    expect(await draftById(db, id)).toMatchObject({ weeklyFee: 1_000n * WARS + WARS / 2n, weeklyCap: 6_000n * WARS });
   });
 });

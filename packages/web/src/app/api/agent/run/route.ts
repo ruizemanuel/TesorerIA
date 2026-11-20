@@ -8,8 +8,7 @@ import { getDb } from "../../../../lib/db/client";
 import { acquireLock, lockTimeLeft } from "../../../../lib/db/lock";
 import { fundsOf } from "../../../../lib/funds";
 import { jsonError } from "../../../../lib/http";
-import { localeOf } from "../../../../lib/i18n/locales";
-import { messagesFor } from "../../../../lib/i18n/messages";
+import { messagesOf } from "../../../../lib/i18n/request";
 import { lastOperationBlock } from "../../../../lib/operations";
 import { waitForBlock } from "../../../../lib/read-your-writes";
 import { chainWeekSummaryDeps, writeWeekSummaries } from "../../../../lib/week-summaries";
@@ -24,7 +23,7 @@ const COOLDOWN = "agent-run-cooldown";
  * (spec, 9.4: whichever run holds the lock writes them).
  */
 export async function POST(request: Request) {
-  const m = messagesFor(localeOf(request), "AR");
+  const m = messagesOf(request);
   const user = await currentUser();
   if (user === null) return jsonError(401, m.errors.logIn);
   const db = await getDb();

@@ -9,9 +9,9 @@ import { getDb } from "../../../../../lib/db/client";
 import { expenses, funds, memberships } from "../../../../../lib/db/schema";
 import { submitExpense } from "../../../../../lib/expenses";
 import { amountExamples, parseMoney } from "../../../../../lib/format";
+import { countryCodeOf } from "../../../../../lib/fund-country";
 import { jsonError, readJson } from "../../../../../lib/http";
-import { localeOf } from "../../../../../lib/i18n/locales";
-import { messagesFor } from "../../../../../lib/i18n/messages";
+import { messagesOf } from "../../../../../lib/i18n/request";
 
 // The agent runs inside the request, like the heartbeat's; its lock outlives this (agent-runner.ts).
 export const maxDuration = 300;
@@ -25,25 +25,30 @@ const Expense = z.object({
   confirmDuplicate: z.boolean().optional(),
 });
 
-/** Keeps the expense and hands it to the agent right away (spec, 8.3: "por eventos"). */
+/**
+ * Keeps the expense and hands it to the agent right away (spec, 8.3: "por eventos"). The fund comes first: its country
+ * says how the amount is written (spec, 6), and what the route answers from then on.
+ */
 export async function POST(request: Request, { params }: { params: Promise<{ address: string }> }) {
-  const m = messagesFor(localeOf(request), "AR");
+  const outside = messagesOf(request);
   const user = await currentUser();
-  if (user === null) return jsonError(401, m.errors.logIn);
+  if (user === null) return jsonError(401, outside.errors.logIn);
   const { address } = await params;
-  if (!isAddress(address, { strict: false })) return jsonError(404, m.errors.fundNotFound);
+  if (!isAddress(address, { strict: false })) return jsonError(404, outside.errors.fundNotFound);
+
+  const db = await getDb();
+  const [membership] = await db
+    .select({ fundId: funds.id, currency: funds.currency })
+    .from(funds)
+    .innerJoin(memberships, eq(memberships.fundId, funds.id))
+    .where(and(eq(funds.address, getAddress(address)), eq(funds.status, "live"), eq(memberships.userId, user.id)));
+  if (membership === undefined) return jsonError(404, outside.errors.fundNotFound);
+  const m = messagesOf(request, countryCodeOf(getAddress(membership.currency)));
+
   const body = await readJson(request, Expense);
   if (!body.ok) return body.response;
   const amount = parseMoney(body.value.amount, m);
   if (amount === null) return jsonError(400, `${m.expenses.amountUnreadable} ${m.errors.amountFormat(...amountExamples(10_000n, m))}`);
-
-  const db = await getDb();
-  const [membership] = await db
-    .select({ fundId: funds.id })
-    .from(funds)
-    .innerJoin(memberships, eq(memberships.fundId, funds.id))
-    .where(and(eq(funds.address, getAddress(address)), eq(funds.status, "live"), eq(memberships.userId, user.id)));
-  if (membership === undefined) return jsonError(404, m.errors.fundNotFound);
 
   const saved = await submitExpense(db, { userId: user.id, fundId: membership.fundId, input: { ...body.value, amount }, m });
   if (!saved.ok) return jsonError(saved.status, saved.error);

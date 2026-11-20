@@ -18,10 +18,10 @@ export default async function MovementsPage({ params }: { params: Promise<{ addr
   if (!isAddress(address, { strict: false })) notFound();
   const user = await currentUser();
   if (user === null) redirect(`/entrar?next=${encodeURIComponent(safeNext(`/f/${address}/movimientos`))}`);
-  const m = await getMessages();
   const locale = await getLocale();
   const screen = await loadFundScreen(address, user, { locale });
   if (screen === null) notFound();
+  const m = await getMessages(screen.country);
   const { view } = screen;
   const chat = chatEnabled();
   return (

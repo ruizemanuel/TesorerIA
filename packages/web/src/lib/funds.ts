@@ -78,6 +78,8 @@ export type DraftSummary = {
    * NEW_FUND_VERSION, which deployCall freezes it with.
    */
   feeBps: number;
+  /** The token it keeps its money in (funds.currency): what its pages and routes take the country from (countryCodeOf). */
+  currency: Address;
   address: Address | null;
   inviteCode: string;
   creatorId: string;
@@ -156,6 +158,7 @@ async function summarize(db: Db, where: SQL): Promise<DraftSummary | null> {
     status: fund.status,
     version: fund.version,
     feeBps: runs === 2 ? V2_TERMS.feeBps : 0,
+    currency: getAddress(fund.currency),
     address: fund.address === null ? null : getAddress(fund.address),
     inviteCode: fund.inviteCode,
     creatorId: fund.creatorId,

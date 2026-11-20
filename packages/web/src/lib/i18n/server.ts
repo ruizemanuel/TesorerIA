@@ -1,6 +1,7 @@
 import { cookies, headers } from "next/headers";
 import { cache } from "react";
-import { type CountryCode, DEFAULT_COUNTRY } from "../countries";
+import type { CountryCode } from "../countries";
+import { IP_COUNTRY_HEADER, visitorCountry } from "../countries-env";
 import { type Locale, LOCALE_COOKIE, pickLocale } from "./locales";
 import { type Messages, messagesFor } from "./messages";
 
@@ -10,7 +11,14 @@ export const getLocale = cache(async (): Promise<Locale> => {
   return pickLocale({ cookie: jar.get(LOCALE_COOKIE)?.value, acceptLanguage: list.get("accept-language") });
 });
 
-/** The page's dictionary, for `country`: Argentina when the page doesn't say. */
-export async function getMessages(country: CountryCode = DEFAULT_COUNTRY): Promise<Messages> {
-  return messagesFor(await getLocale(), country);
+/**
+ * The country of a page outside any fund (spec, 6): the IP's, if this deployment offers it, else Argentina. A fund's
+ * pages speak the fund's instead (fundCountryOf). Read once per request.
+ */
+export const getPageCountry = cache(async (): Promise<CountryCode> => visitorCountry((await headers()).get(IP_COUNTRY_HEADER)));
+
+/** The page's dictionary, for `country`: the page's own (getPageCountry) when it doesn't say. */
+export async function getMessages(country?: CountryCode): Promise<Messages> {
+  const [locale, spoken] = await Promise.all([getLocale(), country ?? getPageCountry()]);
+  return messagesFor(locale, spoken);
 }

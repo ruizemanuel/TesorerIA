@@ -128,7 +128,7 @@ function screenIn(m: Messages): FundScreen {
     viewer: ANA,
     m,
   });
-  return { fundId, block: BLOCK, view, timeline: [], viewerIsMember: true, publicView: false, contributionOnItsWay: false, cashOutOnItsWay: false, weekSummaries: [], invite: null, proposalsLeft: null, giveBackMax: null };
+  return { fundId, block: BLOCK, country: m.country.code, view, timeline: [], viewerIsMember: true, publicView: false, contributionOnItsWay: false, cashOutOnItsWay: false, weekSummaries: [], invite: null, proposalsLeft: null, giveBackMax: null };
 }
 
 afterEach(() => {
@@ -200,6 +200,18 @@ describe("POST /api/funds/:address/chat (spec, 8.2)", () => {
     state.memberLimit = 30;
     state.globalLimit = 1;
     expect(await (await chat([user("Hi")], FUND, english)).json()).toEqual({ error: en.chat.unavailable });
+  });
+
+  it("answers in the fund's Spanish once it has read the fund (spec, 6)", async () => {
+    // Before the fund is read, the request's country (no IP here: Argentina); after, the fund's: a wMXN one is neutral.
+    state.user = null;
+    expect(await (await chat([user("Hola")])).json()).toEqual({ error: "Entrá con tu passkey." });
+    state.user = ana;
+    state.screen = { ...screenIn(es), country: "MX" };
+    state.model = new Error("the scripted model could not load");
+    const response = await chat([user("Hola")]);
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ error: "El agente no puede responder ahora. Inténtalo más tarde." });
   });
 
   it("refuses a body that's too big, a long message, and a conversation that doesn't end with the member, before counting", async () => {

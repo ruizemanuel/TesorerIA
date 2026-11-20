@@ -2,10 +2,12 @@ import { type FundEvent, type FundSnapshot, USDT, WARS as WARS_TOKEN, type WeekS
 import { and, eq, sql } from "drizzle-orm";
 import { type Address, type Hash, getAddress, isAddressEqual, pad, toHex, zeroAddress } from "viem";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { COUNTRIES } from "../src/lib/countries";
 import type { CurrentUser } from "../src/lib/current-user";
 import type { Db } from "../src/lib/db/client";
 import { decisions, expenses, funds, joinRequests, memberships, operations, weekSummaries } from "../src/lib/db/schema";
 import { NBSP, formatMoney, formatUsdt } from "../src/lib/format";
+import { getPageCountry } from "../src/lib/i18n/server";
 import { JOIN_REQUEST_REACH_DAYS } from "../src/lib/join-requests";
 import { finishOperation, recordOperation } from "../src/lib/operations";
 import { HistoryGapError, loadFundScreen as loadScreen, loadPublicFundScreen } from "../src/lib/read-fund";
@@ -50,8 +52,14 @@ vi.mock("@tesoreria/agent", async (importOriginal) => ({
 const waitForBlock = vi.hoisted(() => vi.fn(async () => true));
 vi.mock("../src/lib/read-your-writes", () => ({ waitForBlock }));
 
+// The viewer's request: their IP's country, and the countries this run offers on top of the agent's (EXTRA_COUNTRIES).
+const visitor = vi.hoisted(() => ({ ipCountry: null as string | null, extraCountries: [] as ("AR" | "MX")[] }));
+vi.mock("next/headers", () => ({
+  cookies: async () => ({ get: () => undefined }),
+  headers: async () => new Headers(visitor.ipCountry === null ? {} : { "x-vercel-ip-country": visitor.ipCountry }),
+}));
 // The summary's link to the fund (spec, 9.4) is the site's own origin.
-vi.mock("../src/lib/env", () => ({ env: () => ({ ORIGIN: "https://tesoreriaia.vercel.app" }) }));
+vi.mock("../src/lib/env", () => ({ env: () => ({ ORIGIN: "https://tesoreriaia.vercel.app", EXTRA_COUNTRIES: visitor.extraCountries }) }));
 
 /** The screens these tests read are in Spanish, unless a test says otherwise. */
 const loadFundScreen = (address: Address, viewer: CurrentUser | null, options: Partial<Parameters<typeof loadScreen>[2]> = {}) =>
@@ -115,6 +123,8 @@ beforeEach(() => {
   agent.readFund.mockReset();
   agent.readFundEvents.mockReset();
   setHistory([]);
+  visitor.ipCountry = null;
+  visitor.extraCountries = [];
 });
 
 describe("loadFundScreen: who sees a fund", () => {
@@ -596,6 +606,49 @@ describe("loadFundScreen: a version 2 fund", () => {
     await decide(address, "skip", "price-reference", 2);
     await decide(address, "blocked", null, 1, { kind: "pay-fee" });
     expect(await holds(address)).toEqual([expect.stringContaining("el precio de referencia del dólar no está al día")]);
+  });
+});
+
+describe("loadFundScreen: the fund's country (spec, 6)", () => {
+  const MXN = COUNTRIES.MX.currency.token;
+  /** A live version 2 fund of Ana, Beto and Caro in `currency`, as the chain reads it with `change`. */
+  async function liveFundIn(currency: Address, change: Partial<FundSnapshot> = {}) {
+    const address = randomAccount();
+    await addLiveFund(db, { creatorId: ana.id, address, members: [ana.id, beto.id, caro.id], version: 2, currency });
+    chainFund({ address, members: [ana, beto, caro].map((person) => getAddress(person.account)), version: 2, currency, feeBps: 25, ...change });
+    return address;
+  }
+
+  it("speaks a wMXN fund's country even to a viewer from Argentina", async () => {
+    visitor.ipCountry = "AR";
+    setHistory([event("Contribution", { member: getAddress(beto.account), token: MXN, amount: 1_000n * WARS, credited: 1_000n * WARS }, BLOCK - 100n)]);
+    const address = await liveFundIn(MXN, { dollar: null, pool: null });
+    const screen = await loadFundScreen(address, asViewer(ana), { locale: "es" });
+    expect(screen!.country).toBe("MX");
+    expect(screen!.timeline.some((item) => /\$\d{1,3}(,\d{3})*(\.\d{2})?/.test(item.text))).toBe(true);
+  });
+
+  it("keeps the football fund in Rioplatense for a viewer with a Mexican IP", async () => {
+    // Outside a fund, this viewer's pages are Mexico's: the IP says so, and this run offers Mexico.
+    visitor.ipCountry = "MX";
+    visitor.extraCountries = ["MX"];
+    expect(await getPageCountry()).toBe("MX");
+    setHistory([event("FeePaid", { amount: 10_000n * WARS }, BLOCK - 100n)]);
+    const address = await liveFundIn(WARS_TOKEN);
+    const screen = await loadFundScreen(address, asViewer(ana), { locale: "es" });
+    expect(screen!.country).toBe("AR");
+    // Argentina's amount and percent, in the Rioplatense sentence: the neutral one says "Envié $10,000 … del 0.25%".
+    expect(texts(screen!)).toEqual([
+      `Pasé $${NBSP}10.000 de la comisión del 0,25${NBSP}% a TesorerIA, para cubrir lo que cuestan las operaciones del fondo.`,
+    ]);
+  });
+
+  it("keeps one public screen per fund and per language: the country comes with the fund", async () => {
+    const address = await liveFundIn(MXN, { dollar: null, pool: null });
+    await db.update(funds).set({ publicView: true }).where(eq(funds.address, address));
+    const shown = (await loadPublicFundScreen(address, "es"))!;
+    expect(shown.country).toBe("MX");
+    expect(await loadPublicFundScreen(address.toLowerCase() as Address, "es")).toBe(shown);
   });
 });
 

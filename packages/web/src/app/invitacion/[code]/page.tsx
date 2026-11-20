@@ -7,26 +7,31 @@ import { celoClient } from "../../../lib/chain";
 import { currentUser } from "../../../lib/current-user";
 import { getDb } from "../../../lib/db/client";
 import { formatPercent } from "../../../lib/format";
+import { countryCodeOf } from "../../../lib/fund-country";
 import { draftByInvite } from "../../../lib/funds";
+import { LocaleProvider } from "../../../lib/i18n/client";
 import { getMessages } from "../../../lib/i18n/server";
 import { invitationFor } from "../../../lib/invitation";
 import { NO_JOIN, joinStateOf, openRequestsFromOthers } from "../../../lib/join-requests";
 
-/** The link preview names the fund it invites to (spec, 9.6): it's what the group sees in the chat. */
+/** The link preview names the fund it invites to (spec, 9.6): it's what the group sees in the chat, in the fund's country. */
 export async function generateMetadata({ params }: { params: Promise<{ code: string }> }): Promise<Metadata> {
   const draft = await draftByInvite(await getDb(), (await params).code);
   if (draft === null) return {};
-  const m = await getMessages();
+  const m = await getMessages(countryCodeOf(draft.currency));
   return { title: m.meta.invitationTitle(draft.name), description: m.meta.invitationDescription };
 }
 
-/** The invitation (spec, 9, screen 1), and on a live fund, asking to join it and where that stands (spec, 9.4). */
+/**
+ * The invitation (spec, 9, screen 1), and on a live fund, asking to join it and where that stands (spec, 9.4). It speaks
+ * the fund's country (spec, 6): its form, which runs in the browser, too.
+ */
 export default async function InvitePage({ params }: { params: Promise<{ code: string }> }) {
   const { code } = await params;
   const db = await getDb();
   let draft = await draftByInvite(db, code);
   if (draft === null) notFound();
-  const m = await getMessages();
+  const m = await getMessages(countryCodeOf(draft.currency));
   const user = await currentUser();
   const join = user === null ? NO_JOIN : await joinStateOf(db, celoClient(), draft, user, m);
   // Admitted just now: the fund lists them, and the invitation takes them to it.
@@ -35,44 +40,46 @@ export default async function InvitePage({ params }: { params: Promise<{ code: s
   const othersWaiting = draft.status === "live" ? await openRequestsFromOthers(db, draft.id, user?.id ?? null) : 0;
   const invitation = invitationFor(draft, user?.id ?? null, m, join, othersWaiting);
   return (
-    <main className="mx-auto grid max-w-[560px] gap-4 p-4 pt-8">
-      <div className="flex items-center justify-between">
-        <Logo />
-        <LanguageSwitch />
-      </div>
-      <Card className="grid gap-4">
-        <h1 className="text-2xl font-bold [font-stretch:87%]">{m.invitation.title(draft.creatorName, <em>{draft.name}</em>)}</h1>
-        <p>
-          {m.invitation.rules(
-            <Money units={draft.weeklyFee} speech={m} />,
-            <Money units={draft.weeklyCap} speech={m} />,
-            draft.agreedExpense,
-          )}
-        </p>
-        {draft.feeBps > 0 && <p>{m.invitation.feeNote(formatPercent(draft.feeBps, m))}</p>}
-        {invitation.kind === "closed" ? (
-          <>
-            <p role="status" className="font-semibold">
-              {invitation.why}
-            </p>
-            {invitation.link && <ButtonLink href={invitation.link.href}>{invitation.link.label}</ButtonLink>}
-          </>
-        ) : (
-          <>
-            {invitation.kind === "request" && invitation.why && (
+    <LocaleProvider locale={m.locale} country={m.country.code}>
+      <main lang={m.country.htmlLang[m.locale]} className="mx-auto grid max-w-[560px] gap-4 p-4 pt-8">
+        <div className="flex items-center justify-between">
+          <Logo />
+          <LanguageSwitch />
+        </div>
+        <Card className="grid gap-4">
+          <h1 className="text-2xl font-bold [font-stretch:87%]">{m.invitation.title(draft.creatorName, <em>{draft.name}</em>)}</h1>
+          <p>
+            {m.invitation.rules(
+              <Money units={draft.weeklyFee} speech={m} />,
+              <Money units={draft.weeklyCap} speech={m} />,
+              draft.agreedExpense,
+            )}
+          </p>
+          {draft.feeBps > 0 && <p>{m.invitation.feeNote(formatPercent(draft.feeBps, m))}</p>}
+          {invitation.kind === "closed" ? (
+            <>
               <p role="status" className="font-semibold">
                 {invitation.why}
               </p>
-            )}
-            <JoinForm
-              code={code}
-              loggedIn={user !== null}
-              label={invitation.kind === "join" ? m.invitation.join : invitation.again ? m.invitation.requestAgain : m.invitation.request}
-            />
-          </>
-        )}
-      </Card>
-      <p className="text-sm text-muted">{m.invitation.alreadyJoined(draft.members.map((member) => member.name).join(", "))}</p>
-    </main>
+              {invitation.link && <ButtonLink href={invitation.link.href}>{invitation.link.label}</ButtonLink>}
+            </>
+          ) : (
+            <>
+              {invitation.kind === "request" && invitation.why && (
+                <p role="status" className="font-semibold">
+                  {invitation.why}
+                </p>
+              )}
+              <JoinForm
+                code={code}
+                loggedIn={user !== null}
+                label={invitation.kind === "join" ? m.invitation.join : invitation.again ? m.invitation.requestAgain : m.invitation.request}
+              />
+            </>
+          )}
+        </Card>
+        <p className="text-sm text-muted">{m.invitation.alreadyJoined(draft.members.map((member) => member.name).join(", "))}</p>
+      </main>
+    </LocaleProvider>
   );
 }

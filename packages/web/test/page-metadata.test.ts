@@ -60,6 +60,7 @@ function screen(): FundScreen {
   return {
     fundId: "fund-1",
     block: 81_300_000n,
+    country: "AR",
     view,
     timeline: [],
     weekSummaries: [],

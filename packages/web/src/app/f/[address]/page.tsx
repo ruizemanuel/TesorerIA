@@ -37,10 +37,10 @@ export default async function FundPage({ params, searchParams }: { params: Promi
   if (!isAddress(address, { strict: false })) notFound();
   const user = await currentUser();
   if (user === null) redirect(`/entrar?next=${encodeURIComponent(safeNext(`/f/${address}`))}`);
-  const m = await getMessages();
   const locale = await getLocale();
   const screen = await loadFundScreen(address, user, { locale });
   if (screen === null) notFound();
+  const m = await getMessages(screen.country);
   const here = `/f/${screen.view.address}`;
   const chat = chatEnabled();
   const db = await getDb();
@@ -117,7 +117,7 @@ export default async function FundPage({ params, searchParams }: { params: Promi
   return (
     <>
       <RememberFund fund={screen.view.address} />
-      <FundScreenView screen={screen} user={user} panel={panel} previousBalance={previousBalance} chat={chat} keyChange={keyChange} />
+      <FundScreenView screen={screen} user={user} m={m} panel={panel} previousBalance={previousBalance} chat={chat} keyChange={keyChange} />
     </>
   );
 }

@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import type { CurrentUser } from "../lib/current-user";
-import { getMessages } from "../lib/i18n/server";
+import type { Messages } from "../lib/i18n/messages";
 import type { FundScreen } from "../lib/read-fund";
 import { splitYourTurn } from "../lib/timeline";
 import { AgentButton, TabBar, TopBar } from "./bars";
@@ -26,9 +26,10 @@ const DESKTOP_LATEST = 8;
  * The inicio (spec, 9.2): one column with the bottom bar up to 1023 px, 16 px from the edges and 560 px wide at
  * most; from 1024 px, the top bar and two columns, the fund on the left (380 px) and the movements on the right.
  */
-export async function FundScreenView({
+export function FundScreenView({
   screen,
   user,
+  m,
   panel,
   previousBalance,
   chat = false,
@@ -36,13 +37,14 @@ export async function FundScreenView({
 }: {
   screen: FundScreen;
   user: CurrentUser | null;
+  /** The page's words, for the fund's country (screen.country). */
+  m: Messages;
   panel?: ReactNode;
   previousBalance?: bigint;
   chat?: boolean;
   /** The member's request to swap the passkey of the old site for one of this one (spec, 9.5). Not for a public view. */
   keyChange?: KeyChangeAsk;
 }) {
-  const m = await getMessages();
   const { view, timeline, publicView } = screen;
   const userName = publicView ? undefined : user?.name;
   // What waits for the viewer goes up to Te toca (spec, 9.8), and the latest show the rest, without repeating it.

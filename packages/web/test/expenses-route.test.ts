@@ -1,10 +1,12 @@
+import { eq } from "drizzle-orm";
 import { getAddress } from "viem";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AGENT_LOCK, type MakeContext } from "../src/lib/agent-runner";
+import { COUNTRIES } from "../src/lib/countries";
 import type { CurrentUser } from "../src/lib/current-user";
 import type { Db } from "../src/lib/db/client";
 import { acquireLock } from "../src/lib/db/lock";
-import { expenses } from "../src/lib/db/schema";
+import { expenses, funds } from "../src/lib/db/schema";
 import { fakeAgent } from "./support/agent";
 import { addLiveFund, addUser, testDb } from "./support/db";
 import { ANA, BETO, FUND, WARS, snapshot } from "./support/fixtures";
@@ -85,6 +87,21 @@ describe("POST /api/funds/:address/expenses", () => {
     expect(await (await english("45,000")).json()).toEqual({ error: "Log in with your passkey." });
     state.user = asUser(await addUser(db, "Dani"));
     expect(await (await english("45,000")).json()).toEqual({ error: "We couldn't find that fund." });
+  });
+
+  it("reads a Mexican fund's amount the Mexican way", async () => {
+    // A wMXN fund without a dollar, within the agent's cap for it: the fund's row is what says how its amounts are written.
+    const MXN = COUNTRIES.MX.currency.token;
+    await db.update(funds).set({ version: 2, currency: MXN, balanceCap: 5_000n * WARS }).where(eq(funds.address, FUND));
+    const mexican = snapshot({ version: 2, currency: MXN, dollar: null, pool: null, balanceCap: 5_000n * WARS, currencyBalance: 4_000n * WARS });
+    state.makeContext = fakeAgent({ snapshot: () => mexican }).makeContext;
+
+    const ok = await expense({ kind: "agreed", amount: "1,000", note: "Cancha" });
+    expect(ok.status).toBe(200);
+    expect((await db.select().from(expenses)).map((kept) => kept.amount)).toEqual([1_000n * 10n ** 18n]);
+    const bad = await expense({ clientKey: "k2", kind: "agreed", amount: "1.000", note: "Cancha" });
+    expect(bad.status).toBe(400);
+    expect(((await bad.json()) as { error: string }).error).toContain("10,000.50"); // the example in Mexico's format (errors.amountFormat)
   });
 
   it("keeps a contribution given back, which the agent always puts to the vote (spec, 7.3)", async () => {

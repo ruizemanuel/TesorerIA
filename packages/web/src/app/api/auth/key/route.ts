@@ -5,8 +5,7 @@ import { currentUser } from "../../../../lib/current-user";
 import { getDb } from "../../../../lib/db/client";
 import { env } from "../../../../lib/env";
 import { jsonError, readJson } from "../../../../lib/http";
-import { localeOf } from "../../../../lib/i18n/locales";
-import { messagesFor } from "../../../../lib/i18n/messages";
+import { messagesOf } from "../../../../lib/i18n/request";
 import { startKeyChange } from "../../../../lib/key-change";
 import { attestationSchema, hexSchema } from "../../../../lib/schemas";
 import { getSession } from "../../../../lib/session";
@@ -27,7 +26,7 @@ const KeyChangeStart = z.object({
 
 /** Keeps the passkey the member just made as their pending one (spec, 9.5), and answers its key: the swap's. */
 export async function POST(request: Request) {
-  const m = messagesFor(localeOf(request), "AR");
+  const m = messagesOf(request);
   const user = await currentUser();
   if (user === null) return jsonError(401, m.errors.logIn);
   const body = await readJson(request, KeyChangeStart);

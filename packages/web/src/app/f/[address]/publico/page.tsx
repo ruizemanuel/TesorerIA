@@ -19,12 +19,12 @@ export default async function PublicFundPage({ params }: { params: Promise<{ add
   await connection(); // it reads the database and the chain, so it's never prerendered at build time
   const { address } = await params;
   if (!isAddress(address, { strict: false })) notFound();
-  const m = await getMessages();
   const locale = await getLocale();
   const screen = await loadPublicFundScreen(address, locale);
   if (screen === null) notFound();
+  const m = await getMessages(screen.country);
   const receipts = receiptPanels(screen.timeline, new Date(), m);
   const summaries = summaryPanels(screen.weekSummaries, { shareable: false });
   const panel = <PanelHost closeHref={`/f/${screen.view.address}/publico`} receipts={receipts} summaries={summaries} />;
-  return <FundScreenView screen={screen} user={null} panel={panel} />;
+  return <FundScreenView screen={screen} user={null} m={m} panel={panel} />;
 }

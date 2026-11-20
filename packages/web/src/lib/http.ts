@@ -1,6 +1,5 @@
 import type { z } from "zod";
-import { localeOf } from "./i18n/locales";
-import { messagesFor } from "./i18n/messages";
+import { messagesOf } from "./i18n/request";
 
 export function jsonError(status: number, error: string): Response {
   return Response.json({ error }, { status });
@@ -14,14 +13,15 @@ export function jsonError(status: number, error: string): Response {
  * With `maxBytes`, a body above it is refused with 413, whether it says so in its content-length or not (a chunked
  * body has none, and a header can lie): the declared length is checked first, then the text actually read.
  *
- * It answers in the request's language (`localeOf`); only the 415, which no person ever sees, stays in technical English.
+ * It answers in the request's language and country (`messagesOf`); only the 415, which no person ever sees, stays in
+ * technical English.
  */
 export async function readJson<T>(
   request: Request,
   schema: z.ZodType<T>,
   { maxBytes }: { maxBytes?: number } = {},
 ): Promise<{ ok: true; value: T } | { ok: false; response: Response }> {
-  const m = messagesFor(localeOf(request), "AR");
+  const m = messagesOf(request);
   if (!(request.headers.get("content-type") ?? "").includes("application/json")) {
     return { ok: false, response: jsonError(415, "Expected application/json") };
   }

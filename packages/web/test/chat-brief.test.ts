@@ -27,7 +27,7 @@ function screen(timeline: TimelineItem[] = [], contributed = [30_000n * WARS, 20
     viewer: ANA,
     m: es,
   });
-  return { fundId: "fund", block: BLOCK, view, timeline, viewerIsMember: true, publicView: false, contributionOnItsWay: false, cashOutOnItsWay: false, weekSummaries: [], invite: null, proposalsLeft: null, giveBackMax: null };
+  return { fundId: "fund", block: BLOCK, country: "AR", view, timeline, viewerIsMember: true, publicView: false, contributionOnItsWay: false, cashOutOnItsWay: false, weekSummaries: [], invite: null, proposalsLeft: null, giveBackMax: null };
 }
 
 const item = (n: number, change: Partial<TimelineItem> = {}): TimelineItem => ({
@@ -166,7 +166,7 @@ function screenIn(
     viewer,
     m,
   });
-  return { fundId: "fund", block: BLOCK, view, timeline, viewerIsMember: true, publicView: false, contributionOnItsWay: false, cashOutOnItsWay: false, weekSummaries: [], invite: null, proposalsLeft: null, giveBackMax: null };
+  return { fundId: "fund", block: BLOCK, country: m.country.code, view, timeline, viewerIsMember: true, publicView: false, contributionOnItsWay: false, cashOutOnItsWay: false, weekSummaries: [], invite: null, proposalsLeft: null, giveBackMax: null };
 }
 
 const ARS = (pesos: number) => formatMoney(BigInt(pesos) * WARS, en);
