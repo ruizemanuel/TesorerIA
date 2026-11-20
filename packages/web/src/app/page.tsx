@@ -88,7 +88,7 @@ export default async function Home() {
       <Card className="grid gap-3">
         <h2 className="text-lg font-bold [font-stretch:87%]">{m.home.howItWorks}</h2>
         <ol className="grid gap-2">
-          {m.home.steps.map((step, i) => (
+          {m.home.steps(true).map((step, i) => (
             <li key={step} className="flex gap-3">
               <span className="w-6 text-xl font-bold text-num [font-stretch:75%]">{i + 1}</span>
               <span>{step}</span>

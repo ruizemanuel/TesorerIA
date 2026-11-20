@@ -1,4 +1,4 @@
-import { MAX_PESOS, formatMoney, parseMoney } from "./format";
+import { MAX_PESOS, amountExamples, formatMoney, parseMoney } from "./format";
 import { DEFAULT_BALANCE_CAP } from "./fund-abi";
 import type { Messages } from "./i18n/messages";
 
@@ -44,9 +44,9 @@ export function readDraft(
   m: Messages,
 ): { ok: true; draft: DraftSettings } | { ok: false; error: string } {
   const weeklyFee = parseMoney(input.weeklyFee, m);
-  if (weeklyFee === null) return { ok: false, error: m.checks.feeUnreadable };
+  if (weeklyFee === null) return { ok: false, error: m.checks.feeUnreadable(...amountExamples(10_000n, m)) };
   const weeklyCap = parseMoney(input.weeklyCap, m);
-  if (weeklyCap === null) return { ok: false, error: m.checks.capUnreadable };
+  if (weeklyCap === null) return { ok: false, error: m.checks.capUnreadable(...amountExamples(60_000n, m)) };
   const draft = { name: input.name.trim(), agreedExpense: input.agreedExpense.trim(), weeklyFee, weeklyCap };
   const problem = draftProblem(draft, m);
   return problem === null ? { ok: true, draft } : { ok: false, error: problem };

@@ -79,6 +79,7 @@ export function ContributePanel({
   contributionOnItsWay: boolean;
 }) {
   const m = useMessages();
+  const words = m.country.words[m.locale];
   const router = useRouter();
   const { refresh } = useRefresh();
   // A fund with no dollar takes its currency alone.
@@ -211,7 +212,8 @@ export function ContributePanel({
           </p>
         ) : (
           <div className="grid gap-2">
-            <p>{m.contribute.ripioWithdraw}</p>
+            {/* Ripio's app only where the country has it: elsewhere (Mexico), its ramp alone. */}
+            <p>{m.country.ripioApp ? m.contribute.ripioWithdraw(words.token) : m.contribute.rampOnly(words.token)}</p>
             <ButtonLink
               href={rampUrl(account, rampAmount)}
               target="_blank"

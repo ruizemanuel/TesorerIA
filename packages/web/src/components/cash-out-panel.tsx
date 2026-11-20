@@ -28,6 +28,7 @@ const ADDRESS = "narrow break-all rounded-[14px] bg-surface p-3 text-center text
  */
 export function CashOutPanel({ fund, account, cashOutOnItsWay }: { fund: Address; account: Address; cashOutOnItsWay: boolean }) {
   const m = useMessages();
+  const words = m.country.words[m.locale];
   const { refresh } = useRefresh();
   // `changing`: right after a pass, until the account is read again, the balances are the old ones.
   const { balances, failed, changing } = useAccountBalances(account, LOOK_EVERY_MS);
@@ -89,7 +90,7 @@ export function CashOutPanel({ fund, account, cashOutOnItsWay }: { fund: Address
     <div className="grid gap-4">
       {passed !== null && (
         <p role="status" className="rounded-[14px] bg-surface p-4 font-semibold">
-          {m.cashOut.passed(<span className="money">{formatMoney(passed, m)}</span>)}
+          {m.cashOut.passed(<span className="money">{formatMoney(passed, m)}</span>, m.country.ripioApp)}
         </p>
       )}
 
@@ -97,7 +98,7 @@ export function CashOutPanel({ fund, account, cashOutOnItsWay }: { fund: Address
           as Aportar's "Cargar pesos con Ripio": the pass below stays the panel's one primary (spec, 9.1). */}
       {saved !== undefined && (
         <div className="grid gap-3">
-          <p>{asking ? m.cashOut.sellIntro : m.cashOut.sellIntroSaved}</p>
+          <p>{asking ? m.cashOut.sellIntro(words.bankAccount) : m.cashOut.sellIntroSaved}</p>
           <ButtonLink href={offRampUrl(amount ?? undefined)} target="_blank" rel="noreferrer" variant="secondary">
             {m.cashOut.sellWithRipio}
           </ButtonLink>
@@ -106,7 +107,8 @@ export function CashOutPanel({ fund, account, cashOutOnItsWay }: { fund: Address
 
       {saved === undefined ? null : asking ? (
         <div className="grid gap-3">
-          <p>{m.cashOut.depositInstructions}</p>
+          {/* The app's deposit address, only where the country has Ripio's app. */}
+          {m.country.ripioApp && <p>{m.cashOut.depositInstructions(words.token)}</p>}
           <NetworkWarning />
           <label className="grid gap-1">
             <span className="font-semibold">{m.cashOut.addressLabel}</span>

@@ -78,7 +78,7 @@ export function fundBrief(screen: FundScreen, viewerName: string, now: Date, m: 
   const pesos = (units: bigint) => formatMoney(units, m);
   return [
     `<${BRIEF_TAG}>`,
-    brief.now(today, String(view.week + 1n)),
+    brief.now(today, String(view.week + 1n), m.country.words[m.locale].timeName),
     `${brief.fund(briefText(view.name, m), pesos(view.balance))}${view.closed ? brief.closed : ""}`,
     brief.rules(
       pesos(view.weeklyFee),

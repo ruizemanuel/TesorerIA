@@ -235,7 +235,10 @@ describe("what Aportar reads and writes in English", () => {
     expect(moneyText(10_000n * WARS_UNIT, en)).toBe("10,000");
     expect(usdtText(6_260_000n, en)).toBe("6.26");
     expect(readPesosAmount("10,000", { held: 20_000n * WARS_UNIT, room: null, cap: DEFAULT_BALANCE_CAP }, en)).toEqual({ ok: true, amount: 10_000n * WARS_UNIT });
-    expect(readPesosAmount("10.000", { held: 20_000n * WARS_UNIT, room: null, cap: DEFAULT_BALANCE_CAP }, en)).toEqual({ ok: false, error: en.errors.amountFormat });
+    expect(readPesosAmount("10.000", { held: 20_000n * WARS_UNIT, room: null, cap: DEFAULT_BALANCE_CAP }, en)).toEqual({
+      ok: false,
+      error: "Write it like 10,000 or 10,000.50.",
+    });
     expect(readPesosAmount("30,000", { held: 20_000n * WARS_UNIT, room: null, cap: DEFAULT_BALANCE_CAP }, en)).toEqual({
       ok: false,
       error: `Your account holds ARS${NBSP}20,000.`,

@@ -7,6 +7,7 @@ import { post } from "../lib/client/api";
 import { userMessage } from "../lib/client/errors";
 import { createAccount } from "../lib/client/passkey";
 import { withAccount } from "../lib/client/sign-up";
+import { moneyText } from "../lib/contribute";
 import { useMessages } from "../lib/i18n/client";
 import { PersonFields, personFrom } from "./person-fields";
 import { Button, FIELD } from "./ui";
@@ -56,7 +57,7 @@ export function CreateFundForm({ loggedIn }: { loggedIn: boolean }) {
       </label>
       <label className="grid gap-1">
         <span className="font-semibold">{m.create.weeklyFee}</span>
-        <input className={`${FIELD} money`} name="weeklyFee" required inputMode="decimal" defaultValue={m.create.defaults.weeklyFee} />
+        <input className={`${FIELD} money`} name="weeklyFee" required inputMode="decimal" defaultValue={moneyText(m.country.defaults.weeklyFee, m)} />
       </label>
       <label className="grid gap-1">
         <span className="font-semibold">{m.create.agreedExpense}</span>
@@ -65,7 +66,7 @@ export function CreateFundForm({ loggedIn }: { loggedIn: boolean }) {
       </label>
       <label className="grid gap-1">
         <span className="font-semibold">{m.create.weeklyCap}</span>
-        <input className={`${FIELD} money`} name="weeklyCap" required inputMode="decimal" defaultValue={m.create.defaults.weeklyCap} />
+        <input className={`${FIELD} money`} name="weeklyCap" required inputMode="decimal" defaultValue={moneyText(m.country.defaults.weeklyCap, m)} />
       </label>
       <Button type="submit" disabled={busy}>
         {busy ? m.create.creating : hasAccount ? m.create.submit : m.create.submitWithPasskey}

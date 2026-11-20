@@ -1,15 +1,21 @@
 import { type ReactNode, createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
+import { moneyText } from "../src/lib/contribute";
 import { COUNTRIES } from "../src/lib/countries";
-import { NBSP, WARS_UNIT, formatPercent, parseMoney } from "../src/lib/format";
+import { NBSP, WARS_UNIT, amountExamples, formatAmount, formatPercent, parseMoney } from "../src/lib/format";
 import { en } from "../src/lib/i18n/en";
 import { es } from "../src/lib/i18n/es";
 import { LOCALES, LOCALE_NAMES } from "../src/lib/i18n/locales";
-import { DICTIONARIES, type Dictionary, messagesFor } from "../src/lib/i18n/messages";
+import { ALL_DICTIONARIES, DICTIONARIES, type Dictionary, messagesFor } from "../src/lib/i18n/messages";
+import { neutral } from "../src/lib/i18n/neutral";
 
 /** The dictionaries with Argentina, which every format takes: what a page of an Argentine fund passes as `m`. */
 const [AR_ES, AR_EN] = [messagesFor("es", "AR"), messagesFor("en", "AR")];
+/** The same with Mexico: the neutral Spanish, and English with Mexico's words. */
+const [MX_ES, MX_EN] = [messagesFor("es", "MX"), messagesFor("en", "MX")];
+/** Each country's words, in each language. */
+const [AR, MX] = [COUNTRIES.AR.words, COUNTRIES.MX.words];
 
 /** Every path to a leaf of a dictionary, so a missing or extra sentence shows by name. */
 function paths(value: unknown, prefix = ""): string[] {
@@ -25,6 +31,18 @@ describe("the dictionaries", () => {
     expect(messagesFor("es", "AR")).toBe(AR_ES);
     expect(Object.keys(DICTIONARIES).sort()).toEqual([...LOCALES].sort());
     for (const locale of LOCALES) expect(DICTIONARIES[locale].locale).toBe(locale);
+    expect(ALL_DICTIONARIES).toEqual([es, neutral, en]);
+  });
+
+  it("picks the neutral dictionary for Mexico and Rioplatense for Argentina", () => {
+    expect(messagesFor("es", "MX").meta.description).toBe("El dinero del grupo, sin tesorero.");
+    expect(messagesFor("es", "AR").meta.description).toBe("La plata del grupo, sin tesorero.");
+    expect(messagesFor("es", "MX").common.confirm).toBe("Confirma con tu huella, tu cara o el PIN");
+    expect(MX_ES).toEqual({ ...neutral, country: COUNTRIES.MX });
+    expect(MX_EN).toEqual({ ...en, country: COUNTRIES.MX });
+    expect(messagesFor("es", "MX")).toBe(MX_ES);
+    expect(neutral.locale).toBe("es");
+    expect([neutral.meta.invitationDescription, neutral.common.you]).toEqual(["Únete al fondo del grupo en TesorerIA.", " (tú)"]);
   });
 
   it("carries the country with the dictionary", () => {
@@ -42,6 +60,64 @@ describe("the dictionaries", () => {
     }
   });
 
+  it("has the same keys and shapes in the neutral dictionary as in Rioplatense", () => {
+    expect(paths(neutral)).toEqual(paths(es));
+    for (const path of paths(es)) {
+      const at = (dictionary: unknown) => path.split(".").reduce<unknown>((value, key) => (value as Record<string, unknown>)[key], dictionary);
+      expect(typeof at(neutral), path).toBe(typeof at(es));
+      // A sentence with values takes as many in both.
+      if (typeof at(es) === "function") expect((at(neutral) as () => unknown).length, path).toBe((at(es) as () => unknown).length);
+    }
+  });
+
+  it("says Argentina's words exactly as before", () => {
+    expect(es.cashOut.sellIntro(AR.es.bankAccount)).toBe(
+      "Con Vender con Ripio cargás tu CBU, CVU o alias, y Ripio te da una dirección en la red Celo. Pegala acá y mandá: los pesos llegan a tu banco.",
+    );
+    expect(en.cashOut.sellIntro(AR.en.bankAccount)).toBe(
+      "With Sell with Ripio you enter your CBU, CVU or alias, and Ripio gives you an address on the Celo network. Paste it here and send: the pesos reach your bank.",
+    );
+    expect(es.contribute.ripioWithdraw(AR.es.token)).toBe("En la app de Ripio, retirá wARS por la red Celo a tu cuenta del fondo. O cargalos directo:");
+    expect(en.contribute.ripioWithdraw(AR.en.token)).toBe("In the Ripio app, withdraw wARS over the Celo network to your fund account. Or load them directly:");
+    expect(es.cashOut.depositInstructions(AR.es.token)).toBe(
+      "O desde la app de Ripio: tocá Depositar, elegí wARS y la red Celo, y copiá la dirección. Ahí los vendés 1:1.",
+    );
+    expect(en.cashOut.depositInstructions(AR.en.token)).toBe(
+      "Or from the Ripio app: tap Depositar (Deposit), pick wARS and the Celo network, and copy the address. You sell them there 1:1.",
+    );
+    expect(es.chat.brief.now("jueves, 19 de noviembre de 2026, 10:00", "6", AR.es.timeName)).toBe(
+      "Ahora es jueves, 19 de noviembre de 2026, 10:00, hora de Argentina. El fondo va por su semana 6.",
+    );
+    expect(en.chat.brief.now("Thursday, November 19, 2026 at 10:00", "6", AR.en.timeName)).toBe(
+      "It's Thursday, November 19, 2026 at 10:00, Argentina time. The fund is in week 6.",
+    );
+    // The examples of how to write an amount, as Argentina writes them in each language.
+    expect(es.errors.amountFormat(...amountExamples(10_000n, AR_ES))).toBe("Escribilo como 10.000 o 10.000,50.");
+    expect(en.errors.amountFormat(...amountExamples(10_000n, AR_EN))).toBe("Write it like 10,000 or 10,000.50.");
+    expect(es.checks.feeUnreadable(...amountExamples(10_000n, AR_ES))).toBe("No entendimos la cuota. Escribila como 10.000 o 10.000,50.");
+    expect(en.checks.feeUnreadable(...amountExamples(10_000n, AR_EN))).toBe("We couldn't read the weekly dues. Write them like 10,000 or 10,000.50.");
+    expect(es.checks.capUnreadable(...amountExamples(60_000n, AR_ES))).toBe("No entendimos el tope. Escribilo como 60.000 o 60.000,50.");
+    expect(en.checks.capUnreadable(...amountExamples(60_000n, AR_EN))).toBe("We couldn't read the weekly cap. Write it like 60,000 or 60,000.50.");
+  });
+
+  it("asks Mexico for the CLABE and names wMXN", () => {
+    const mx = MX.es;
+    expect(neutral.cashOut.sellIntro(mx.bankAccount)).toContain("CLABE");
+    expect(neutral.cashOut.sellIntro(mx.bankAccount)).not.toMatch(/CBU|CVU|alias/);
+    expect(neutral.contribute.rampOnly(mx.token)).toBe("Compra wMXN con Ripio y llegan directo a tu cuenta del fondo.");
+    expect(es.contribute.rampOnly(AR.es.token)).toBe("Comprá wARS con Ripio y llegan directo a tu cuenta del fondo.");
+    expect(en.contribute.rampOnly(MX.en.token)).toBe("Buy wMXN with Ripio and they land straight in your fund account.");
+    expect(en.cashOut.sellIntro(MX.en.bankAccount)).toBe(
+      "With Sell with Ripio you enter your CLABE, and Ripio gives you an address on the Celo network. Paste it here and send: the pesos reach your bank.",
+    );
+    expect(neutral.chat.brief.now("jueves, 19 de noviembre de 2026, 10:00", "6", mx.timeName)).toContain(", hora de Ciudad de México.");
+    expect(en.chat.brief.now("Thursday", "6", MX.en.timeName)).toBe("It's Thursday, Mexico City time. The fund is in week 6.");
+    // Mexico writes the examples its own way, in both languages.
+    expect(amountExamples(10_000n, MX_ES)).toEqual(["10,000", "10,000.50"]);
+    expect(neutral.errors.amountFormat(...amountExamples(10_000n, MX_ES))).toBe("Escríbelo como 10,000 o 10,000.50.");
+    expect(en.checks.capUnreadable(...amountExamples(60_000n, MX_EN))).toBe("We couldn't read the weekly cap. Write it like 60,000 or 60,000.50.");
+  });
+
   it("say the page's description in each language", () => {
     expect(es.meta.description).toBe("La plata del grupo, sin tesorero.");
     expect(en.meta.description).toBe("The group's treasury, without a treasurer.");
@@ -52,11 +128,19 @@ describe("the dictionaries", () => {
   });
 
   it("offer the defaults of a new fund in each language's own way of writing amounts", () => {
-    expect(parseMoney(es.create.defaults.weeklyFee, AR_ES)).toBe(10_000n * WARS_UNIT);
-    expect(parseMoney(en.create.defaults.weeklyFee, AR_EN)).toBe(10_000n * WARS_UNIT);
-    expect(parseMoney(es.create.defaults.weeklyCap, AR_ES)).toBe(60_000n * WARS_UNIT);
-    expect(parseMoney(en.create.defaults.weeklyCap, AR_EN)).toBe(60_000n * WARS_UNIT);
-    expect(es.create.defaults.agreedExpense).toBe("la cancha");
+    // What the form starts with (create-fund-form.tsx): the country's amounts, as the field writes them.
+    const { weeklyFee, weeklyCap } = COUNTRIES.AR.defaults;
+    expect([moneyText(weeklyFee, AR_ES), moneyText(weeklyCap, AR_ES)]).toEqual(["10.000", "60.000"]);
+    expect([moneyText(weeklyFee, AR_EN), moneyText(weeklyCap, AR_EN)]).toEqual(["10,000", "60,000"]);
+    expect(parseMoney(moneyText(weeklyFee, AR_ES), AR_ES)).toBe(10_000n * WARS_UNIT);
+    expect(parseMoney(moneyText(weeklyFee, AR_EN), AR_EN)).toBe(10_000n * WARS_UNIT);
+    expect(parseMoney(moneyText(weeklyCap, AR_ES), AR_ES)).toBe(60_000n * WARS_UNIT);
+    expect(parseMoney(moneyText(weeklyCap, AR_EN), AR_EN)).toBe(60_000n * WARS_UNIT);
+    const mexico = COUNTRIES.MX.defaults;
+    expect([moneyText(mexico.weeklyFee, MX_ES), moneyText(mexico.weeklyCap, MX_ES)]).toEqual(["100", "600"]);
+    // The dictionaries keep only the words: the amounts are the country's.
+    expect(es.create.defaults).toEqual({ fundNamePlaceholder: "Fútbol de los jueves", agreedExpense: "la cancha" });
+    expect(en.create.defaults).toEqual({ fundNamePlaceholder: "Thursday football", agreedExpense: "the pitch" });
   });
 
   it("put the pieces of a sentence where it says, in Spanish with the words it always had", () => {
@@ -127,16 +211,23 @@ describe("the dictionaries", () => {
   });
 
   it("say on the portada how it works, with where the pesos and the USDT come from", () => {
-    expect(es.home.steps).toEqual([
+    expect(es.home.steps(true)).toEqual([
       "Armás el fondo y sumás a tus amigos con un link.",
       "Cada uno aporta su cuota semanal, en pesos desde Ripio o en USDT desde cualquier exchange.",
       "El agente devuelve lo acordado, lleva la cuenta de quién debe, y lo demás se vota.",
     ]);
-    expect(en.home.steps).toEqual([
+    expect(en.home.steps(true)).toEqual([
       "You set up the fund and add your friends with a link.",
       "Each one puts in their weekly dues, in pesos from Ripio or in USDT from any exchange.",
       "The agent pays back what was agreed, keeps track of who is behind, and everything else is voted on.",
     ]);
+    // Without a dollar, only the second step changes: the pesos, and no USDT.
+    for (const m of [es, neutral, en]) {
+      const [withDollar, without] = [m.home.steps(true), m.home.steps(false)];
+      expect([without[0], without[2]]).toEqual([withDollar[0], withDollar[2]]);
+      expect(withDollar[1]).toContain("USDT");
+      expect(without[1]).not.toContain("USDT");
+    }
   });
 
   it("say where you stand with the amount set apart, in each language", () => {
@@ -239,8 +330,8 @@ describe("the dictionaries", () => {
     expect(html(en.contribute.binanceMinimumLeftover(money("5 USDT")))).toBe(
       'If you withdraw it from Binance, the minimum is <span class="money">5 USDT</span>: whatever is left over stays in your account for next time.',
     );
-    expect(es.contribute.ripioWithdraw).toBe("En la app de Ripio, retirá wARS por la red Celo a tu cuenta del fondo. O cargalos directo:");
-    expect(en.contribute.ripioWithdraw).toBe("In the Ripio app, withdraw wARS over the Celo network to your fund account. Or load them directly:");
+    expect(es.contribute.ripioWithdraw(AR.es.token)).toBe("En la app de Ripio, retirá wARS por la red Celo a tu cuenta del fondo. O cargalos directo:");
+    expect(en.contribute.ripioWithdraw(AR.en.token)).toBe("In the Ripio app, withdraw wARS over the Celo network to your fund account. Or load them directly:");
     expect([es.contribute.loadWithRipio, en.contribute.loadWithRipio]).toEqual(["Cargar pesos con Ripio", "Load pesos with Ripio"]);
     expect(es.contribute.onItsWay).toBe("Tu aporte está en camino. Cuando se confirme, lo ves en el fondo.");
     expect(es.contribute.nothingYet).toBe("Todavía no llegó nada. Cuando llegue, aparece acá; puede tardar unos minutos.");
@@ -252,7 +343,7 @@ describe("the dictionaries", () => {
     expect(en.contribute.submit("ARS 10,000")).toBe("Contribute ARS 10,000");
     expect(html(es.contribute.capReachedNotice(money("$ 450.000")))).toBe('El fondo llegó a su tope de <span class="money">$ 450.000</span>: no entra más.');
     // The same sentence, said under the field as plain text and in the panel with its amount set apart.
-    for (const m of [es, en]) expect(html(m.contribute.capReachedNotice("X"))).toBe(m.contribute.capReached("X"));
+    for (const m of [es, neutral, en]) expect(html(m.contribute.capReachedNotice("X"))).toBe(m.contribute.capReached("X"));
     expect(es.contribute.roomLeft("$ 10.000", "$ 450.000")).toBe("Al fondo le entran hasta $ 10.000 más, porque tiene un tope de $ 450.000.");
     expect(es.contribute.usdtFormat).toBe("Escribilo como 6 o 6,25.");
     expect(es.contribute.covers("$ 10.000")).toBe("Cubre los $ 10.000, al precio de ahora.");
@@ -264,8 +355,10 @@ describe("the dictionaries", () => {
     expect([es.expense.other, en.expense.other]).toEqual(["Otro gasto (se vota)", "Other expense (voted on)"]);
     expect([es.expense.amountLabel, es.expense.noteLabel, es.expense.submit]).toEqual(["Cuánto pagaste", "Nota (opcional)", "Cargar el gasto"]);
     expect([en.expense.amountLabel, en.expense.noteLabel, en.expense.submit]).toEqual(["How much you paid", "Note (optional)", "Add the expense"]);
-    expect([es.expense.amountPlaceholder, es.expense.notePlaceholder]).toEqual(["45.000", "La cancha del jueves"]);
-    expect([en.expense.amountPlaceholder, en.expense.notePlaceholder]).toEqual(["45,000", "Thursday's pitch"]);
+    // The amount's example is the country's format (expense-panel.tsx), as the dictionary had it written.
+    expect([formatAmount(45_000n * WARS_UNIT, AR_ES), es.expense.notePlaceholder]).toEqual(["45.000", "La cancha del jueves"]);
+    expect([formatAmount(45_000n * WARS_UNIT, AR_EN), en.expense.notePlaceholder]).toEqual(["45,000", "Thursday's pitch"]);
+    expect(formatAmount(45_000n * WARS_UNIT, MX_ES)).toBe("45,000");
     expect(html(es.expense.twin(money("$ 5.000")))).toBe('Hace unos minutos cargaste un gasto de <span class="money">$ 5.000</span>. ¿Es otro gasto igual?');
     expect(html(en.expense.twin(money("ARS 5,000")))).toBe(
       'A few minutes ago you added an expense of <span class="money">ARS 5,000</span>. Is this another expense just like it?',
@@ -297,18 +390,23 @@ describe("the dictionaries", () => {
     ]);
     // Pasar a pesos
     // After a pass, for either address: Ripio's sale pays the bank by itself; the app's deposit waits for a sale there.
-    expect(html(es.cashOut.passed(money("$ 2.000")))).toBe(
+    expect(html(es.cashOut.passed(money("$ 2.000"), COUNTRIES.AR.ripioApp))).toBe(
       'Pasaste <span class="money">$ 2.000</span> a Ripio. Si la dirección es de Vender con Ripio, los pesos llegan solos a tu banco y Ripio te avisa por mail. Si es de la app, vendelos ahí 1:1.',
     );
-    expect(html(en.cashOut.passed(money("ARS 2,000")))).toBe(
+    expect(html(en.cashOut.passed(money("ARS 2,000"), COUNTRIES.AR.ripioApp))).toBe(
       'You cashed out <span class="money">ARS 2,000</span> to Ripio. If the address is from Sell with Ripio, the pesos reach your bank on their own and Ripio emails you. If it\'s from the app, sell them there 1:1.',
     );
+    // Where there's no Ripio app (Mexico), the app's sentence isn't said.
+    expect(html(en.cashOut.passed(money("MXN 2,000"), COUNTRIES.MX.ripioApp))).toBe(
+      'You cashed out <span class="money">MXN 2,000</span> to Ripio. If the address is from Sell with Ripio, the pesos reach your bank on their own and Ripio emails you.',
+    );
+    for (const m of [es, neutral, en]) expect(html(m.cashOut.passed("X", false))).not.toMatch(/\bapp\b/);
     // Where the address comes from: Ripio's sale first (5/11), the app's deposit as the other way.
-    expect([es.cashOut.sellIntro, es.cashOut.sellWithRipio]).toEqual([
+    expect([es.cashOut.sellIntro(AR.es.bankAccount), es.cashOut.sellWithRipio]).toEqual([
       "Con Vender con Ripio cargás tu CBU, CVU o alias, y Ripio te da una dirección en la red Celo. Pegala acá y mandá: los pesos llegan a tu banco.",
       "Vender con Ripio",
     ]);
-    expect([en.cashOut.sellIntro, en.cashOut.sellWithRipio]).toEqual([
+    expect([en.cashOut.sellIntro(AR.en.bankAccount), en.cashOut.sellWithRipio]).toEqual([
       "With Sell with Ripio you enter your CBU, CVU or alias, and Ripio gives you an address on the Celo network. Paste it here and send: the pesos reach your bank.",
       "Sell with Ripio",
     ]);
@@ -319,8 +417,8 @@ describe("the dictionaries", () => {
     expect(en.cashOut.sellIntroSaved).toBe(
       "With Sell with Ripio the pesos go straight to your bank: Ripio gives you an address on the Celo network. Tap Change and paste it here.",
     );
-    expect(es.cashOut.depositInstructions).toBe("O desde la app de Ripio: tocá Depositar, elegí wARS y la red Celo, y copiá la dirección. Ahí los vendés 1:1.");
-    expect(en.cashOut.depositInstructions).toBe(
+    expect(es.cashOut.depositInstructions(AR.es.token)).toBe("O desde la app de Ripio: tocá Depositar, elegí wARS y la red Celo, y copiá la dirección. Ahí los vendés 1:1.");
+    expect(en.cashOut.depositInstructions(AR.en.token)).toBe(
       "Or from the Ripio app: tap Depositar (Deposit), pick wARS and the Celo network, and copy the address. You sell them there 1:1.",
     );
     expect([es.cashOut.addressLabel, es.cashOut.savedAddress, es.cashOut.change]).toEqual(["Tu dirección de Ripio", "A tu cuenta de Ripio", "Cambiar"]);
@@ -400,8 +498,10 @@ describe("the dictionaries", () => {
       notFound: en.errors.fundNotFound,
     });
     // The route answers with the dictionary's other words where it doesn't have the chat's: the same sentences.
-    expect(es.chat.badRequest).toBe(es.errors.badRequest);
-    expect(es.chat.notFound).toBe(es.errors.fundNotFound);
+    for (const m of [es, neutral]) {
+      expect(m.chat.badRequest).toBe(m.errors.badRequest);
+      expect(m.chat.notFound).toBe(m.errors.fundNotFound);
+    }
     expect([es.chat.remaining(1), es.chat.remaining(5)]).toEqual(["Te queda 1 mensaje por hoy.", "Te quedan 5 mensajes por hoy."]);
     expect([en.chat.remaining(1), en.chat.remaining(5)]).toEqual(["You have 1 message left today.", "You have 5 messages left today."]);
     expect([es.chat.greeting("Ana"), en.chat.greeting("Ana")]).toEqual(["Hola, Ana. Preguntame lo que quieras del fondo.", "Hi, Ana. Ask me anything about the fund."]);
@@ -446,8 +546,8 @@ describe("the dictionaries", () => {
     expect([s.agent, s.group, s.account, s.youVoted, s.closed]).toEqual(["El agente", "El grupo", "una cuenta", " Ya la votaste.", " El fondo está cerrado."]);
     expect([e.agent, e.group, e.account, e.youVoted, e.closed]).toEqual(["The agent", "The group", "an account", " You already voted on it.", " The fund is closed."]);
     expect([s.reason("X"), e.reason("X")]).toEqual([" Motivo: X", " Reason: X"]);
-    expect(s.now("sábado", "3")).toBe("Ahora es sábado, hora de Argentina. El fondo va por su semana 3.");
-    expect(e.now("Saturday", "3")).toBe("It's Saturday, Argentina time. The fund is in week 3.");
+    expect(s.now("sábado", "3", AR.es.timeName)).toBe("Ahora es sábado, hora de Argentina. El fondo va por su semana 3.");
+    expect(e.now("Saturday", "3", AR.en.timeName)).toBe("It's Saturday, Argentina time. The fund is in week 3.");
     expect([s.fund("Fútbol", "$ 80.000"), e.fund("Football", "ARS 80,000")]).toEqual(["Fondo: Fútbol. Saldo: $ 80.000.", "Fund: Football. Balance: ARS 80,000."]);
     expect(s.rules("$ 10.000", "$ 60.000", "la cancha", "$ 45.000", "$ 15.000", 2, 3)).toBe(
       "Reglas: cada uno pone $ 10.000 por semana. El agente devuelve hasta $ 60.000 por semana por la cancha, el gasto acordado: esta semana devolvió $ 45.000 y quedan $ 15.000. Todo lo demás necesita 2 de 3 votos. Nadie puede cambiar esto solo, ni el agente.",

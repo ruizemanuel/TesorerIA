@@ -1,29 +1,31 @@
 // packages/web/scripts/i18n-table.ts
-// Writes i18n-table.html: every sentence of the web in Spanish and in English, side by side, for a person to read
-// through before a push (spec, 9.3). Not committed.
+// Writes i18n-table.html: every sentence of the web in Rioplatense Spanish, in neutral Spanish and in English, side by
+// side, for a person to read through before a push (spec, 9.3). Not committed.
 //
 // A sentence with values is a function, so each one has realistic arguments in ARGS below, in its own parameter
-// order and type, written in each language's format (the same name, the same amount). A function with a branch
-// (plural, optional note) has a case per branch. The script fails if a function has no entry, if an entry has the
-// wrong number of arguments, or if any cell comes out with "undefined", "NaN", "[object" or "function" in it, so a
-// change to the dictionaries can't leave the table silently wrong.
+// order and type, written in each column's format (the same name, the same amount). The Rioplatense and the English
+// columns speak for Argentina and the neutral one for Mexico, so a country's words (its bank account, its token, its
+// clock) come from the column's country. A function with a branch (plural, optional note) has a case per branch. The
+// script fails if a function has no entry, if an entry has the wrong number of arguments, or if any cell comes out with
+// "undefined", "NaN", "[object" or "function" in it, so a change to the dictionaries can't leave the table silently
+// wrong.
 import { writeFileSync } from "node:fs";
 import { createElement, Fragment, isValidElement, type ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { FEE_BPS } from "@tesoreria/agent";
-import type { Speech } from "../src/lib/countries";
-import { formatDay, formatMoney, formatPercent, formatUsdt, formatWhen, intlLocale, USDT_UNIT, WARS_UNIT } from "../src/lib/format";
-import { en } from "../src/lib/i18n/en";
-import { es } from "../src/lib/i18n/es";
+import type { CountryWords, Speech } from "../src/lib/countries";
+import { amountExamples, formatDay, formatMoney, formatPercent, formatUsdt, formatWhen, intlLocale, USDT_UNIT, WARS_UNIT } from "../src/lib/format";
 import { type Messages, messagesFor } from "../src/lib/i18n/messages";
 
 const CENT = WARS_UNIT / 100n;
 const BROKEN = /undefined|NaN|\[object|function/;
 
-/** What an example is made of, in one language: its dictionary, and the names and amounts the examples share. */
+/** What an example is made of, in one column: its dictionary and country, and the names and amounts the examples share. */
 interface Kit {
   m: Messages;
-  /** The amount in pesos, as the screen writes it ("$ 10.000", "ARS 10,000"). */
+  /** The country's words in the column's language: its bank account, its token, its clock. */
+  words: CountryWords;
+  /** The amount in pesos, as the screen writes it ("$ 10.000", "$10,000", "ARS 10,000"). */
   pesos(amount: number): string;
   usdt(amount: number): string;
   /** A part that stands out on screen: the dictionary takes it as a ReactNode. */
@@ -39,6 +41,7 @@ interface Kit {
 function kitFor(m: Messages): Kit {
   return {
     m,
+    words: m.country.words[m.locale],
     pesos: (amount) => formatMoney(BigInt(Math.round(amount * 100)) * CENT, m),
     usdt: (amount) => formatUsdt(BigInt(Math.round(amount * 1_000_000)), m),
     bold: (text) => createElement("b", null, text),
@@ -49,7 +52,12 @@ function kitFor(m: Messages): Kit {
   };
 }
 
-const KITS = { es: kitFor(messagesFor("es", "AR")), en: kitFor(messagesFor("en", "AR")) };
+/** The three columns: Rioplatense with Argentina, neutral with Mexico, and English with Argentina. */
+const COLUMNS = [
+  { name: "rioplatense", kit: kitFor(messagesFor("es", "AR")) },
+  { name: "neutro", kit: kitFor(messagesFor("es", "MX")) },
+  { name: "inglés", kit: kitFor(messagesFor("en", "AR")) },
+];
 
 interface Case {
   /** Which branch this is, when a function has more than one. */
@@ -59,7 +67,7 @@ interface Case {
 const call = (...args: unknown[]): Case => ({ args });
 const when = (label: string, ...args: unknown[]): Case => ({ when: label, args });
 
-/** A Thursday, 10:15 in Buenos Aires. */
+/** A Thursday, 10:15 in Buenos Aires (7:15 in Mexico City). */
 const NOW = new Date("2026-10-15T13:15:00Z");
 const NAME = "Ana";
 const OTHER = "Beto";
@@ -74,10 +82,13 @@ const ARGS: Record<string, (k: Kit) => Case[]> = {
   "meta.publicDescription": ({ fund }) => [call(fund)],
   "meta.invitationTitle": ({ fund }) => [call(fund)],
   "common.member": () => [call(3)],
+  "errors.amountFormat": ({ m }) => [call(...amountExamples(10_000n, m))],
   "errors.amountTooBig": ({ pesos }) => [call(pesos(1_000_000_000_000))],
   "checks.feeTooBig": ({ pesos }) => [call(pesos(1_000_000_000_000))],
   "checks.capTooBig": ({ pesos }) => [call(pesos(1_000_000_000_000))],
   "checks.capAboveFundCap": ({ pesos }) => [call(pesos(450_000))],
+  "checks.feeUnreadable": ({ m }) => [call(...amountExamples(10_000n, m))],
+  "checks.capUnreadable": ({ m }) => [call(...amountExamples(60_000n, m))],
   "funds.accountCap": () => [call(3)],
   "funds.tooManyMembers": () => [call(10, 11)],
   "funds.votesRange": () => [call(8)],
@@ -85,6 +96,7 @@ const ARGS: Record<string, (k: Kit) => Case[]> = {
   "expenses.amountTooBig": ({ pesos }) => [call(pesos(1_000_000_000_000))],
   "expenses.noteTooLong": () => [call(140)],
   "home.live": ({ bold, fund }) => [call(bold(fund))],
+  "home.steps": () => [when("with a dollar", true), when("without a dollar", false)],
   "home.rules.alone": ({ bold, pesos, expense }) => [call(expense, bold(pesos(60_000)))],
   "home.rules.vote": ({ fund }) => [call(fund, 5, 8)],
   "home.rules.money": ({ m, link }) => [call(link(m.home.rules.contractLink))],
@@ -194,11 +206,15 @@ const ARGS: Record<string, (k: Kit) => Case[]> = {
   "contribute.worth": ({ pesos }) => [call(pesos(16_000))],
   "contribute.youHold": ({ bold, usdt }) => [call(bold(usdt(6.18)))],
   "contribute.feeNote": ({ m }) => [call(formatPercent(FEE_BPS, m))],
+  "contribute.ripioWithdraw": ({ words }) => [call(words.token)],
+  "contribute.rampOnly": ({ words }) => [call(words.token)],
   "expense.agreed": ({ expense }) => [call(expense)],
   "expense.twin": ({ bold, pesos }) => [call(bold(pesos(45_000)))],
   "expense.giveBackMax": ({ pesos }) => [call(pesos(10_000))],
   "expense.proposalsLeft": () => [when("several left", 3), when("one left", 1)],
-  "cashOut.passed": ({ bold, pesos }) => [call(bold(pesos(45_000)))],
+  "cashOut.passed": ({ bold, pesos }) => [when("with Ripio's app", bold(pesos(45_000)), true), when("without Ripio's app", bold(pesos(45_000)), false)],
+  "cashOut.sellIntro": ({ words }) => [call(words.bankAccount)],
+  "cashOut.depositInstructions": ({ words }) => [call(words.token)],
   "cashOut.submitAmount": ({ pesos }) => [call(pesos(45_000))],
   "cashOut.accountHolds": ({ pesos }) => [call(pesos(45_000))],
   "chat.longMessage": () => [call(500)],
@@ -221,6 +237,7 @@ const ARGS: Record<string, (k: Kit) => Case[]> = {
         hourCycle: "h23",
       }).format(NOW),
       "3",
+      m.country.words[m.locale].timeName,
     ),
   ],
   "chat.brief.fund": ({ fund, pesos }) => [call(fund, pesos(80_000))],
@@ -239,8 +256,12 @@ const ARGS: Record<string, (k: Kit) => Case[]> = {
 
 const escape = (text: string) => text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 
-/** A plain string is escaped; what a function returned as React is rendered, and goes in as the HTML it is. */
+/**
+ * A plain string is escaped; what a function returned as React is rendered, and goes in as the HTML it is; a list, line
+ * by line.
+ */
 function html(value: unknown, where: string): string {
+  if (Array.isArray(value)) return value.map((line) => html(line, where)).join("<br>");
   const text = isValidElement(value) ? renderToStaticMarkup(value) : typeof value === "string" ? escape(value) : null;
   if (text === null) throw new Error(`${where}: not a sentence: ${String(value)}`);
   if (BROKEN.test(text)) throw new Error(`${where}: broken cell: ${text}`);
@@ -249,47 +270,58 @@ function html(value: unknown, where: string): string {
 
 const used = new Set<string>();
 
-function said(spanish: unknown, english: unknown, path: string): string[] {
-  const row = (label: string, es: string, en: string) => `<tr><td>${label}</td><td>${es}</td><td>${en}</td></tr>`;
-  if (typeof spanish === "function" && typeof english === "function") {
+const row = (label: string, cells: string[]) => `<tr><td>${label}</td>${cells.map((cell) => `<td>${cell}</td>`).join("")}</tr>`;
+
+/** The rows of one path of the dictionaries, `values` its value in each column, in COLUMNS's order. */
+function said(values: unknown[], path: string): string[] {
+  if (values.every((value) => typeof value === "function")) {
     const entry = ARGS[path];
     if (entry === undefined) throw new Error(`${path}: no example arguments in scripts/i18n-table.ts`);
     used.add(path);
-    const inSpanish = entry(KITS.es);
-    const inEnglish = entry(KITS.en);
-    if (inSpanish.length === 0 || inSpanish.length !== inEnglish.length) throw new Error(`${path}: Spanish and English need the same cases`);
-    return inSpanish.map((spanishCase, i) => {
-      const englishCase = inEnglish[i] as Case;
-      for (const [fn, args] of [[spanish, spanishCase.args], [english, englishCase.args]] as const) {
+    const cases = COLUMNS.map(({ kit }) => entry(kit));
+    const [first] = cases as [Case[]];
+    if (first.length === 0 || cases.some((list) => list.length !== first.length)) throw new Error(`${path}: every column needs the same cases`);
+    return first.map((firstCase, i) => {
+      const label = firstCase.when === undefined ? path : `${path} (${firstCase.when})`;
+      const cells = values.map((value, column) => {
+        const fn = value as (...args: unknown[]) => unknown;
+        const { args } = (cases[column] as Case[])[i] as Case;
         if (fn.length !== args.length) throw new Error(`${path}: takes ${fn.length} arguments, the example has ${args.length}`);
-      }
-      const label = spanishCase.when === undefined ? path : `${path} (${spanishCase.when})`;
-      return row(
-        label,
-        html(spanish(...spanishCase.args), `${label} (es)`),
-        html(english(...englishCase.args), `${label} (en)`),
+        return html(fn(...args), `${label} (${COLUMNS[column]?.name})`);
+      });
+      return row(label, cells);
+    });
+  }
+  if (values.every((value) => Array.isArray(value) || typeof value === "string")) {
+    return [row(path, values.map((value, column) => html(value, `${path} (${COLUMNS[column]?.name})`)))];
+  }
+  if (values.every((value) => typeof value === "object" && value !== null)) {
+    return Object.keys(values[0] as object).flatMap((key) => {
+      // `m` carries its language and its country next to the sentences: neither is one.
+      if (path === "" && (key === "locale" || key === "country")) return [];
+      return said(
+        values.map((value) => (value as Record<string, unknown>)[key]),
+        path === "" ? key : `${path}.${key}`,
       );
     });
   }
-  if (Array.isArray(spanish) && Array.isArray(english)) {
-    const lines = (list: unknown[], language: string) => list.map((line) => html(line, `${path} (${language})`)).join("<br>");
-    return [row(path, lines(spanish, "es"), lines(english, "en"))];
-  }
-  if (typeof spanish === "string" && typeof english === "string") return [row(path, html(spanish, `${path} (es)`), html(english, `${path} (en)`))];
-  if (typeof spanish === "object" && spanish !== null && typeof english === "object" && english !== null) {
-    return Object.keys(spanish).flatMap((key) => {
-      if (path === "" && key === "locale") return [];
-      return said((spanish as Record<string, unknown>)[key], (english as Record<string, unknown>)[key], path === "" ? key : `${path}.${key}`);
-    });
-  }
-  throw new Error(`${path}: Spanish and English don't have the same shape`);
+  throw new Error(`${path}: the dictionaries don't have the same shape`);
 }
 
-const sentences = said(es, en, "");
+const sentences = said(
+  COLUMNS.map(({ kit }) => kit.m),
+  "",
+);
 const stale = Object.keys(ARGS).filter((path) => !used.has(path));
 if (stale.length > 0) throw new Error(`Example arguments for functions that aren't in the dictionaries: ${stale.join(", ")}`);
 
-/** The formats, from the functions the screens use. */
+/** The formats, from the functions the screens use, in each language of each country. */
+const SPEECHES: Array<[name: string, speech: Speech]> = [
+  ["Argentina, castellano", messagesFor("es", "AR")],
+  ["Argentina, inglés", messagesFor("en", "AR")],
+  ["México, castellano", messagesFor("es", "MX")],
+  ["México, inglés", messagesFor("en", "MX")],
+];
 const FORMATS: Array<[label: string, write: (speech: Speech) => string]> = [
   ["formatMoney, whole", (s) => formatMoney(10_000n * WARS_UNIT, s)],
   ["formatMoney, with cents", (s) => formatMoney(1_605_037n * CENT, s)],
@@ -300,19 +332,22 @@ const FORMATS: Array<[label: string, write: (speech: Speech) => string]> = [
   ["formatWhen, yesterday", (s) => formatWhen(new Date("2026-10-14T21:02:00Z"), NOW, s)],
   ["formatWhen, this week", (s) => formatWhen(new Date("2026-10-12T12:00:00Z"), NOW, s)],
   ["formatWhen, older", (s) => formatWhen(new Date("2026-10-03T12:00:00Z"), NOW, s)],
+  ["formatPercent, the fee", (s) => formatPercent(FEE_BPS, s)],
 ];
-const formats = FORMATS.map(([label, write]) => {
-  const [spanish, english] = [write(KITS.es.m), write(KITS.en.m)].map((text, i) => html(text, `${label} (${i === 0 ? "es" : "en"})`));
-  return `<tr><td>${label}</td><td>${spanish}</td><td>${english}</td></tr>`;
-});
+const formats = FORMATS.map(([label, write]) =>
+  row(
+    label,
+    SPEECHES.map(([name, speech]) => html(write(speech), `${label} (${name})`)),
+  ),
+);
 
-const head = (first: string) => `<tr><th>${first}</th><th>castellano</th><th>inglés</th></tr>`;
-const page = `<!doctype html><meta charset="utf-8"><title>TesorerIA: castellano | inglés</title>
+const head = (first: string, names: string[]) => `<tr><th>${first}</th>${names.map((name) => `<th>${name}</th>`).join("")}</tr>`;
+const page = `<!doctype html><meta charset="utf-8"><title>TesorerIA: rioplatense | neutro | inglés</title>
 <style>body{font:15px system-ui;margin:24px}table{border-collapse:collapse;margin-bottom:32px}td{border:1px solid #ccc;padding:6px 8px;vertical-align:top;white-space:pre-wrap}td:first-child{color:#777;font:12px monospace}th{text-align:left;padding:6px 8px}</style>
-<p>Los nombres, los montos y los gastos son ejemplos (cada idioma los escribe a su manera). En negrita, lo que resalta en pantalla. Las frases con variantes (plural, con o sin nota) tienen una fila por variante.</p>
+<p>Los nombres, los montos y los gastos son ejemplos (cada columna los escribe a su manera). La columna rioplatense y la inglesa hablan por un fondo de Argentina; la neutra, por uno de México, con sus palabras (la CLABE, wMXN, la hora de Ciudad de México) y sus montos. En negrita, lo que resalta en pantalla. Las frases con variantes (plural, con o sin nota, con o sin la app de Ripio o un dólar) tienen una fila por variante.</p>
 <h2>Formatos</h2>
-<table>${head("formato")}${formats.join("\n")}</table>
+<table>${head("formato", SPEECHES.map(([name]) => name))}${formats.join("\n")}</table>
 <h2>Frases</h2>
-<table>${head("clave")}${sentences.join("\n")}</table>`;
+<table>${head("clave", COLUMNS.map(({ name }) => name))}${sentences.join("\n")}</table>`;
 writeFileSync(new URL("../i18n-table.html", import.meta.url), page);
 console.log(`i18n-table.html written: ${sentences.length} sentences, ${formats.length} formats`);

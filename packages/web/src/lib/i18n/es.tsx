@@ -9,9 +9,10 @@ const sentenceStart = (who: string) => (who === SOMEONE ? "Alguien" : who);
 /**
  * Everything the web says, in Rioplatense Spanish (spec, 9.3): the texts it always had, moved here word for word
  * (except that "alguien" now starts a sentence capitalized).
- * `en` has this same shape (Dictionary), so a sentence missing in English doesn't compile. A fixed sentence is a
- * string; one with values is a function that takes them already formatted; a value that stands out on screen comes
- * in as a ReactNode, and the sentence is a fragment around it.
+ * `en` and `neutral` have this same shape (Dictionary), so a sentence missing in English or in neutral Spanish doesn't
+ * compile. A fixed sentence is a string; one with values is a function that takes them already formatted; a value
+ * that stands out on screen comes in as a ReactNode, and the sentence is a fragment around it. What changes by country
+ * (its bank account, its token, its clock) comes in as a value too, from COUNTRIES.
  */
 export const es = {
   /** The dictionary's own language: with the country `Messages` adds, it makes `m` what the formats take (formatMoney(x, m)). */
@@ -52,7 +53,8 @@ export const es = {
     /** The paymaster refused for its cap per account, or for one of the whole policy: trying again doesn't help. */
     accountSponsorCap: "Tu cuenta llegó al tope de operaciones que paga TesorerIA este mes. No se movió plata. Escribinos y lo destrabamos.",
     sponsorCap: "TesorerIA llegó al tope de operaciones que paga este mes. No se movió plata. Escribinos y lo destrabamos.",
-    amountFormat: "Escribilo como 10.000 o 10.000,50.",
+    /** How to write an amount: `whole` and `cents` are two examples, as the country writes them (amountExamples). */
+    amountFormat: (whole: string, cents: string) => `Escribilo como ${whole} o ${cents}.`,
     /** What the browser says of an amount typed above the most the app takes; `max` is that most. */
     amountTooBig: (max: string) => `No puede pasar de ${max}.`,
     notInAFund: "No estás en ningún fondo.",
@@ -71,8 +73,9 @@ export const es = {
     capTooBig: (max: string) => `El tope no puede pasar de ${max}.`,
     /** `cap` is the fund's cap on its balance: the weekly cap can't pass it (FundV2 reverts otherwise). */
     capAboveFundCap: (cap: string) => `El tope semanal no puede pasar el tope del fondo, de ${cap}.`,
-    feeUnreadable: "No entendimos la cuota. Escribila como 10.000 o 10.000,50.",
-    capUnreadable: "No entendimos el tope. Escribilo como 60.000 o 60.000,50.",
+    /** `whole` and `cents` are two examples of an amount, as the country writes them (amountExamples). */
+    feeUnreadable: (whole: string, cents: string) => `No entendimos la cuota. Escribila como ${whole} o ${cents}.`,
+    capUnreadable: (whole: string, cents: string) => `No entendimos el tope. Escribilo como ${whole} o ${cents}.`,
   },
   /** Drafts, invitations and creating a fund (funds.ts). */
   funds: {
@@ -122,9 +125,12 @@ export const es = {
     /** Above the real group's week: `name` stands out. */
     live: (name: ReactNode) => <>{name}, en vivo.</>,
     howItWorks: "Cómo funciona",
-    steps: [
+    /** `hasDollar`: whether the page's country has a dollar to put in; without one, the pesos alone. */
+    steps: (hasDollar: boolean) => [
       "Armás el fondo y sumás a tus amigos con un link.",
-      "Cada uno aporta su cuota semanal, en pesos desde Ripio o en USDT desde cualquier exchange.",
+      hasDollar
+        ? "Cada uno aporta su cuota semanal, en pesos desde Ripio o en USDT desde cualquier exchange."
+        : "Cada uno aporta su cuota semanal, en pesos desde Ripio.",
       "El agente devuelve lo acordado, lleva la cuenta de quién debe, y lo demás se vota.",
     ],
     /**
@@ -212,12 +218,10 @@ export const es = {
     agreedExpense: "Gasto acordado",
     agreedExpenseHint: "El agente lo devuelve sin votación, hasta el tope de cada semana.",
     weeklyCap: "Tope por semana para ese gasto",
-    /** What the form starts with. The amounts are written the way this language writes them: `readDraft` reads them back. */
+    /** What the form starts with; its amounts are the country's (Country.defaults), written as the field writes them. */
     defaults: {
       fundNamePlaceholder: "Fútbol de los jueves",
-      weeklyFee: "10.000",
       agreedExpense: "la cancha",
-      weeklyCap: "60.000",
     },
     creating: "Creando…",
     submit: "Crear fondo",
@@ -545,8 +549,10 @@ export const es = {
     /** Binance's minimum goes after either: `min` stands out. The second is for when the week needs less than that. */
     binanceMinimum: (min: ReactNode) => <>Si lo retirás de Binance, el mínimo es {min}.</>,
     binanceMinimumLeftover: (min: ReactNode) => <>Si lo retirás de Binance, el mínimo es {min}: lo que sobre queda en tu cuenta para la próxima.</>,
-    /** The wARS tab: Ripio's app is where they come from. */
-    ripioWithdraw: "En la app de Ripio, retirá wARS por la red Celo a tu cuenta del fondo. O cargalos directo:",
+    /** The currency's tab where the country has Ripio's app, where they come from: `token` is the currency's. */
+    ripioWithdraw: (token: string) => `En la app de Ripio, retirá ${token} por la red Celo a tu cuenta del fondo. O cargalos directo:`,
+    /** The same where there's no Ripio app, only its ramp (the button below). */
+    rampOnly: (token: string) => `Comprá ${token} con Ripio y llegan directo a tu cuenta del fondo.`,
     loadWithRipio: "Cargar pesos con Ripio",
     /** The member's contribution went out and has no receipt yet. */
     onItsWay: "Tu aporte está en camino. Cuando se confirme, lo ves en el fondo.",
@@ -576,8 +582,6 @@ export const es = {
     agreed: (expense: string) => `${expense} (el gasto acordado)`,
     other: "Otro gasto (se vota)",
     amountLabel: "Cuánto pagaste",
-    /** An example in the empty field: written the way this language writes amounts. */
-    amountPlaceholder: "45.000",
     noteLabel: "Nota (opcional)",
     notePlaceholder: "La cancha del jueves",
     submit: "Cargar el gasto",
@@ -614,20 +618,21 @@ export const es = {
   },
   /** Pasar a pesos (spec, 9, pantalla 8, and 9.2): the member's wARS, to their Ripio address. */
   cashOut: {
-    /** After a pass that went well: `amount` stands out. */
-    passed: (amount: ReactNode) => (
+    /** After a pass that went well: `amount` stands out. Where the country has Ripio's app (`ripioApp`), the address may be its own. */
+    passed: (amount: ReactNode, ripioApp: boolean) => (
       <>
-        Pasaste {amount} a Ripio. Si la dirección es de Vender con Ripio, los pesos llegan solos a tu banco y Ripio te avisa por mail. Si es de
-        la app, vendelos ahí 1:1.
+        Pasaste {amount} a Ripio. Si la dirección es de Vender con Ripio, los pesos llegan solos a tu banco y Ripio te avisa por mail.
+        {ripioApp && " Si es de la app, vendelos ahí 1:1."}
       </>
     ),
-    /** Over "Vender con Ripio": Ripio's own sale (offRampUrl), the first way to get the address. */
-    sellIntro: "Con Vender con Ripio cargás tu CBU, CVU o alias, y Ripio te da una dirección en la red Celo. Pegala acá y mandá: los pesos llegan a tu banco.",
+    /** Over "Vender con Ripio": Ripio's own sale (offRampUrl), the first way to get the address. `bankAccount` is the country's. */
+    sellIntro: (bankAccount: string) =>
+      `Con Vender con Ripio cargás tu ${bankAccount}, y Ripio te da una dirección en la red Celo. Pegala acá y mandá: los pesos llegan a tu banco.`,
     /** The same, over an address this browser remembers, which may be the app's. */
     sellIntroSaved: "Con Vender con Ripio los pesos llegan directo a tu banco: Ripio te da una dirección en la red Celo. Tocá Cambiar y pegala acá.",
     sellWithRipio: "Vender con Ripio",
-    /** The other way: the app's deposit address. */
-    depositInstructions: "O desde la app de Ripio: tocá Depositar, elegí wARS y la red Celo, y copiá la dirección. Ahí los vendés 1:1.",
+    /** The other way, where the country has Ripio's app: its deposit address. `token` is the currency's. */
+    depositInstructions: (token: string) => `O desde la app de Ripio: tocá Depositar, elegí ${token} y la red Celo, y copiá la dirección. Ahí los vendés 1:1.`,
     addressLabel: "Tu dirección de Ripio",
     /** Over the address this browser remembers. */
     savedAddress: "A tu cuenta de Ripio",
@@ -716,8 +721,8 @@ export const es = {
       account: "una cuenta",
       reason: (detail: string) => ` Motivo: ${detail}`,
       youVoted: " Ya la votaste.",
-      /** `today` is the date and time, in words; `week` counts from 1. */
-      now: (today: string, week: string) => `Ahora es ${today}, hora de Argentina. El fondo va por su semana ${week}.`,
+      /** `today` is the date and time, in words; `week` counts from 1; `timeName` is the country's clock ("hora de Argentina"). */
+      now: (today: string, week: string, timeName: string) => `Ahora es ${today}, ${timeName}. El fondo va por su semana ${week}.`,
       fund: (name: string, balance: string) => `Fondo: ${name}. Saldo: ${balance}.`,
       closed: " El fondo está cerrado.",
       rules: (fee: string, cap: string, expense: string, spent: string, left: string, votes: number, members: number) =>

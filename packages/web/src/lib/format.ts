@@ -65,6 +65,15 @@ export function formatAmount(units: bigint, speech: Speech): string {
 }
 
 /**
+ * The two amounts a hint shows of how to write one: `whole` of the currency, and the same with 50 cents, as `speech`
+ * writes them ("10.000" and "10.000,50" in Argentine Spanish, "10,000" and "10,000.50" in English or in Mexico).
+ */
+export function amountExamples(whole: bigint, speech: Speech): [whole: string, cents: string] {
+  const units = whole * WARS_UNIT;
+  return [formatAmount(units, speech), formatAmount(units + 50n * CENT, speech)];
+}
+
+/**
  * Another country's money on `speech`'s screen: the code of `of`'s currency, then the amount with the screen's
  * separators ("ARS 16,050.37" on a screen of Mexico), so it reads neither as the screen's own pesos nor backwards.
  */

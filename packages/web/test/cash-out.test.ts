@@ -101,7 +101,7 @@ describe("Pasar a pesos in English", () => {
 
   it("says what to fix in English, with the language's own amounts", () => {
     const held = 45_000n * WARS_UNIT;
-    expect(readCashOutAmount("45.000", held, en)).toEqual({ ok: false, error: en.errors.amountFormat });
+    expect(readCashOutAmount("45.000", held, en)).toEqual({ ok: false, error: "Write it like 10,000 or 10,000.50." });
     expect(readCashOutAmount("45,001", held, en)).toEqual({ ok: false, error: `You have ARS${NBSP}45,000 in your account.` });
     expect(readCashOutAmount(null, 0n, en)).toEqual({ ok: false, error: "You have no pesos in your account to cash out." });
     expect(cashOutProblem(ACCOUNT, ours, en)).toBe("That's your fund account. Paste your Ripio one.");

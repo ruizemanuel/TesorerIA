@@ -2,7 +2,7 @@ import { USDT, WARS } from "@tesoreria/agent";
 import type { Call } from "@tesoreria/wallet";
 import { type Address, encodeFunctionData, erc20Abi, getAddress, isAddress, isAddressEqual, zeroAddress } from "viem";
 import { plainPesos } from "./contribute";
-import { WARS_SPECK, formatMoney, parseMoney } from "./format";
+import { WARS_SPECK, amountExamples, formatMoney, parseMoney } from "./format";
 import type { Messages } from "./i18n/messages";
 
 /**
@@ -50,7 +50,7 @@ export function readCashOutAmount(text: string | null, held: bigint, m: Messages
   if (held < WARS_SPECK) return { ok: false, error: m.cashOut.nothingToPass };
   if (text === null) return { ok: true, amount: held };
   const amount = parseMoney(text, m);
-  if (amount === null) return { ok: false, error: m.errors.amountFormat };
+  if (amount === null) return { ok: false, error: m.errors.amountFormat(...amountExamples(10_000n, m)) };
   if (formatMoney(amount, m) === formatMoney(held, m)) return { ok: true, amount: held };
   if (amount > held) return { ok: false, error: m.cashOut.accountHolds(formatMoney(held, m)) };
   return { ok: true, amount };

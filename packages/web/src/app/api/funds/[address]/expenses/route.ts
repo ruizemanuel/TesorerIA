@@ -8,7 +8,7 @@ import { currentUser } from "../../../../../lib/current-user";
 import { getDb } from "../../../../../lib/db/client";
 import { expenses, funds, memberships } from "../../../../../lib/db/schema";
 import { submitExpense } from "../../../../../lib/expenses";
-import { parseMoney } from "../../../../../lib/format";
+import { amountExamples, parseMoney } from "../../../../../lib/format";
 import { jsonError, readJson } from "../../../../../lib/http";
 import { localeOf } from "../../../../../lib/i18n/locales";
 import { messagesFor } from "../../../../../lib/i18n/messages";
@@ -35,7 +35,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ add
   const body = await readJson(request, Expense);
   if (!body.ok) return body.response;
   const amount = parseMoney(body.value.amount, m);
-  if (amount === null) return jsonError(400, `${m.expenses.amountUnreadable} ${m.errors.amountFormat}`);
+  if (amount === null) return jsonError(400, `${m.expenses.amountUnreadable} ${m.errors.amountFormat(...amountExamples(10_000n, m))}`);
 
   const db = await getDb();
   const [membership] = await db

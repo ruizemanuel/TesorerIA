@@ -44,7 +44,7 @@ export const en: Dictionary = {
     notCompleted: "The operation couldn't be completed. No money moved.",
     accountSponsorCap: "Your account reached the monthly limit of operations TesorerIA pays for. No money moved. Write to us and we'll unblock it.",
     sponsorCap: "TesorerIA reached the monthly limit of operations it pays for. No money moved. Write to us and we'll unblock it.",
-    amountFormat: "Write it like 10,000 or 10,000.50.",
+    amountFormat: (whole: string, cents: string) => `Write it like ${whole} or ${cents}.`,
     amountTooBig: (max: string) => `It can't be more than ${max}.`,
     notInAFund: "You aren't in any fund.",
     agentJustRan: "The agent just ran.",
@@ -60,8 +60,8 @@ export const en: Dictionary = {
     feeTooBig: (max: string) => `The weekly dues can't be more than ${max}.`,
     capTooBig: (max: string) => `The weekly cap can't be more than ${max}.`,
     capAboveFundCap: (cap: string) => `The weekly cap can't be above the fund's cap of ${cap}.`,
-    feeUnreadable: "We couldn't read the weekly dues. Write them like 10,000 or 10,000.50.",
-    capUnreadable: "We couldn't read the weekly cap. Write it like 60,000 or 60,000.50.",
+    feeUnreadable: (whole: string, cents: string) => `We couldn't read the weekly dues. Write them like ${whole} or ${cents}.`,
+    capUnreadable: (whole: string, cents: string) => `We couldn't read the weekly cap. Write it like ${whole} or ${cents}.`,
   },
   funds: {
     badInvite: "That invitation link isn't valid.",
@@ -105,9 +105,11 @@ export const en: Dictionary = {
     haveFund: "I already have a fund: log in",
     live: (name: ReactNode) => <>{name}, live.</>,
     howItWorks: "How it works",
-    steps: [
+    steps: (hasDollar: boolean) => [
       "You set up the fund and add your friends with a link.",
-      "Each one puts in their weekly dues, in pesos from Ripio or in USDT from any exchange.",
+      hasDollar
+        ? "Each one puts in their weekly dues, in pesos from Ripio or in USDT from any exchange."
+        : "Each one puts in their weekly dues, in pesos from Ripio.",
       "The agent pays back what was agreed, keeps track of who is behind, and everything else is voted on.",
     ],
     rules: {
@@ -182,9 +184,7 @@ export const en: Dictionary = {
     weeklyCap: "Weekly cap for that expense",
     defaults: {
       fundNamePlaceholder: "Thursday football",
-      weeklyFee: "10,000",
       agreedExpense: "the pitch",
-      weeklyCap: "60,000",
     },
     creating: "Creating…",
     submit: "Create fund",
@@ -439,7 +439,8 @@ export const en: Dictionary = {
     binanceMinimumLeftover: (min: ReactNode) => (
       <>If you withdraw it from Binance, the minimum is {min}: whatever is left over stays in your account for next time.</>
     ),
-    ripioWithdraw: "In the Ripio app, withdraw wARS over the Celo network to your fund account. Or load them directly:",
+    ripioWithdraw: (token: string) => `In the Ripio app, withdraw ${token} over the Celo network to your fund account. Or load them directly:`,
+    rampOnly: (token: string) => `Buy ${token} with Ripio and they land straight in your fund account.`,
     loadWithRipio: "Load pesos with Ripio",
     onItsWay: "Your contribution is on its way. Once it's confirmed, you'll see it in the fund.",
     nothingYet: "Nothing has arrived yet. When it does, it'll show up here; it can take a few minutes.",
@@ -460,7 +461,6 @@ export const en: Dictionary = {
     agreed: (expense: string) => `“${expense}” (the agreed expense)`,
     other: "Other expense (voted on)",
     amountLabel: "How much you paid",
-    amountPlaceholder: "45,000",
     noteLabel: "Note (optional)",
     notePlaceholder: "Thursday's pitch",
     submit: "Add the expense",
@@ -490,16 +490,18 @@ export const en: Dictionary = {
     new: "The agent is busy: it'll process it in a few minutes.",
   },
   cashOut: {
-    passed: (amount: ReactNode) => (
+    passed: (amount: ReactNode, ripioApp: boolean) => (
       <>
         You cashed out {amount} to Ripio. If the address is from Sell with Ripio, the pesos reach your bank on their own and Ripio emails you.
-        If it's from the app, sell them there 1:1.
+        {ripioApp && " If it's from the app, sell them there 1:1."}
       </>
     ),
-    sellIntro: "With Sell with Ripio you enter your CBU, CVU or alias, and Ripio gives you an address on the Celo network. Paste it here and send: the pesos reach your bank.",
+    sellIntro: (bankAccount: string) =>
+      `With Sell with Ripio you enter your ${bankAccount}, and Ripio gives you an address on the Celo network. Paste it here and send: the pesos reach your bank.`,
     sellIntroSaved: "With Sell with Ripio the pesos go straight to your bank: Ripio gives you an address on the Celo network. Tap Change and paste it here.",
     sellWithRipio: "Sell with Ripio",
-    depositInstructions: "Or from the Ripio app: tap Depositar (Deposit), pick wARS and the Celo network, and copy the address. You sell them there 1:1.",
+    depositInstructions: (token: string) =>
+      `Or from the Ripio app: tap Depositar (Deposit), pick ${token} and the Celo network, and copy the address. You sell them there 1:1.`,
     addressLabel: "Your Ripio address",
     savedAddress: "To your Ripio account",
     change: "Change",
@@ -563,7 +565,7 @@ export const en: Dictionary = {
       account: "an account",
       reason: (detail: string) => ` Reason: ${detail}`,
       youVoted: " You already voted on it.",
-      now: (today: string, week: string) => `It's ${today}, Argentina time. The fund is in week ${week}.`,
+      now: (today: string, week: string, timeName: string) => `It's ${today}, ${timeName}. The fund is in week ${week}.`,
       fund: (name: string, balance: string) => `Fund: ${name}. Balance: ${balance}.`,
       closed: " The fund is closed.",
       rules: (fee: string, cap: string, expense: string, spent: string, left: string, votes: number, members: number) =>

@@ -1,6 +1,6 @@
 import { APICallError } from "ai";
 import { formatMoney, parseMoneyInChat } from "../format";
-import { DICTIONARIES, type Messages } from "../i18n/messages";
+import { ALL_DICTIONARIES, type Messages } from "../i18n/messages";
 import { MAX_MESSAGE_CHARS } from "./limits";
 import type { ChatUIMessage, ProposedExpense } from "./tools";
 
@@ -27,9 +27,9 @@ export function proposalPreview(input: ProposedExpense, rules: ProposalRules, m:
 
 /** The route's own words, in every language: it answers in its request's, which isn't always the page's by the time they arrive. */
 const OURS = new Set(
-  Object.values(DICTIONARIES).flatMap((m) => [m.chat.unavailable, m.chat.memberLimit, m.chat.longMessage(MAX_MESSAGE_CHARS), m.chat.badRequest, m.chat.notFound]),
+  ALL_DICTIONARIES.flatMap((m) => [m.chat.unavailable, m.chat.memberLimit, m.chat.longMessage(MAX_MESSAGE_CHARS), m.chat.badRequest, m.chat.notFound]),
 );
-const MEMBER_LIMITS = new Set(Object.values(DICTIONARIES).map((m) => m.chat.memberLimit));
+const MEMBER_LIMITS = new Set(ALL_DICTIONARIES.map((m) => m.chat.memberLimit));
 
 /**
  * What the panel says when a message didn't go through: the route's own words (its JSON `error`, or a stream error,
