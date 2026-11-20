@@ -5,10 +5,10 @@ import { describe, expect, it, vi } from "vitest";
 import { AGENT_LOCK, runAgent, saveDecisions, statusAfter } from "../src/lib/agent-runner";
 import { decisions, expenses, locks } from "../src/lib/db/schema";
 import { submitExpense } from "../src/lib/expenses";
-import { es } from "../src/lib/i18n/es";
 import { SENT_HASH, fakeAgent } from "./support/agent";
 import { addLiveFund, addUser, testDb } from "./support/db";
 import { AGENT, ANA, BLOCK, FUND, USDT_UNIT, WARS, event, snapshot } from "./support/fixtures";
+import { es } from "./support/messages";
 
 describe("saveDecisions", () => {
   it("keeps a skipped conversion's code, and none for a decision without one", async () => {

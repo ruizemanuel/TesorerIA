@@ -21,7 +21,7 @@ export async function readJson<T>(
   schema: z.ZodType<T>,
   { maxBytes }: { maxBytes?: number } = {},
 ): Promise<{ ok: true; value: T } | { ok: false; response: Response }> {
-  const m = messagesFor(localeOf(request));
+  const m = messagesFor(localeOf(request), "AR");
   if (!(request.headers.get("content-type") ?? "").includes("application/json")) {
     return { ok: false, response: jsonError(415, "Expected application/json") };
   }

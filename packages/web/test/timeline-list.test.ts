@@ -2,8 +2,8 @@ import { Fragment, createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { TimelineList } from "../src/components/timeline-list";
-import { es } from "../src/lib/i18n/es";
 import type { TimelineItem } from "../src/lib/timeline";
+import { es } from "./support/messages";
 
 // The button refreshes the page through the app router, which isn't mounted when a test renders on its own.
 vi.mock("next/navigation", () => ({
@@ -36,7 +36,6 @@ function render({ readOnly = false, closed = false, canPropose = true }: { readO
       readOnly,
       closed,
       m: es,
-      locale: "es",
     }),
   );
 }
@@ -79,7 +78,7 @@ function withLinks() {
       action: { kind: "receipt", tx: "0x00000000000000000000000000000000000000000000000000000000000000b2" },
     },
   ];
-  return createElement(TimelineList, { items, fund: "0x00000000000000000000000000000000000f00d1", fundName: "Fondo", now: new Date(), m: es, locale: "es" });
+  return createElement(TimelineList, { items, fund: "0x00000000000000000000000000000000000f00d1", fundName: "Fondo", now: new Date(), m: es });
 }
 
 /** Each link of the markup, by its text: what it says it's about (aria-describedby) and its classes. */

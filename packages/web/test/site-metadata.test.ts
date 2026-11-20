@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { en } from "../src/lib/i18n/en";
-import { es } from "../src/lib/i18n/es";
 import { siteMetadata } from "../src/lib/site-metadata";
+import { en, es } from "./support/messages";
 
 describe("siteMetadata", () => {
   it("gives the link preview its absolute base, the name and the page's language", () => {

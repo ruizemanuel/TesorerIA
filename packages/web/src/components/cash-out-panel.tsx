@@ -7,9 +7,9 @@ import { browserStorage, cashOutCalls, cashOutProblem, offRampUrl, readCashOutAm
 import { useAccountBalances } from "../lib/client/account";
 import { isOnItsWay, userMessage } from "../lib/client/errors";
 import { loadMe, sendCalls } from "../lib/client/wallet";
-import { pesosText } from "../lib/contribute";
-import { WARS_SPECK, formatPesos } from "../lib/format";
-import { useLocale, useMessages } from "../lib/i18n/client";
+import { moneyText } from "../lib/contribute";
+import { WARS_SPECK, formatMoney } from "../lib/format";
+import { useMessages } from "../lib/i18n/client";
 import { NetworkWarning } from "./address-box";
 import { AmountField } from "./amount-field";
 import { useRefresh } from "./refresh-provider";
@@ -28,7 +28,6 @@ const ADDRESS = "narrow break-all rounded-[14px] bg-surface p-3 text-center text
  */
 export function CashOutPanel({ fund, account, cashOutOnItsWay }: { fund: Address; account: Address; cashOutOnItsWay: boolean }) {
   const m = useMessages();
-  const locale = useLocale();
   const { refresh } = useRefresh();
   // `changing`: right after a pass, until the account is read again, the balances are the old ones.
   const { balances, failed, changing } = useAccountBalances(account, LOOK_EVERY_MS);
@@ -90,7 +89,7 @@ export function CashOutPanel({ fund, account, cashOutOnItsWay }: { fund: Address
     <div className="grid gap-4">
       {passed !== null && (
         <p role="status" className="rounded-[14px] bg-surface p-4 font-semibold">
-          {m.cashOut.passed(<span className="money">{formatPesos(passed, locale)}</span>)}
+          {m.cashOut.passed(<span className="money">{formatMoney(passed, m)}</span>)}
         </p>
       )}
 
@@ -152,10 +151,10 @@ export function CashOutPanel({ fund, account, cashOutOnItsWay }: { fund: Address
           <p className="text-muted">{m.cashOut.nothingToPass}</p>
         ) : (
           <>
-            <p>{m.account.youHave(<span className="money font-semibold">{formatPesos(fresh.wars, locale)}</span>)}</p>
+            <p>{m.account.youHave(<span className="money font-semibold">{formatMoney(fresh.wars, m)}</span>)}</p>
             <AmountField
               label={m.cashOut.amountLabel}
-              value={typed ?? pesosText(fresh.wars, locale)}
+              value={typed ?? moneyText(fresh.wars, m)}
               problem={reading?.ok === false ? reading.error : ""}
               disabled={step !== "idle"}
               onChange={setTyped}
@@ -167,7 +166,7 @@ export function CashOutPanel({ fund, account, cashOutOnItsWay }: { fund: Address
                   ? m.common.sending
                   : amount === null
                     ? m.cashOut.submit
-                    : m.cashOut.submitAmount(formatPesos(amount, locale))}
+                    : m.cashOut.submitAmount(formatMoney(amount, m))}
             </Button>
           </>
         )}

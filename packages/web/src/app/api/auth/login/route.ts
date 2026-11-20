@@ -8,7 +8,7 @@ import { assertionSchema } from "../../../../lib/schemas";
 import { getSession } from "../../../../lib/session";
 
 export async function POST(request: Request) {
-  const m = messagesFor(localeOf(request));
+  const m = messagesFor(localeOf(request), "AR");
   const body = await readJson(request, assertionSchema);
   if (!body.ok) return body.response;
   const result = await logIn({

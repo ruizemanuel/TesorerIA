@@ -2,9 +2,8 @@ import { USDT, WARS } from "@tesoreria/agent";
 import { decodeFunctionData, erc20Abi, getAddress } from "viem";
 import { describe, expect, it } from "vitest";
 import { cashOutCalls, cashOutProblem, offRampUrl, readCashOutAmount, rememberRipioAddress, rememberedRipioAddress } from "../src/lib/cash-out";
-import { NBSP, WARS_UNIT, formatPesos } from "../src/lib/format";
-import { en } from "../src/lib/i18n/en";
-import { es } from "../src/lib/i18n/es";
+import { NBSP, WARS_UNIT, formatMoney } from "../src/lib/format";
+import { en, es } from "./support/messages";
 
 const ACCOUNT = getAddress("0x2F8218c7cF6d822091EDe24Db9c46B0324c21A6F");
 const FUND = getAddress("0x00000000000000000000000000000000000f00d1");
@@ -72,7 +71,7 @@ describe("readCashOutAmount", () => {
   });
 
   it("takes an amount typed as the field shows all of it as all of it, though the field rounded it", () => {
-    expect(formatPesos(held, "es")).toBe("$ 45.000,01");
+    expect(formatMoney(held, es)).toBe("$ 45.000,01");
     expect(readCashOutAmount("45.000,01", held, es)).toEqual({ ok: true, amount: held });
     const justUnder = 45_000n * WARS_UNIT + 4n * 10n ** 15n; // $ 45.000,004 shows as $ 45.000
     expect(readCashOutAmount("45.000", justUnder, es)).toEqual({ ok: true, amount: justUnder });
@@ -81,7 +80,7 @@ describe("readCashOutAmount", () => {
   it("says what to fix: a malformed amount, nothing, or more than the account holds", () => {
     expect(readCashOutAmount("2,000.50", held, es)).toEqual({ ok: false, error: "Escribilo como 10.000 o 10.000,50." });
     expect(readCashOutAmount("0", held, es)).toEqual({ ok: false, error: "Escribilo como 10.000 o 10.000,50." });
-    expect(readCashOutAmount("45.000,02", held, es)).toEqual({ ok: false, error: `Tenés ${formatPesos(held, "es")} en tu cuenta.` });
+    expect(readCashOutAmount("45.000,02", held, es)).toEqual({ ok: false, error: `Tenés ${formatMoney(held, es)} en tu cuenta.` });
   });
 
   it("has nothing to pass below half a cent, whatever was typed", () => {

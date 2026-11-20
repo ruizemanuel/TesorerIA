@@ -14,10 +14,10 @@ import {
 } from "../src/lib/auth";
 import type { Db } from "../src/lib/db/client";
 import { credentials, users } from "../src/lib/db/schema";
-import { en } from "../src/lib/i18n/en";
-import { type Messages, es } from "../src/lib/i18n/es";
+import type { Messages } from "../src/lib/i18n/messages";
 import { LEGACY_RP_ID } from "../src/lib/passkey-sites";
 import { addUser, testDb } from "./support/db";
+import { en, es } from "./support/messages";
 import { fakeSession } from "./support/session";
 
 const RP_ID = "localhost";

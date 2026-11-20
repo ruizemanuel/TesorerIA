@@ -40,7 +40,6 @@ export default async function MovementsPage({ params }: { params: Promise<{ addr
             basePath={`/f/${view.address}`}
             viewerName={user.name}
             m={m}
-            locale={locale}
           />
         </Card>
       </main>

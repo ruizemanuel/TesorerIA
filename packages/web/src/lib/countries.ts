@@ -11,8 +11,12 @@ export function isCountryCode(value: unknown): value is CountryCode {
   return typeof value === "string" && (COUNTRY_CODES as readonly string[]).includes(value);
 }
 
-/** How a language writes an amount in a country's currency: "$ 87.500,50" in Argentina, "$87,500.50" in Mexico. */
-export type MoneyStyle = { mark: string; space: boolean; thousands: "." | ","; decimal: "," | "." };
+/**
+ * How a language writes numbers in a country: an amount in its currency ("$ 87.500,50" in Argentina, "$87,500.50" in
+ * Mexico), and a percentage, with the same decimal separator and, if `percentSpace`, a space that doesn't break before
+ * the sign ("0,25 %" in Argentina, "0.25%" in Mexico, as Intl writes es-MX).
+ */
+export type MoneyStyle = { mark: string; space: boolean; thousands: "." | ","; decimal: "," | "."; percentSpace: boolean };
 
 /** The words a screen says for a country, in one language. */
 export type CountryWords = {
@@ -69,8 +73,8 @@ export const COUNTRIES: Record<CountryCode, Country> = {
     htmlLang: { es: "es-AR", en: "en" },
     ogLocale: { es: "es_AR", en: "en_US" },
     money: {
-      es: { mark: "$", space: true, thousands: ".", decimal: "," },
-      en: { mark: "ARS", space: true, thousands: ",", decimal: "." },
+      es: { mark: "$", space: true, thousands: ".", decimal: ",", percentSpace: true },
+      en: { mark: "ARS", space: true, thousands: ",", decimal: ".", percentSpace: false },
     },
     words: {
       es: { code: "ARS", token: "wARS", bankAccount: "CBU, CVU o alias", timeName: "hora de Argentina" },
@@ -88,8 +92,8 @@ export const COUNTRIES: Record<CountryCode, Country> = {
     htmlLang: { es: "es-MX", en: "en" },
     ogLocale: { es: "es_MX", en: "en_US" },
     money: {
-      es: { mark: "$", space: false, thousands: ",", decimal: "." },
-      en: { mark: "MXN", space: true, thousands: ",", decimal: "." },
+      es: { mark: "$", space: false, thousands: ",", decimal: ".", percentSpace: false },
+      en: { mark: "MXN", space: true, thousands: ",", decimal: ".", percentSpace: false },
     },
     words: {
       es: { code: "MXN", token: "wMXN", bankAccount: "CLABE", timeName: "hora de Ciudad de México" },

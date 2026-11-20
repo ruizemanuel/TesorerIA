@@ -11,10 +11,11 @@ import { writeFileSync } from "node:fs";
 import { createElement, Fragment, isValidElement, type ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { FEE_BPS } from "@tesoreria/agent";
-import { formatDay, formatPercent, formatPesos, formatUsdt, formatWhen, intlLocale, TIME_ZONE, USDT_UNIT, WARS_UNIT } from "../src/lib/format";
+import type { Speech } from "../src/lib/countries";
+import { formatDay, formatMoney, formatPercent, formatUsdt, formatWhen, intlLocale, USDT_UNIT, WARS_UNIT } from "../src/lib/format";
 import { en } from "../src/lib/i18n/en";
-import { es, type Messages } from "../src/lib/i18n/es";
-import type { Locale } from "../src/lib/i18n/locales";
+import { es } from "../src/lib/i18n/es";
+import { type Messages, messagesFor } from "../src/lib/i18n/messages";
 
 const CENT = WARS_UNIT / 100n;
 const BROKEN = /undefined|NaN|\[object|function/;
@@ -22,7 +23,6 @@ const BROKEN = /undefined|NaN|\[object|function/;
 /** What an example is made of, in one language: its dictionary, and the names and amounts the examples share. */
 interface Kit {
   m: Messages;
-  locale: Locale;
   /** The amount in pesos, as the screen writes it ("$ 10.000", "ARS 10,000"). */
   pesos(amount: number): string;
   usdt(amount: number): string;
@@ -39,9 +39,8 @@ interface Kit {
 function kitFor(m: Messages): Kit {
   return {
     m,
-    locale: m.locale,
-    pesos: (amount) => formatPesos(BigInt(Math.round(amount * 100)) * CENT, m.locale),
-    usdt: (amount) => formatUsdt(BigInt(Math.round(amount * 1_000_000)), m.locale),
+    pesos: (amount) => formatMoney(BigInt(Math.round(amount * 100)) * CENT, m),
+    usdt: (amount) => formatUsdt(BigInt(Math.round(amount * 1_000_000)), m),
     bold: (text) => createElement("b", null, text),
     link: (text) => createElement("u", null, text),
     fund: m.create.defaults.fundNamePlaceholder,
@@ -50,7 +49,7 @@ function kitFor(m: Messages): Kit {
   };
 }
 
-const KITS = { es: kitFor(es), en: kitFor(en) };
+const KITS = { es: kitFor(messagesFor("es", "AR")), en: kitFor(messagesFor("en", "AR")) };
 
 interface Case {
   /** Which branch this is, when a function has more than one. */
@@ -96,10 +95,10 @@ const ARGS: Record<string, (k: Kit) => Case[]> = {
   "login.firstTime": ({ m, link }) => [call(link(m.login.createLink))],
   "deploy.waitingForCreator": () => [call(NAME)],
   "deploy.votesOption": () => [call(5, 8)],
-  "deploy.feeNote": ({ locale }) => [call(formatPercent(FEE_BPS, locale))],
+  "deploy.feeNote": ({ m }) => [call(formatPercent(FEE_BPS, m))],
   "share.whatsApp": ({ fund }) => [call(fund, INVITATION_URL)],
-  "summary.heading": ({ locale }) => [
-    call(1, formatDay(new Date("2026-10-12T00:19:48Z"), locale), formatDay(new Date("2026-10-19T00:19:48Z"), locale)),
+  "summary.heading": ({ m }) => [
+    call(1, formatDay(new Date("2026-10-12T00:19:48Z"), m), formatDay(new Date("2026-10-19T00:19:48Z"), m)),
   ],
   "summary.balance": ({ pesos }) => [call(pesos(80_000))],
   "summary.paid": () => [call(6, 8)],
@@ -109,7 +108,7 @@ const ARGS: Record<string, (k: Kit) => Case[]> = {
   "summary.toContribute": () => [call(FUND_URL)],
   "invitation.title": ({ fund }) => [call(NAME, createElement("i", null, fund))],
   "invitation.rules": ({ bold, pesos, expense }) => [call(bold(pesos(10_000)), bold(pesos(60_000)), expense)],
-  "invitation.feeNote": ({ locale }) => [call(formatPercent(FEE_BPS, locale))],
+  "invitation.feeNote": ({ m }) => [call(formatPercent(FEE_BPS, m))],
   "invitation.alreadyJoined": () => [call(`${NAME}, ${OTHER}, ${THIRD}`)],
   "invitation.proposed": ({ m }) => [call(NAME, 1, 2), when("an account with no name", m.timeline.someone, 1, 2)],
   "timeline.contributed": ({ m, pesos }) => [call(NAME, pesos(10_000)), when("an account with no name", m.timeline.someone, pesos(10_000))],
@@ -123,8 +122,8 @@ const ARGS: Record<string, (k: Kit) => Case[]> = {
     when("several members'", usdt(10), pesos(16_050), pesos(4.41), null),
   ],
   "timeline.convertedFor": ({ m, pesos, usdt }) => [call(usdt(6.3), pesos(8_012.34), NAME), when("an account with no name", usdt(6.3), pesos(8_012.34), m.timeline.someone)],
-  "timeline.feePaid": ({ pesos, locale }) => [call(pesos(200.05), formatPercent(FEE_BPS, locale))],
-  "timeline.feePaidDetail": ({ locale }) => [call(formatPercent(FEE_BPS, locale))],
+  "timeline.feePaid": ({ pesos, m }) => [call(pesos(200.05), formatPercent(FEE_BPS, m))],
+  "timeline.feePaidDetail": ({ m }) => [call(formatPercent(FEE_BPS, m))],
   "timeline.reimbursed": ({ pesos, expense }) => [call(pesos(45_000), NAME, expense)],
   "timeline.reimbursedLeftThisWeek": ({ pesos }) => [call(pesos(15_000))],
   "timeline.reimbursedLeftThatWeek": ({ pesos }) => [call(pesos(15_000))],
@@ -176,7 +175,7 @@ const ARGS: Record<string, (k: Kit) => Case[]> = {
   "week.dues": ({ pesos }) => [call(pesos(10_000))],
   "week.owes": ({ pesos }) => [call(pesos(10_000))],
   "rules.text": ({ bold, pesos, expense }) => [call(bold(pesos(60_000)), expense, bold(pesos(45_000)), 5, 8)],
-  "rules.fee": ({ locale }) => [call(formatPercent(FEE_BPS, locale))],
+  "rules.fee": ({ m }) => [call(formatPercent(FEE_BPS, m))],
   "account.youHave": ({ bold, pesos }) => [call(bold(pesos(1_016.1)))],
   "account.loggedInAs": () => [call(NAME)],
   "account.holds": ({ bold, pesos }) => [call(bold(pesos(1_016.1)))],
@@ -194,7 +193,7 @@ const ARGS: Record<string, (k: Kit) => Case[]> = {
   "contribute.covers": ({ pesos }) => [call(pesos(10_000))],
   "contribute.worth": ({ pesos }) => [call(pesos(16_000))],
   "contribute.youHold": ({ bold, usdt }) => [call(bold(usdt(6.18)))],
-  "contribute.feeNote": ({ locale }) => [call(formatPercent(FEE_BPS, locale))],
+  "contribute.feeNote": ({ m }) => [call(formatPercent(FEE_BPS, m))],
   "expense.agreed": ({ expense }) => [call(expense)],
   "expense.twin": ({ bold, pesos }) => [call(bold(pesos(45_000)))],
   "expense.giveBackMax": ({ pesos }) => [call(pesos(10_000))],
@@ -209,10 +208,10 @@ const ARGS: Record<string, (k: Kit) => Case[]> = {
   "chat.card.agreedNext": ({ pesos }) => [call(pesos(15_000))],
   "chat.card.otherNext": () => [call(5, 8)],
   "chat.brief.reason": ({ m }) => [call(m.timeline.proposal.agentDetail(5))],
-  "chat.brief.now": ({ locale }) => [
+  "chat.brief.now": ({ m }) => [
     call(
-      new Intl.DateTimeFormat(intlLocale(locale), {
-        timeZone: TIME_ZONE,
+      new Intl.DateTimeFormat(intlLocale(m), {
+        timeZone: m.country.timeZone,
         weekday: "long",
         day: "numeric",
         month: "long",
@@ -226,7 +225,7 @@ const ARGS: Record<string, (k: Kit) => Case[]> = {
   ],
   "chat.brief.fund": ({ fund, pesos }) => [call(fund, pesos(80_000))],
   "chat.brief.rules": ({ pesos, expense }) => [call(pesos(10_000), pesos(60_000), expense, pesos(45_000), pesos(15_000), 5, 8)],
-  "chat.brief.fee": ({ locale }) => [call(formatPercent(FEE_BPS, locale))],
+  "chat.brief.fee": ({ m }) => [call(formatPercent(FEE_BPS, m))],
   "chat.brief.speaking": () => [call(NAME)],
   "chat.brief.owe": ({ pesos }) => [call(pesos(10_000))],
   "chat.brief.upToDateAhead": ({ pesos }) => [call(pesos(20_000))],
@@ -291,19 +290,19 @@ const stale = Object.keys(ARGS).filter((path) => !used.has(path));
 if (stale.length > 0) throw new Error(`Example arguments for functions that aren't in the dictionaries: ${stale.join(", ")}`);
 
 /** The formats, from the functions the screens use. */
-const FORMATS: Array<[label: string, write: (locale: Locale) => string]> = [
-  ["formatPesos, whole", (l) => formatPesos(10_000n * WARS_UNIT, l)],
-  ["formatPesos, with cents", (l) => formatPesos(1_605_037n * CENT, l)],
-  ["formatPesos, millions", (l) => formatPesos(1_234_567n * WARS_UNIT, l)],
-  ["formatUsdt, whole", (l) => formatUsdt(10n * USDT_UNIT, l)],
-  ["formatUsdt, with decimals", (l) => formatUsdt(10_500_000n, l)],
-  ["formatWhen, today", (l) => formatWhen(new Date("2026-10-15T13:15:00Z"), NOW, l)],
-  ["formatWhen, yesterday", (l) => formatWhen(new Date("2026-10-14T21:02:00Z"), NOW, l)],
-  ["formatWhen, this week", (l) => formatWhen(new Date("2026-10-12T12:00:00Z"), NOW, l)],
-  ["formatWhen, older", (l) => formatWhen(new Date("2026-10-03T12:00:00Z"), NOW, l)],
+const FORMATS: Array<[label: string, write: (speech: Speech) => string]> = [
+  ["formatMoney, whole", (s) => formatMoney(10_000n * WARS_UNIT, s)],
+  ["formatMoney, with cents", (s) => formatMoney(1_605_037n * CENT, s)],
+  ["formatMoney, millions", (s) => formatMoney(1_234_567n * WARS_UNIT, s)],
+  ["formatUsdt, whole", (s) => formatUsdt(10n * USDT_UNIT, s)],
+  ["formatUsdt, with decimals", (s) => formatUsdt(10_500_000n, s)],
+  ["formatWhen, today", (s) => formatWhen(new Date("2026-10-15T13:15:00Z"), NOW, s)],
+  ["formatWhen, yesterday", (s) => formatWhen(new Date("2026-10-14T21:02:00Z"), NOW, s)],
+  ["formatWhen, this week", (s) => formatWhen(new Date("2026-10-12T12:00:00Z"), NOW, s)],
+  ["formatWhen, older", (s) => formatWhen(new Date("2026-10-03T12:00:00Z"), NOW, s)],
 ];
 const formats = FORMATS.map(([label, write]) => {
-  const [spanish, english] = [write("es"), write("en")].map((text, i) => html(text, `${label} (${i === 0 ? "es" : "en"})`));
+  const [spanish, english] = [write(KITS.es.m), write(KITS.en.m)].map((text, i) => html(text, `${label} (${i === 0 ? "es" : "en"})`));
   return `<tr><td>${label}</td><td>${spanish}</td><td>${english}</td></tr>`;
 });
 

@@ -7,14 +7,13 @@ import { post } from "../lib/client/api";
 import { userMessage } from "../lib/client/errors";
 import { createAccount } from "../lib/client/passkey";
 import { withAccount } from "../lib/client/sign-up";
-import { useLocale, useMessages } from "../lib/i18n/client";
+import { useMessages } from "../lib/i18n/client";
 import { PersonFields, personFrom } from "./person-fields";
 import { Button, FIELD } from "./ui";
 
 /** Creating a fund (spec, 9, screen 7). Someone without an account creates it in the same step. */
 export function CreateFundForm({ loggedIn }: { loggedIn: boolean }) {
   const router = useRouter();
-  const locale = useLocale();
   const m = useMessages();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -30,7 +29,7 @@ export function CreateFundForm({ loggedIn }: { loggedIn: boolean }) {
         const form = new FormData(event.currentTarget);
         const text = (name: string) => String(form.get(name) ?? "");
         const fields = { name: text("name"), agreedExpense: text("agreedExpense"), weeklyFee: text("weeklyFee"), weeklyCap: text("weeklyCap") };
-        const draft = readDraft(fields, locale);
+        const draft = readDraft(fields, m);
         setBusy(true);
         setError("");
         try {

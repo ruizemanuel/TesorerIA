@@ -16,13 +16,12 @@ const Draft = z.object({
 });
 
 export async function POST(request: Request) {
-  const locale = localeOf(request);
-  const m = messagesFor(locale);
+  const m = messagesFor(localeOf(request), "AR");
   const user = await currentUser();
   if (user === null) return jsonError(401, m.errors.logIn);
   const body = await readJson(request, Draft);
   if (!body.ok) return body.response;
-  const read = readDraft(body.value, locale); // the same checks the form ran before making the passkey
+  const read = readDraft(body.value, m); // the same checks the form ran before making the passkey
   if (!read.ok) return jsonError(400, read.error);
   const result = await createDraft(await getDb(), user.id, read.draft, m);
   return result.ok ? Response.json({ id: result.id }) : jsonError(result.status, result.error);

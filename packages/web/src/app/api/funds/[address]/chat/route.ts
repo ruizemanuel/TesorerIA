@@ -42,7 +42,7 @@ function sumTokens(counts: Array<number | undefined>): number | undefined {
  */
 export async function POST(request: Request, { params }: { params: Promise<{ address: string }> }) {
   const locale = localeOf(request);
-  const m = messagesFor(locale);
+  const m = messagesFor(locale, "AR");
   const user = await currentUser();
   if (user === null) return jsonError(401, m.errors.logIn);
   const { address } = await params;

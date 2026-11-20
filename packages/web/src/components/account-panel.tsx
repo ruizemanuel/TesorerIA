@@ -4,9 +4,9 @@ import Link from "next/link";
 import { useId } from "react";
 import type { Address } from "viem";
 import { useAccountBalances } from "../lib/client/account";
-import { USDT_SPECK, WARS_SPECK, formatPesos, formatUsdt } from "../lib/format";
+import { USDT_SPECK, WARS_SPECK, formatMoney, formatUsdt } from "../lib/format";
 import { type YourFund, fundTag } from "../lib/home";
-import { useLocale, useMessages } from "../lib/i18n/client";
+import { useMessages } from "../lib/i18n/client";
 import { type KeyChangeAsk, KeyChangeSection } from "./key-change-card";
 import { LanguageSwitch } from "./language-switch";
 import { LogoutButton } from "./logout-button";
@@ -38,7 +38,6 @@ export function AccountPanel({
   keyChange?: KeyChangeAsk;
 }) {
   const m = useMessages();
-  const locale = useLocale();
   const { balances, failed } = useAccountBalances(account, LOOK_EVERY_MS);
   return (
     <div className="grid gap-4">
@@ -51,10 +50,10 @@ export function AccountPanel({
             <p className="text-[24px] font-bold leading-tight [font-stretch:87%]">
               {balances.usdt >= USDT_SPECK
                 ? m.account.holdsAnd(
-                    <span className="money">{formatPesos(balances.wars, locale)}</span>,
-                    <span className="money">{formatUsdt(balances.usdt, locale)}</span>,
+                    <span className="money">{formatMoney(balances.wars, m)}</span>,
+                    <span className="money">{formatUsdt(balances.usdt, m)}</span>,
                   )
-                : m.account.holds(<span className="money">{formatPesos(balances.wars, locale)}</span>)}
+                : m.account.holds(<span className="money">{formatMoney(balances.wars, m)}</span>)}
             </p>
             <p className="text-sm text-muted">{m.account.reimbursementsLand}</p>
           </>

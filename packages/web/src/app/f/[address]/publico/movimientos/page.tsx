@@ -51,7 +51,6 @@ export default async function PublicMovementsPage({ params }: { params: Promise<
             closed={view.closed}
             basePath={home}
             m={m}
-            locale={locale}
           />
         </Card>
       </main>

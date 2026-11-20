@@ -34,8 +34,8 @@ vi.mock("../src/lib/client/api", () => api);
 import { changeKey, confirmOnLoad } from "../src/lib/client/key-change";
 import { RefusedError, UserFacingError, userMessage } from "../src/lib/client/errors";
 import type { Me } from "../src/lib/client/wallet";
-import { es } from "../src/lib/i18n/es";
 import { LEGACY_RP_ID } from "../src/lib/passkey-sites";
+import { es } from "./support/messages";
 
 const ACCOUNT = getAddress("0x2F8218c7cF6d822091EDe24Db9c46B0324c21A6F");
 const OLD = { id: "old", publicKey: "0x1234", rpId: LEGACY_RP_ID } as const;

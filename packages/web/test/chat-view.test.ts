@@ -14,10 +14,9 @@ import {
   waitingForText,
 } from "../src/lib/chat/view";
 import { expenseOutcome } from "../src/lib/expense-outcome";
-import { NBSP, formatPesos } from "../src/lib/format";
-import { en } from "../src/lib/i18n/en";
-import { es } from "../src/lib/i18n/es";
+import { NBSP, formatMoney } from "../src/lib/format";
 import { WARS } from "./support/fixtures";
+import { en, es } from "./support/messages";
 
 const rules = { agreedExpense: "la cancha", leftThisWeek: 15_000n * WARS, votesRequired: 3, members: 5 };
 const apiError = (statusCode: number, responseBody: string) =>
@@ -30,7 +29,7 @@ describe("proposalPreview: what the card says before it's confirmed (spec, 9.2)"
       kind: "la cancha (el gasto acordado)",
       amount: 45_000n * WARS,
       note: "Jueves",
-      next: `Si entra en lo que queda del tope de la semana (${formatPesos(15_000n * WARS, "es")}), te lo devuelvo enseguida. Si no, se vota.`,
+      next: `Si entra en lo que queda del tope de la semana (${formatMoney(15_000n * WARS, es)}), te lo devuelvo enseguida. Si no, se vota.`,
     });
   });
 

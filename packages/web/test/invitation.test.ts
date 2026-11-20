@@ -1,11 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import type { DraftSummary } from "../src/lib/funds";
-import { en } from "../src/lib/i18n/en";
-import { es } from "../src/lib/i18n/es";
 import { invitationFor } from "../src/lib/invitation";
 import { MAX_OPEN_JOIN_REQUESTS } from "../src/lib/join-requests";
 import { randomAccount } from "./support/db";
+import { en, es } from "./support/messages";
 
 const ME = randomUUID();
 const FUND = randomAccount();

@@ -107,7 +107,7 @@ export default async function FundPage({ params, searchParams }: { params: Promi
           />
         ) : undefined,
       }}
-      receipts={receiptPanels(screen.timeline, new Date(), m, locale)}
+      receipts={receiptPanels(screen.timeline, new Date(), m)}
       summaries={summaryPanels(screen.weekSummaries, { shareable: true })}
     />
   );

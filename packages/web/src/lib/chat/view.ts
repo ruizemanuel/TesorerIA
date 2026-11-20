@@ -1,6 +1,6 @@
 import { APICallError } from "ai";
-import { formatPesos, parsePesosEitherWay } from "../format";
-import { MESSAGES, type Messages } from "../i18n/messages";
+import { formatMoney, parseMoneyInChat } from "../format";
+import { DICTIONARIES, type Messages } from "../i18n/messages";
 import { MAX_MESSAGE_CHARS } from "./limits";
 import type { ChatUIMessage, ProposedExpense } from "./tools";
 
@@ -9,26 +9,27 @@ export type ProposalRules = { agreedExpense: string; leftThisWeek: bigint; votes
 
 /**
  * The card before it's confirmed: the kind, the amount (null if it can't be read), the note, and what comes next, in
- * the page's language. The amount is the model's, not a person's: it is read in either language's way (parsePesosEitherWay).
+ * the page's language. The amount is the model's, not a person's: it is read in either language's way, in the page's
+ * country (parseMoneyInChat).
  */
 export function proposalPreview(input: ProposedExpense, rules: ProposalRules, m: Messages) {
-  const amount = parsePesosEitherWay(input.amount);
+  const amount = parseMoneyInChat(input.amount, m.country);
   return {
     kind: input.kind === "agreed" ? m.expense.agreed(rules.agreedExpense) : m.chat.card.otherExpense,
     amount,
     note: input.note,
     next:
       input.kind === "agreed"
-        ? m.chat.card.agreedNext(formatPesos(rules.leftThisWeek, m.locale))
+        ? m.chat.card.agreedNext(formatMoney(rules.leftThisWeek, m))
         : m.chat.card.otherNext(rules.votesRequired, rules.members),
   };
 }
 
 /** The route's own words, in every language: it answers in its request's, which isn't always the page's by the time they arrive. */
 const OURS = new Set(
-  Object.values(MESSAGES).flatMap((m) => [m.chat.unavailable, m.chat.memberLimit, m.chat.longMessage(MAX_MESSAGE_CHARS), m.chat.badRequest, m.chat.notFound]),
+  Object.values(DICTIONARIES).flatMap((m) => [m.chat.unavailable, m.chat.memberLimit, m.chat.longMessage(MAX_MESSAGE_CHARS), m.chat.badRequest, m.chat.notFound]),
 );
-const MEMBER_LIMITS = new Set(Object.values(MESSAGES).map((m) => m.chat.memberLimit));
+const MEMBER_LIMITS = new Set(Object.values(DICTIONARIES).map((m) => m.chat.memberLimit));
 
 /**
  * What the panel says when a message didn't go through: the route's own words (its JSON `error`, or a stream error,

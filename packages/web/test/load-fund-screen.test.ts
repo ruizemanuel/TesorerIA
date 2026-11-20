@@ -5,13 +5,14 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CurrentUser } from "../src/lib/current-user";
 import type { Db } from "../src/lib/db/client";
 import { decisions, expenses, funds, joinRequests, memberships, operations, weekSummaries } from "../src/lib/db/schema";
-import { NBSP, formatPesos, formatUsdt } from "../src/lib/format";
+import { NBSP, formatMoney, formatUsdt } from "../src/lib/format";
 import { JOIN_REQUEST_REACH_DAYS } from "../src/lib/join-requests";
 import { finishOperation, recordOperation } from "../src/lib/operations";
 import { HistoryGapError, loadFundScreen as loadScreen, loadPublicFundScreen } from "../src/lib/read-fund";
 import { storeFacts } from "../src/lib/week-summaries";
 import { addLiveFund, addUser, randomAccount, testDb } from "./support/db";
 import { AGENT, BLOCK, CLOCK, USDT_UNIT, WARS, event, snapshot } from "./support/fixtures";
+import { en, es } from "./support/messages";
 
 // Who may see which fund (spec, 9.2) is decided before and around the chain reads, so the chain and the
 // database stand in: the database is a real (in-memory) one, the chain answers what each test sets.
@@ -187,7 +188,7 @@ describe("loadFundScreen: who sees a fund", () => {
       reader === readers.node ? history.filter((e) => e.blockNumber >= fromBlock && e.blockNumber <= toBlock) : [],
     );
     const screen = await loadFundScreen(address, asViewer(ana));
-    expect(texts(screen!)).toEqual([`Beto aportó ${formatPesos(10_000n * WARS, "es")}.`]);
+    expect(texts(screen!)).toEqual([`Beto aportó ${formatMoney(10_000n * WARS, es)}.`]);
   });
 });
 
@@ -198,7 +199,7 @@ describe("loadFundScreen: the public view", () => {
     const screen = (await loadFundScreen(address, null, { publicView: true }))!;
     expect(screen).toMatchObject({ publicView: true });
     expect(screen.view.rows.map((row) => row.name)).toEqual(["Miembro 1", "Miembro 2", "Miembro 3"]);
-    expect(texts(screen)).toEqual([`Miembro 3 aportó ${formatPesos(10_000n * WARS, "es")}.`]);
+    expect(texts(screen)).toEqual([`Miembro 3 aportó ${formatMoney(10_000n * WARS, es)}.`]);
     // Nothing in what the screen carries has a real name.
     const everything = JSON.stringify(screen, (_, value) => (typeof value === "bigint" ? value.toString() : value));
     for (const name of ["Ana", "Beto", "Caro"]) expect(everything).not.toContain(name);
@@ -224,8 +225,8 @@ describe("loadFundScreen: the public view", () => {
     const english = (await loadPublicFundScreen(address, "en"))!;
     expect(spanish.view.rows[0]!.name).toBe("Miembro 1");
     expect(english.view.rows[0]!.name).toBe("Member 1");
-    expect(texts(spanish)).toEqual([`Miembro 2 aportó ${formatPesos(10_000n * WARS, "es")}.`]);
-    expect(texts(english)).toEqual([`Member 2 contributed ${formatPesos(10_000n * WARS, "en")}.`]);
+    expect(texts(spanish)).toEqual([`Miembro 2 aportó ${formatMoney(10_000n * WARS, es)}.`]);
+    expect(texts(english)).toEqual([`Member 2 contributed ${formatMoney(10_000n * WARS, en)}.`]);
 
     // Each language is its own entry: asking again gives each its own screen back, without reading the chain again.
     expect(await loadPublicFundScreen(address, "es")).toBe(spanish);
@@ -238,7 +239,7 @@ describe("loadFundScreen: the public view", () => {
     const address = await liveFund();
     setHistory([paidByBeto()]);
     const screen = (await loadFundScreen(address, asViewer(ana), { locale: "en" }))!;
-    expect(texts(screen)).toEqual([`Beto contributed ${formatPesos(10_000n * WARS, "en")}.`]);
+    expect(texts(screen)).toEqual([`Beto contributed ${formatMoney(10_000n * WARS, en)}.`]);
     expect(screen.view.rows.map((row) => row.name)).toEqual(["Ana", "Beto", "Caro"]);
   });
 
@@ -260,7 +261,7 @@ describe("loadFundScreen: the public view", () => {
       ["Caro", false],
     ]);
     expect(screen.view.me).toBeNull();
-    expect(texts(screen)).toEqual([`Beto aportó ${formatPesos(10_000n * WARS, "es")}.`]);
+    expect(texts(screen)).toEqual([`Beto aportó ${formatMoney(10_000n * WARS, es)}.`]);
   });
 
   it("does not read the expenses or the pending operations: they are the group's, not the public's", async () => {
@@ -282,7 +283,7 @@ describe("loadFundScreen: the public view", () => {
     // The members do see them...
     const own = (await loadFundScreen(address, asViewer(ana)))!;
     expect(texts(own).some((text) => text.includes("que cargó Ana (pelota)"))).toBe(true);
-    expect(own.timeline.filter((item) => item.pending).map((item) => item.text)).toEqual([`Tu aporte de ${formatPesos(10_000n * WARS, "es")} está en camino.`]);
+    expect(own.timeline.filter((item) => item.pending).map((item) => item.text)).toEqual([`Tu aporte de ${formatMoney(10_000n * WARS, es)} está en camino.`]);
 
     // ...and the public view, even asked by that same member, sees neither.
     for (const viewer of [null, asViewer(ana)]) {
@@ -296,7 +297,7 @@ describe("loadFundScreen: the public view", () => {
     await recordOperation(db, ana.id, { userOpHash: `0x${"b1".repeat(32)}`, kind: "contribute", fund: address, amount: 10_000n * WARS, token: "wars" });
     await recordOperation(db, beto.id, { userOpHash: `0x${"b2".repeat(32)}`, kind: "contribute", fund: address, amount: 20_000n * WARS, token: "wars" });
     const forBeto = (await loadFundScreen(address, asViewer(beto)))!;
-    expect(texts(forBeto)).toEqual([`Tu aporte de ${formatPesos(20_000n * WARS, "es")} está en camino.`]);
+    expect(texts(forBeto)).toEqual([`Tu aporte de ${formatMoney(20_000n * WARS, es)} está en camino.`]);
   });
 
   describe("a contribution on its way", () => {
@@ -379,7 +380,7 @@ describe("loadFundScreen: what converting USDT lost (conversion-loss design)", (
     const screen = (await loadFundScreen(address, asViewer(caro)))!;
     expect(screen.view.rows[2]?.owed).toBe(60n * WARS);
     expect(texts(screen).filter((text) => text.startsWith("Pasé a pesos"))).toEqual([
-      `Pasé a pesos los ${formatUsdt(6n * USDT_UNIT, "es")} que entraron: ${formatPesos(9_940n * WARS, "es")}, ${formatPesos(60n * WARS, "es")} menos de lo que valían al aportarlos. Esa diferencia la pone Caro.`,
+      `Pasé a pesos los ${formatUsdt(6n * USDT_UNIT, es)} que entraron: ${formatMoney(9_940n * WARS, es)}, ${formatMoney(60n * WARS, es)} menos de lo que valían al aportarlos. Esa diferencia la pone Caro.`,
     ]);
   });
 });
@@ -418,8 +419,8 @@ describe("loadFundScreen: a contribution given back (spec, 7.3)", () => {
     const screen = (await loadFundScreen(address, asViewer(caro)))!;
     expect(screen.view.rows[2]?.owed).toBe(5_000n * WARS);
     expect(texts(screen).filter((text) => text.includes("devol"))).toEqual([
-      `El fondo le devolvió ${formatPesos(10_000n * WARS, "es")} de su aporte a Caro: la propuesta se aprobó.`,
-      `Propuse devolverle ${formatPesos(10_000n * WARS, "es")} de su aporte a Caro (deposité en otro fondo). Lleva 1 de 2 votos.`,
+      `El fondo le devolvió ${formatMoney(10_000n * WARS, es)} de su aporte a Caro: la propuesta se aprobó.`,
+      `Propuse devolverle ${formatMoney(10_000n * WARS, es)} de su aporte a Caro (deposité en otro fondo). Lleva 1 de 2 votos.`,
     ]);
     // The public view counts it the same: the dues are the group's list.
     await db.update(funds).set({ publicView: true }).where(eq(funds.id, fund!.id));
@@ -546,7 +547,7 @@ describe("loadFundScreen: a version 2 fund", () => {
 
     setHistory([event("Contribution", { member: caroAccount(), token: USDT, amount: 6n * USDT_UNIT, credited: 0n }, BLOCK - 100n)]);
     chainFund({ address, members: [ana, beto, caro].map((person) => getAddress(person.account)), version: 2, feeBps: 25, ...caroPending() });
-    expect(await holds(address)).toEqual([expect.stringContaining(`Todavía no pasé a pesos ${formatUsdt(6n * USDT_UNIT, "es")}: el precio de referencia`)]);
+    expect(await holds(address)).toEqual([expect.stringContaining(`Todavía no pasé a pesos ${formatUsdt(6n * USDT_UNIT, es)}: el precio de referencia`)]);
   });
 
   it("a v2 member sees how many proposals they have left, and how much they can ask back", async () => {
@@ -584,7 +585,7 @@ describe("loadFundScreen: a version 2 fund", () => {
     setHistory([event("FeePaid", { amount: 200n * WARS }, BLOCK - 100n)]);
     const address = await liveFundV2();
     expect(texts((await loadFundScreen(address, asViewer(ana)))!)).toEqual([
-      `Pasé ${formatPesos(200n * WARS, "es")} de la comisión del 0,25${NBSP}% a TesorerIA, para cubrir lo que cuestan las operaciones del fondo.`,
+      `Pasé ${formatMoney(200n * WARS, es)} de la comisión del 0,25${NBSP}% a TesorerIA, para cubrir lo que cuestan las operaciones del fondo.`,
     ]);
   });
 
@@ -627,7 +628,7 @@ describe("loadFundScreen: the week summaries (spec, 9.4)", () => {
     const [summary] = screen!.weekSummaries;
     expect(summary?.week).toBe(1);
     expect(summary?.text).toContain("Resumen de la semana 2 (del 18/10 al 25/10)");
-    expect(summary?.text).toContain(`· Beto, ${formatPesos(10_000n * WARS, "es")}`);
+    expect(summary?.text).toContain(`· Beto, ${formatMoney(10_000n * WARS, es)}`);
     expect(summary?.text.endsWith(`Para aportar: https://tesoreriaia.vercel.app/f/${address}`)).toBe(true);
     const item = screen?.timeline.find((i) => i.id === "summary:1");
     expect(item).toMatchObject({ actor: { kind: "agent" }, text: "Cerré la semana 2. Te dejo el resumen para el grupo.", action: { kind: "summary", week: 1 } });
@@ -637,7 +638,7 @@ describe("loadFundScreen: the week summaries (spec, 9.4)", () => {
     const address = await withSummary({ publicView: true });
     const screen = await loadFundScreen(address, null, { publicView: true });
     const text = screen?.weekSummaries[0]?.text ?? "";
-    expect(text).toContain(`· Miembro 2, ${formatPesos(10_000n * WARS, "es")}`);
+    expect(text).toContain(`· Miembro 2, ${formatMoney(10_000n * WARS, es)}`);
     expect(text).not.toContain("Beto");
     expect(text).not.toContain("Para aportar");
   });

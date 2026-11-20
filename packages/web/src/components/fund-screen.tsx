@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import type { CurrentUser } from "../lib/current-user";
-import { getLocale, getMessages } from "../lib/i18n/server";
+import { getMessages } from "../lib/i18n/server";
 import type { FundScreen } from "../lib/read-fund";
 import { splitYourTurn } from "../lib/timeline";
 import { AgentButton, TabBar, TopBar } from "./bars";
@@ -43,7 +43,6 @@ export async function FundScreenView({
   keyChange?: KeyChangeAsk;
 }) {
   const m = await getMessages();
-  const locale = await getLocale();
   const { view, timeline, publicView } = screen;
   const userName = publicView ? undefined : user?.name;
   // What waits for the viewer goes up to Te toca (spec, 9.8), and the latest show the rest, without repeating it.
@@ -56,7 +55,6 @@ export async function FundScreenView({
     closed: view.closed,
     viewerName: userName,
     m,
-    locale,
   };
   const movements = { ...list, items: rest, href: movementsPath(view.address, publicView) };
   return (
@@ -72,17 +70,16 @@ export async function FundScreenView({
             userName={userName}
             account={publicView ? undefined : user?.account}
             m={m}
-            locale={locale}
           />
           <div className="mx-auto grid w-full max-w-[560px] gap-3 px-4 lg:max-w-none lg:gap-4 lg:px-0">
             {!publicView && keyChange !== undefined && <KeyChangeCard due={keyChange.due} resume={keyChange.resume} />}
             <YourTurn items={yourTurn} {...list} />
-            <WeekList view={view} justPaid={previousBalance !== undefined} m={m} locale={locale} />
+            <WeekList view={view} justPaid={previousBalance !== undefined} m={m} />
             <Card className="lg:hidden">
               <CardTitle>{m.movements.latest}</CardTitle>
               <LatestMovements shown={PHONE_LATEST} {...movements} />
             </Card>
-            <RulesCard view={view} m={m} locale={locale} />
+            <RulesCard view={view} m={m} />
           </div>
         </div>
         <Card className="hidden lg:block">

@@ -6,7 +6,7 @@ import { chatCall } from "../src/lib/chat/call";
 import { toAnswerStream, toModelMessages } from "../src/lib/chat/convert";
 import { readChatRequest } from "../src/lib/chat/request";
 import type { ChatUIMessage } from "../src/lib/chat/tools";
-import { es } from "../src/lib/i18n/es";
+import { es } from "./support/messages";
 
 const usage = { inputTokens: { total: 2_000, noCache: 2_000, cacheRead: 0, cacheWrite: 0 }, outputTokens: { total: 40, text: 0, reasoning: 30 } };
 const streamOf = (chunks: LanguageModelV4StreamPart[]) => simulateReadableStream({ chunks, initialDelayInMs: null, chunkDelayInMs: null });

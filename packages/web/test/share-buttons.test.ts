@@ -7,7 +7,8 @@ import { LocaleProvider } from "../src/lib/i18n/client";
 import type { Locale } from "../src/lib/i18n/locales";
 import { whatsAppLink } from "../src/lib/share";
 
-const inLocale = (locale: Locale, child: ReturnType<typeof createElement>) => renderToStaticMarkup(createElement(LocaleProvider, { locale, children: child }));
+const inLocale = (locale: Locale, child: ReturnType<typeof createElement>) =>
+  renderToStaticMarkup(createElement(LocaleProvider, { locale, country: "AR", children: child }));
 
 /** The WhatsApp link's `text`, as WhatsApp reads it, from the markup of a page. */
 function sent(markup: string): string | null {

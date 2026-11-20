@@ -1,7 +1,6 @@
-import { MAX_PESOS, formatPesos, parsePesos } from "./format";
+import { MAX_PESOS, formatMoney, parseMoney } from "./format";
 import { DEFAULT_BALANCE_CAP } from "./fund-abi";
-import type { Locale } from "./i18n/locales";
-import { type Messages, messagesFor } from "./i18n/messages";
+import type { Messages } from "./i18n/messages";
 
 // What the forms check, shared by the browser (before the passkey is made: see withAccount) and the server, so
 // both refuse the same things with the same sentence, in the language of the person (`m`).
@@ -24,17 +23,17 @@ export function draftProblem({ name, agreedExpense, weeklyFee, weeklyCap }: Draf
   if (expense.length === 0 || expense.length > 40) return m.checks.agreedExpense;
   if (weeklyFee <= 0n) return m.checks.feeZero;
   if (weeklyCap <= 0n) return m.checks.capZero;
-  if (weeklyFee > MAX_PESOS) return m.checks.feeTooBig(formatPesos(MAX_PESOS, m.locale));
-  if (weeklyCap > MAX_PESOS) return m.checks.capTooBig(formatPesos(MAX_PESOS, m.locale));
+  if (weeklyFee > MAX_PESOS) return m.checks.feeTooBig(formatMoney(MAX_PESOS, m));
+  if (weeklyCap > MAX_PESOS) return m.checks.capTooBig(formatMoney(MAX_PESOS, m));
   return fundCapProblem(weeklyCap, m);
 }
 
 /** Whether a weekly cap is above the fund's cap on its balance, which FundV2 reverts at creation, and what to say of it. */
 export function fundCapProblem(weeklyCap: bigint, m: Messages): string | null {
-  return weeklyCap > DEFAULT_BALANCE_CAP ? m.checks.capAboveFundCap(formatPesos(DEFAULT_BALANCE_CAP, m.locale)) : null;
+  return weeklyCap > DEFAULT_BALANCE_CAP ? m.checks.capAboveFundCap(formatMoney(DEFAULT_BALANCE_CAP, m)) : null;
 }
 
-/** A draft as the form has it, with its amounts read the way `locale` writes them (`parsePesos`), or what to fix. */
+/** A draft as the form has it, with its amounts read the way `m` writes them (`parseMoney`), or what to fix in its words. */
 export function readDraft(
   input: {
     name: string;
@@ -42,12 +41,11 @@ export function readDraft(
     weeklyFee: string;
     weeklyCap: string;
   },
-  locale: Locale,
+  m: Messages,
 ): { ok: true; draft: DraftSettings } | { ok: false; error: string } {
-  const m = messagesFor(locale);
-  const weeklyFee = parsePesos(input.weeklyFee, locale);
+  const weeklyFee = parseMoney(input.weeklyFee, m);
   if (weeklyFee === null) return { ok: false, error: m.checks.feeUnreadable };
-  const weeklyCap = parsePesos(input.weeklyCap, locale);
+  const weeklyCap = parseMoney(input.weeklyCap, m);
   if (weeklyCap === null) return { ok: false, error: m.checks.capUnreadable };
   const draft = { name: input.name.trim(), agreedExpense: input.agreedExpense.trim(), weeklyFee, weeklyCap };
   const problem = draftProblem(draft, m);

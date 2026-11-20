@@ -3,10 +3,9 @@ import { type Address, getAddress, pad, toHex, zeroAddress } from "viem";
 import { describe, expect, it } from "vitest";
 import type { ExpenseStatus } from "../src/lib/db/schema";
 import { NBSP, formatUsdt } from "../src/lib/format";
-import { en } from "../src/lib/i18n/en";
-import { es } from "../src/lib/i18n/es";
 import { type ProposalState, type TimelineItem, buildTimeline, splitYourTurn } from "../src/lib/timeline";
 import { AGENT, ANA, BETO, BLOCK, CARO, CLOCK, NOW, START, USDT_UNIT, WARS, event } from "./support/fixtures";
+import { en, es } from "./support/messages";
 
 const NAMES = new Map<Address, string>([
   [ANA, "Ana"],
@@ -242,7 +241,7 @@ describe("buildTimeline", () => {
         id: "conversion-hold",
         at,
         actor: { kind: "agent" },
-        text: `Todavía no pasé a pesos ${formatUsdt(5n * USDT_UNIT, "es")}: el precio de referencia del dólar no está al día. Lo vuelvo a intentar en unos minutos.`,
+        text: `Todavía no pasé a pesos ${formatUsdt(5n * USDT_UNIT, es)}: el precio de referencia del dólar no está al día. Lo vuelvo a intentar en unos minutos.`,
       },
     ]);
     expect(hold("daily-limit")[0]?.text).toContain(": ya cambié todo lo que puedo cambiar por día en este fondo.");

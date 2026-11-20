@@ -8,7 +8,7 @@ import { currentUser } from "../../../../../lib/current-user";
 import { getDb } from "../../../../../lib/db/client";
 import { expenses, funds, memberships } from "../../../../../lib/db/schema";
 import { submitExpense } from "../../../../../lib/expenses";
-import { parsePesos } from "../../../../../lib/format";
+import { parseMoney } from "../../../../../lib/format";
 import { jsonError, readJson } from "../../../../../lib/http";
 import { localeOf } from "../../../../../lib/i18n/locales";
 import { messagesFor } from "../../../../../lib/i18n/messages";
@@ -27,15 +27,14 @@ const Expense = z.object({
 
 /** Keeps the expense and hands it to the agent right away (spec, 8.3: "por eventos"). */
 export async function POST(request: Request, { params }: { params: Promise<{ address: string }> }) {
-  const locale = localeOf(request);
-  const m = messagesFor(locale);
+  const m = messagesFor(localeOf(request), "AR");
   const user = await currentUser();
   if (user === null) return jsonError(401, m.errors.logIn);
   const { address } = await params;
   if (!isAddress(address, { strict: false })) return jsonError(404, m.errors.fundNotFound);
   const body = await readJson(request, Expense);
   if (!body.ok) return body.response;
-  const amount = parsePesos(body.value.amount, locale);
+  const amount = parseMoney(body.value.amount, m);
   if (amount === null) return jsonError(400, `${m.expenses.amountUnreadable} ${m.errors.amountFormat}`);
 
   const db = await getDb();

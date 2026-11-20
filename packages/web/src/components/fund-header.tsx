@@ -1,7 +1,6 @@
 import type { Address } from "viem";
-import { formatPesos } from "../lib/format";
+import { formatMoney } from "../lib/format";
 import type { FundView } from "../lib/fund-view";
-import type { Locale } from "../lib/i18n/locales";
 import type { Messages } from "../lib/i18n/messages";
 import { AccountHolding } from "./account-holding";
 import { FundNameRow } from "./bars";
@@ -21,7 +20,6 @@ export function FundHeader({
   userName,
   account,
   m,
-  locale,
 }: {
   view: FundView;
   readOnly: boolean;
@@ -29,10 +27,9 @@ export function FundHeader({
   userName?: string;
   account?: Address;
   m: Messages;
-  locale: Locale;
 }) {
   const { me } = view;
-  const money = (units: bigint) => <span className="money">{formatPesos(units, locale)}</span>;
+  const money = (units: bigint) => <span className="money">{formatMoney(units, m)}</span>;
   return (
     <section className="border-b-4 border-primary bg-surface lg:rounded-[14px] lg:border-b-0">
       <div className="mx-auto max-w-[560px] px-4 pb-5 pt-1.5 lg:max-w-none lg:p-5">
@@ -42,7 +39,7 @@ export function FundHeader({
         {/* The label first, as wallet apps do, so the balance doesn't read as "$ X en el fondo. Estás al día…" */}
         <p className="mt-1 text-sm text-muted lg:mt-0">{m.fund.inFund}</p>
         <p className="narrow money mt-1 text-[50px] font-bold leading-none lg:text-[52px]">
-          {previousBalance === undefined ? formatPesos(view.balance, locale) : <CountUp from={previousBalance} to={view.balance} />}
+          {previousBalance === undefined ? formatMoney(view.balance, m) : <CountUp from={previousBalance} to={view.balance} />}
         </p>
         {me !== null && (
           <>

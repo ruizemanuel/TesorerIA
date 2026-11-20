@@ -1,8 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { expenseFields, expenseLimits, panelOutcome } from "../src/lib/expense-fields";
 import { NBSP, WARS_UNIT } from "../src/lib/format";
-import { en } from "../src/lib/i18n/en";
-import { es } from "../src/lib/i18n/es";
+import { en, es } from "./support/messages";
 
 describe("expenseFields: what the Cargar gasto panel asks, by the kind chosen", () => {
   it("asks how much was paid, with an optional note, for an expense", () => {

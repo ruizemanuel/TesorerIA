@@ -2,12 +2,12 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { ContributeAmount } from "../src/components/contribute-amount";
+import { COUNTRIES, type Speech } from "../src/lib/countries";
 import { NBSP, formatPercent } from "../src/lib/format";
-import { en } from "../src/lib/i18n/en";
-import { es } from "../src/lib/i18n/es";
+import { en, es } from "./support/messages";
 
 /** Aportar's amount, as the USDT tab shows it, with these changes. */
-function render(changes: { token?: "usdt" | "wars"; problem?: string; note?: string } = {}) {
+function render(changes: { token?: "usdt" | "wars"; problem?: string; note?: string; speech?: Speech } = {}) {
   return renderToStaticMarkup(
     createElement(ContributeAmount, {
       label: es.contribute.amountLabel,
@@ -18,6 +18,7 @@ function render(changes: { token?: "usdt" | "wars"; problem?: string; note?: str
       note: es.contribute.covers("$ 10.000"),
       disabled: false,
       onChange() {},
+      speech: es,
       ...changes,
     }),
   );
@@ -41,10 +42,20 @@ describe("ContributeAmount", () => {
     expect(render({ token: "wars", note: undefined })).toContain("ARS</span>");
   });
 
+  it("names the fund's currency by its country, with the same sign in both languages", () => {
+    const pill = (token: "usdt" | "wars", speech: Speech) =>
+      /aria-hidden="true"[^>]*>([^<]+)<\/span>([^<]+)<\/span>/.exec(render({ token, note: undefined, speech }))?.slice(1);
+    expect(pill("wars", es)).toEqual(["$", "ARS"]);
+    expect(pill("wars", en)).toEqual(["$", "ARS"]);
+    expect(pill("wars", { locale: "es", country: COUNTRIES.MX })).toEqual(["$", "MXN"]);
+    expect(pill("wars", { locale: "en", country: COUNTRIES.MX })).toEqual(["$", "MXN"]);
+    expect(pill("usdt", { locale: "es", country: COUNTRIES.MX })).toEqual(["₮", "USDT"]);
+  });
+
   it("says under a v2 fund's amount the fee it includes, in each language's way of writing it", () => {
-    const html = render({ token: "wars", note: es.contribute.feeNote(formatPercent(25, "es")) });
+    const html = render({ token: "wars", note: es.contribute.feeNote(formatPercent(25, es)) });
     expect(html).toContain(`Incluye el 0,25${NBSP}% que cubre lo que cuestan las operaciones del fondo: lo demás cuenta como tu aporte.`);
-    expect(en.contribute.feeNote(formatPercent(25, "en"))).toBe("It includes the 0.25% that covers what the fund's operations cost: the rest counts as your contribution.");
+    expect(en.contribute.feeNote(formatPercent(25, en))).toBe("It includes the 0.25% that covers what the fund's operations cost: the rest counts as your contribution.");
   });
 
   it("puts what to fix in place of the note, as an alert, and marks the amount as invalid", () => {

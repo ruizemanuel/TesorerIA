@@ -80,7 +80,7 @@ export default async function Home() {
           {real && (
             <div className="grid gap-2">
               <p className="text-sm text-muted">{m.home.live(<span className="font-semibold text-ink">{real.view.name}</span>)}</p>
-              <WeekList view={real.view} m={m} locale={locale} />
+              <WeekList view={real.view} m={m} />
             </div>
           )}
         </div>
@@ -96,7 +96,7 @@ export default async function Home() {
           ))}
         </ol>
       </Card>
-      {real && <HomeRules view={real.view} m={m} locale={locale} />}
+      {real && <HomeRules view={real.view} m={m} />}
       <HomeJudges m={m} />
     </main>
   );

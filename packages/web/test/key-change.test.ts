@@ -7,7 +7,6 @@ import { CHALLENGE_TTL_MS, issueChallenge, logIn } from "../src/lib/auth";
 import type { Db } from "../src/lib/db/client";
 import { acquireLock, releaseLock } from "../src/lib/db/lock";
 import { credentials, operations } from "../src/lib/db/schema";
-import { es } from "../src/lib/i18n/es";
 import {
   KEY_CHANGE_LOCK_TTL_MS,
   type KeyChangeInput,
@@ -21,6 +20,7 @@ import {
 import { LEGACY_RP_ID } from "../src/lib/passkey-sites";
 import type { Session } from "../src/lib/session";
 import { addUser, testDb } from "./support/db";
+import { es } from "./support/messages";
 import { fakeSession } from "./support/session";
 
 const RP_ID = "tesoreria.finance";

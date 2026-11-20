@@ -22,9 +22,9 @@ import {
   weeklyContribution,
   withFee,
 } from "../lib/contribute";
-import { USDT_UNIT, formatPercent, formatPesos, formatUsdt, upToCentavo } from "../lib/format";
+import { USDT_UNIT, formatMoney, formatPercent, formatUsdt, upToCentavo } from "../lib/format";
 import { memberFundAbi } from "../lib/fund-abi";
-import { useLocale, useMessages } from "../lib/i18n/client";
+import { useMessages } from "../lib/i18n/client";
 import { AddressBox } from "./address-box";
 import { ContributeAmount } from "./contribute-amount";
 import { useRefresh } from "./refresh-provider";
@@ -79,7 +79,6 @@ export function ContributePanel({
   contributionOnItsWay: boolean;
 }) {
   const m = useMessages();
-  const locale = useLocale();
   const router = useRouter();
   const { refresh } = useRefresh();
   // A fund with no dollar takes its currency alone.
@@ -129,7 +128,7 @@ export function ContributePanel({
   // fund's rate, with no fee, since a version 2 fund counts pending dollars whole. In version 1, both what is left.
   const room = roomUnderCap(counted, balanceCap, feeBps);
   const usdtRoom = roomUnderCap(counted, balanceCap, 0);
-  const cap = formatPesos(balanceCap, locale);
+  const cap = formatMoney(balanceCap, m);
   // This week's contribution, in pesos, net of any fee: what both tabs cover, and what the USDT one says how much to send for.
   const target = weeklyContribution({ owed, weeklyFee, room: usdtRoom });
   // Reimbursements land in this same account, so wARS are offered by what the member owes, never by what they hold (F7).
@@ -143,12 +142,12 @@ export function ContributePanel({
   const reading = tab === "usdt" ? usdtReading : wars.reading;
   const amount = reading.ok ? reading.amount : 0n;
   // Pesos up to the centavo, as the field shows them: what was typed already is, and a version 2 fee's amount is a fraction over.
-  const label = tab === "usdt" ? formatUsdt(amount, locale) : formatPesos(upToCentavo(amount), locale);
+  const label = tab === "usdt" ? formatUsdt(amount, m) : formatMoney(upToCentavo(amount), m);
   // Ripio loads what the pesos tab asks: in a version 2 fund, what credits the week after the fee, up to the centavo.
   const rampAmount = version === 2 ? upToCentavo(withFee(target, feeBps)) : target;
   // Under the amount: in USDT, what it covers at the fund's rate; in either tab, the fee a version 2 fund leaves of it.
   const usdtNote = held !== null && held.rate !== null && usdtReading.ok ? usdtWorthText(usdtReading.amount, held.rate, target, m) : null;
-  const feeNote = feeBps > 0 ? m.contribute.feeNote(formatPercent(feeBps, locale)) : null;
+  const feeNote = feeBps > 0 ? m.contribute.feeNote(formatPercent(feeBps, m)) : null;
   const notes = [tab === "usdt" ? usdtNote : null, feeNote].filter((part) => part !== null);
   const note = notes.length > 0 ? notes.join(" ") : undefined;
   const holding = held === null ? 0n : held[tab];
@@ -206,9 +205,9 @@ export function ContributePanel({
         {tab === "usdt" ? (
           <p>
             {toSend !== null && toSend > 0n
-              ? sendAtLeast(<span className="money font-semibold">{formatUsdt(toSend, locale)}</span>, <span className="money">{formatPesos(target, locale)}</span>)
+              ? sendAtLeast(<span className="money font-semibold">{formatUsdt(toSend, m)}</span>, <span className="money">{formatMoney(target, m)}</span>)
               : m.contribute.sendUsdt}{" "}
-            {binanceMinimum(<span className="money">{formatUsdt(MIN_BINANCE_USDT, locale)}</span>)}
+            {binanceMinimum(<span className="money">{formatUsdt(MIN_BINANCE_USDT, m)}</span>)}
           </p>
         ) : (
           <div className="grid gap-2">
@@ -241,14 +240,15 @@ export function ContributePanel({
               <ContributeAmount
                 label={m.contribute.amountLabel}
                 held={m.contribute.youHold(
-                  <span className="money font-semibold">{tab === "usdt" ? formatUsdt(held.usdt, locale) : formatPesos(held.wars, locale)}</span>,
+                  <span className="money font-semibold">{tab === "usdt" ? formatUsdt(held.usdt, m) : formatMoney(held.wars, m)}</span>,
                 )}
                 token={tab}
-                value={tab === "usdt" ? (typedUsdt ?? usdtText(usdtDefault, locale)) : wars.value}
+                value={tab === "usdt" ? (typedUsdt ?? usdtText(usdtDefault, m)) : wars.value}
                 problem={reading.ok ? "" : reading.error}
                 note={note}
                 disabled={step !== "idle"}
                 onChange={tab === "usdt" ? setTypedUsdt : setTyped}
+                speech={m}
               />
               <Button disabled={step !== "idle" || amount === 0n} onClick={contribute}>
                 {step === "signing" ? m.common.confirm : step === "sending" ? m.common.sending : m.contribute.submit(label)}

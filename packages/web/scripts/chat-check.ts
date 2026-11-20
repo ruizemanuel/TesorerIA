@@ -137,7 +137,7 @@ async function main(address: Address, position: number) {
   if (person === undefined) throw new CheckError(`The fund has ${people.length} members`);
   const viewer = { id: person.id, name: person.name, account: getAddress(person.account) };
 
-  const m = messagesFor(locale);
+  const m = messagesFor(locale, "AR");
   const screen = await loadFundScreen(address, viewer, { locale });
   if (screen === null) throw new CheckError("The fund's screen could not be loaded for that member");
   const brief = fundBrief(screen, viewer.name, new Date(), m);

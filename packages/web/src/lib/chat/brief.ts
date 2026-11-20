@@ -1,4 +1,4 @@
-import { TIME_ZONE, formatPercent, formatPesos, formatWhen, intlLocale } from "../format";
+import { formatMoney, formatPercent, formatWhen, intlLocale } from "../format";
 import type { FundView } from "../fund-view";
 import type { Messages } from "../i18n/messages";
 import type { FundScreen } from "../read-fund";
@@ -16,7 +16,7 @@ export const BRIEF_MOVEMENTS = 50;
  * language says what it becomes).
  */
 export function briefText(text: string, m: Messages): string {
-  // `\s` also matches the no-break space that formatPesos puts in "$ 50": keep it, so amounts read as they do on screen.
+  // `\s` also matches the no-break space that formatMoney puts in "$ 50": keep it, so amounts read as they do on screen.
   return text
     .replace(/[^\S ]+/g, " ")
     .replaceAll("<", "‹")
@@ -32,7 +32,7 @@ function who(item: TimelineItem, m: Messages): string {
 }
 
 function movement(item: TimelineItem, now: Date, m: Messages): string {
-  const when = item.pending ? m.movements.onItsWay : formatWhen(item.at, now, m.locale);
+  const when = item.pending ? m.movements.onItsWay : formatWhen(item.at, now, m);
   const why = item.detail ? m.chat.brief.reason(item.detail) : "";
   const voted = item.action?.kind === "vote" && item.action.voted ? m.chat.brief.youVoted : "";
   return `- ${when}. ${briefText(`${who(item, m)}: ${item.text}${why}${voted}`, m)}`;
@@ -43,11 +43,11 @@ function yours(view: FundView, m: Messages): string[] {
   const { brief } = m.chat;
   const standing =
     view.me.owed > 0n
-      ? brief.owe(formatPesos(view.me.owed, m.locale))
+      ? brief.owe(formatMoney(view.me.owed, m))
       : view.me.ahead > 0n
-        ? brief.upToDateAhead(formatPesos(view.me.ahead, m.locale))
+        ? brief.upToDateAhead(formatMoney(view.me.ahead, m))
         : brief.upToDate;
-  return [brief.situation(standing, formatPesos(view.me.share, m.locale))];
+  return [brief.situation(standing, formatMoney(view.me.share, m))];
 }
 
 /**
@@ -57,9 +57,8 @@ function yours(view: FundView, m: Messages): string[] {
 export function fundBrief(screen: FundScreen, viewerName: string, now: Date, m: Messages): string {
   const { view, timeline } = screen;
   const { brief } = m.chat;
-  const { locale } = m;
-  const today = new Intl.DateTimeFormat(intlLocale(locale), {
-    timeZone: TIME_ZONE,
+  const today = new Intl.DateTimeFormat(intlLocale(m), {
+    timeZone: m.country.timeZone,
     weekday: "long",
     day: "numeric",
     month: "long",
@@ -76,7 +75,7 @@ export function fundBrief(screen: FundScreen, viewerName: string, now: Date, m: 
       : timeline.length > BRIEF_MOVEMENTS
         ? brief.movementsCut(BRIEF_MOVEMENTS, timeline.length)
         : brief.movements;
-  const pesos = (units: bigint) => formatPesos(units, locale);
+  const pesos = (units: bigint) => formatMoney(units, m);
   return [
     `<${BRIEF_TAG}>`,
     brief.now(today, String(view.week + 1n)),
@@ -91,7 +90,7 @@ export function fundBrief(screen: FundScreen, viewerName: string, now: Date, m: 
       view.rows.length,
     ),
     // A version 2 fund's fee: what makes Aportar ask for more than the dues.
-    ...(view.feeBps > 0 ? [brief.fee(formatPercent(view.feeBps, locale))] : []),
+    ...(view.feeBps > 0 ? [brief.fee(formatPercent(view.feeBps, m))] : []),
     brief.speaking(briefText(viewerName, m)),
     ...yours(view, m),
     brief.weekList,

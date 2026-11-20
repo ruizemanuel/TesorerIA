@@ -2,8 +2,8 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { LatestMovements, movementsPath } from "../src/components/latest-movements";
-import { es } from "../src/lib/i18n/es";
 import type { TimelineItem } from "../src/lib/timeline";
+import { es } from "./support/messages";
 
 // The vote and execute buttons refresh through the app router, which isn't mounted when a test renders on its own.
 vi.mock("next/navigation", () => ({
@@ -34,7 +34,6 @@ function render(count: number, shown: number) {
       fundName: "Fondo",
       now: new Date(Date.UTC(2026, 9, 26)),
       m: es,
-      locale: "es",
     }),
   );
 }

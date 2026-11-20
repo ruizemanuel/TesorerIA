@@ -1,10 +1,10 @@
 import type { WeekSummaryFacts } from "@tesoreria/agent";
 import { type Address, getAddress, pad, toHex } from "viem";
 import { describe, expect, it } from "vitest";
-import { es } from "../src/lib/i18n/es";
 import { whatsAppLink } from "../src/lib/share";
 import { weekSummaryText } from "../src/lib/week-summaries";
 import { WARS } from "./support/fixtures";
+import { es } from "./support/messages";
 
 /** What WhatsApp reads from the link: the `text` parameter, decoded. */
 const carried = (link: string) => new URL(link).searchParams.get("text");

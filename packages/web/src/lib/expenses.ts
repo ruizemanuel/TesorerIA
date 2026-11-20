@@ -4,7 +4,7 @@ import { and, desc, eq, gt, sql } from "drizzle-orm";
 import { keccak256, toHex } from "viem";
 import type { Db } from "./db/client";
 import { type ExpenseStatus, expenses } from "./db/schema";
-import { MAX_PESOS, formatPesos } from "./format";
+import { MAX_PESOS, formatMoney } from "./format";
 import type { Messages } from "./i18n/messages";
 
 export type ExpenseInput = {
@@ -37,7 +37,7 @@ export async function submitExpense(
 ): Promise<SubmitResult> {
   const note = input.note.trim();
   if (input.amount <= 0n) return { ok: false, status: 400, error: m.expenses.amountZero };
-  if (input.amount > MAX_PESOS) return { ok: false, status: 400, error: m.expenses.amountTooBig(formatPesos(MAX_PESOS, m.locale)) };
+  if (input.amount > MAX_PESOS) return { ok: false, status: 400, error: m.expenses.amountTooBig(formatMoney(MAX_PESOS, m)) };
   if ([...note].length > MAX_NOTE_LENGTH) return { ok: false, status: 400, error: m.expenses.noteTooLong(MAX_NOTE_LENGTH) };
   if (input.clientKey.length < 1 || input.clientKey.length > 64) return { ok: false, status: 400, error: m.errors.failed };
 

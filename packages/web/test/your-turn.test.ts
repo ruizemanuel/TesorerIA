@@ -2,10 +2,9 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { YourTurn } from "../src/components/your-turn";
-import { en } from "../src/lib/i18n/en";
-import { es } from "../src/lib/i18n/es";
 import type { Messages } from "../src/lib/i18n/messages";
 import type { TimelineItem } from "../src/lib/timeline";
+import { en, es } from "./support/messages";
 
 // The vote and execute buttons refresh through the app router, which isn't mounted when a test renders on its own.
 vi.mock("next/navigation", () => ({
@@ -27,7 +26,7 @@ const toVote: TimelineItem = {
 
 function render(items: TimelineItem[], m: Messages = es) {
   return renderToStaticMarkup(
-    createElement(YourTurn, { items, fund: FUND, fundName: "Fondo", now: new Date(Date.UTC(2026, 9, 26)), m, locale: m.locale }),
+    createElement(YourTurn, { items, fund: FUND, fundName: "Fondo", now: new Date(Date.UTC(2026, 9, 26)), m }),
   );
 }
 

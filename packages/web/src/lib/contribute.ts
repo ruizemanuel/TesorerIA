@@ -1,9 +1,20 @@
 import { type FundVersion, fundV2Abi } from "@tesoreria/agent";
 import type { Call } from "@tesoreria/wallet";
 import { type Address, encodeFunctionData, erc20Abi } from "viem";
-import { MAX_PESOS, USDT_UNIT, downToCentavo, formatPesos, formatUsdt, parsePesos, parseUsdt, upToCentavo } from "./format";
+import type { Speech } from "./countries";
+import {
+  MAX_PESOS,
+  USDT_UNIT,
+  downToCentavo,
+  formatAmount,
+  formatMoney,
+  formatUsdt,
+  formatUsdtAmount,
+  parseMoney,
+  parseUsdt,
+  upToCentavo,
+} from "./format";
 import { memberFundAbi } from "./fund-abi";
-import type { Locale } from "./i18n/locales";
 import type { Messages } from "./i18n/messages";
 
 /** Binance's minimum USDT withdrawal on Celo (spec, 10). */
@@ -113,9 +124,9 @@ export function defaultWarsAmount(offer: WarsOffer): bigint {
   return min(offer.held, offer.room === null ? asked : min(asked, offer.room));
 }
 
-/** An amount of pesos as the field shows it, without the sign: "10.000", or "10,000" in English. */
-export function pesosText(units: bigint, locale: Locale): string {
-  return formatPesos(units, locale).replace(/^(\$|ARS)\s/, "");
+/** An amount of the fund's currency as the field shows it, without the sign: "10.000", or "10,000" in English. */
+export function moneyText(units: bigint, speech: Speech): string {
+  return formatAmount(units, speech);
 }
 
 export type PesosReading = { ok: true; amount: bigint } | { ok: false; error: string };
@@ -125,7 +136,7 @@ export type PesosReading = { ok: true; amount: bigint } | { ok: false; error: st
  * and `cap` the fund's (FundView's `balanceCap`).
  */
 function overCap(room: bigint, roomText: string, cap: bigint, m: Messages): string {
-  const capText = formatPesos(cap, m.locale);
+  const capText = formatMoney(cap, m);
   return room === 0n ? m.contribute.capReached(capText) : m.contribute.roomLeft(roomText, capText);
 }
 
@@ -135,11 +146,11 @@ export function readPesosAmount(
   { held, room, cap }: { held: bigint; room: bigint | null; cap: bigint },
   m: Messages,
 ): PesosReading {
-  const amount = parsePesos(text, m.locale);
+  const amount = parseMoney(text, m);
   if (amount === null) return { ok: false, error: m.errors.amountFormat };
-  if (amount > MAX_PESOS) return { ok: false, error: m.errors.amountTooBig(formatPesos(MAX_PESOS, m.locale)) };
-  if (amount > held) return { ok: false, error: m.contribute.accountHolds(formatPesos(held, m.locale)) };
-  if (room !== null && amount > room) return { ok: false, error: overCap(room, formatPesos(room, m.locale), cap, m) };
+  if (amount > MAX_PESOS) return { ok: false, error: m.errors.amountTooBig(formatMoney(MAX_PESOS, m)) };
+  if (amount > held) return { ok: false, error: m.contribute.accountHolds(formatMoney(held, m)) };
+  if (room !== null && amount > room) return { ok: false, error: overCap(room, formatMoney(room, m), cap, m) };
   return { ok: true, amount };
 }
 
@@ -159,11 +170,11 @@ export function warsField(
 ): { value: string; reading: PesosReading } {
   const offered = defaultWarsAmount(offer);
   if (typed === null && version === 2) {
-    if (offered === askedWars(offer)) return { value: pesosText(upToCentavo(offered), m.locale), reading: { ok: true, amount: offered } };
+    if (offered === askedWars(offer)) return { value: moneyText(upToCentavo(offered), m), reading: { ok: true, amount: offered } };
     const amount = downToCentavo(offered);
-    return { value: pesosText(amount, m.locale), reading: { ok: true, amount } };
+    return { value: moneyText(amount, m), reading: { ok: true, amount } };
   }
-  const value = typed ?? pesosText(offered, m.locale);
+  const value = typed ?? moneyText(offered, m);
   return { value, reading: readPesosAmount(value, { held: offer.held, room: offer.room, cap }, m) };
 }
 
@@ -236,8 +247,8 @@ export function usdtToSend({ held, rate, owed, weeklyFee, room, feeBps }: UsdtOf
 }
 
 /** An amount of USDT as the field shows it, without the unit: "6,26", or "6.26" in English. */
-export function usdtText(units: bigint, locale: Locale): string {
-  return formatUsdt(units, locale).replace(/\sUSDT$/, "");
+export function usdtText(units: bigint, speech: Speech): string {
+  return formatUsdtAmount(units, speech);
 }
 
 export type UsdtReading = { ok: true; amount: bigint } | { ok: false; error: string };
@@ -248,11 +259,11 @@ export function readUsdtAmount(
   { held, rate, room, cap }: { held: bigint; rate: bigint | null; room: bigint | null; cap: bigint },
   m: Messages,
 ): UsdtReading {
-  const amount = parseUsdt(text, m.locale);
+  const amount = parseUsdt(text, m);
   if (amount === null) return { ok: false, error: m.contribute.usdtFormat };
-  if (amount > held) return { ok: false, error: m.contribute.accountHolds(formatUsdt(held, m.locale)) };
+  if (amount > held) return { ok: false, error: m.contribute.accountHolds(formatUsdt(held, m)) };
   if (rate !== null && room !== null && usdtWorth(amount, rate) > room) {
-    const fits = formatUsdt(centDown(fitUnderCap(held, usdtWorth(held, rate), room)), m.locale);
+    const fits = formatUsdt(centDown(fitUnderCap(held, usdtWorth(held, rate), room)), m);
     return { ok: false, error: overCap(room, fits, cap, m) };
   }
   return { ok: true, amount };
@@ -265,6 +276,6 @@ export function readUsdtAmount(
 export function usdtWorthText(amount: bigint, rate: bigint, target: bigint, m: Messages): string {
   const worth = usdtWorth(amount, rate);
   return worth >= target && worth - target <= target / 100n + usdtWorth(USDT_CENT, rate)
-    ? m.contribute.covers(formatPesos(target, m.locale))
-    : m.contribute.worth(formatPesos(worth, m.locale));
+    ? m.contribute.covers(formatMoney(target, m))
+    : m.contribute.worth(formatMoney(worth, m));
 }

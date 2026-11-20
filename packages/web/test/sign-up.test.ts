@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { UserFacingError, userMessage } from "../src/lib/client/errors";
 import { withAccount } from "../src/lib/client/sign-up";
-import { en } from "../src/lib/i18n/en";
-import { type Messages, es } from "../src/lib/i18n/es";
+import type { Messages } from "../src/lib/i18n/messages";
+import { en, es } from "./support/messages";
 
 const PERSON = { name: "Ema", email: "ema@example.com" };
 const FULL = new UserFacingError("El fondo ya tiene 10 personas, que es el máximo.");

@@ -5,8 +5,8 @@ import { useRef, useState } from "react";
 import { post } from "../lib/client/api";
 import { userMessage } from "../lib/client/errors";
 import { type ExpenseKind, expenseFields, expenseLimits, panelOutcome } from "../lib/expense-fields";
-import { MAX_PESOS, formatPesos, parsePesos } from "../lib/format";
-import { useLocale, useMessages } from "../lib/i18n/client";
+import { MAX_PESOS, formatMoney, parseMoney } from "../lib/format";
+import { useMessages } from "../lib/i18n/client";
 import { useRefresh } from "./refresh-provider";
 import { Button, FIELD } from "./ui";
 
@@ -31,7 +31,6 @@ export function ExpensePanel({
   giveBackMax: bigint | null;
 }) {
   const m = useMessages();
-  const locale = useLocale();
   const { refresh } = useRefresh();
   // One key per opening: a double click or a retry sends the same one, and the server keeps one expense.
   const [clientKey, setClientKey] = useState(() => crypto.randomUUID());
@@ -50,9 +49,9 @@ export function ExpensePanel({
     const data = new FormData(form.current);
     const amount = String(data.get("amount") ?? "");
     // With the page's language, the same one the route reads the amount with.
-    const units = parsePesos(amount, locale);
+    const units = parseMoney(amount, m);
     if (units === null || units > MAX_PESOS) {
-      setError(units === null ? m.errors.amountFormat : m.errors.amountTooBig(formatPesos(MAX_PESOS, locale)));
+      setError(units === null ? m.errors.amountFormat : m.errors.amountTooBig(formatMoney(MAX_PESOS, m)));
       return;
     }
     // The agent gives back no more than what counts as contributed, to the wei: more isn't sent, and the panel says why.
@@ -131,7 +130,7 @@ export function ExpensePanel({
       ) : twin !== null ? (
         <div className="grid gap-2">
           <p role="status" className="font-semibold">
-            {m.expense.twin(<span className="money">{formatPesos(twin.amount, locale)}</span>)}
+            {m.expense.twin(<span className="money">{formatMoney(twin.amount, m)}</span>)}
           </p>
           <Button disabled={busy} onClick={() => submit(true)}>
             {busy ? m.expense.looking : m.expense.another}

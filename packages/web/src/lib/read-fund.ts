@@ -86,7 +86,7 @@ export async function loadFundScreen(
   viewer: CurrentUser | null,
   { publicView = false, locale }: { publicView?: boolean; locale: Locale },
 ): Promise<FundScreen | null> {
-  const m = messagesFor(locale);
+  const m = messagesFor(locale, "AR");
   const db = await getDb();
   const [fund] = await db
     .select()

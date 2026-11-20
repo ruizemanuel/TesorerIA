@@ -1,14 +1,13 @@
 import { FEE_BPS } from "@tesoreria/agent";
 import { describe, expect, it } from "vitest";
 import { BRIEF_MOVEMENTS, BRIEF_TAG, briefText, fundBrief } from "../src/lib/chat/brief";
-import { NBSP, formatPercent, formatPesos } from "../src/lib/format";
+import { NBSP, formatPercent, formatMoney } from "../src/lib/format";
 import { buildFundView } from "../src/lib/fund-view";
-import { en } from "../src/lib/i18n/en";
-import { es } from "../src/lib/i18n/es";
 import type { Messages } from "../src/lib/i18n/messages";
 import type { FundScreen } from "../src/lib/read-fund";
 import type { TimelineItem } from "../src/lib/timeline";
 import { ANA, BETO, BLOCK, CARO, NOW, WARS, snapshot } from "./support/fixtures";
+import { en, es } from "./support/messages";
 
 const names = new Map([
   [ANA, "Ana"],
@@ -35,7 +34,7 @@ const item = (n: number, change: Partial<TimelineItem> = {}): TimelineItem => ({
   id: `item-${n}`,
   at: new Date(NOW.getTime() - n * 60_000),
   actor: { kind: "member", name: "Beto" },
-  text: `Beto aportó ${formatPesos(BigInt(n) * WARS, "es")}.`,
+  text: `Beto aportó ${formatMoney(BigInt(n) * WARS, es)}.`,
   ...change,
 });
 
@@ -82,13 +81,13 @@ describe("fundBrief: what the model reads of the fund (spec, 8.2)", () => {
     const withNoBreakSpace = (text: string) => text.replaceAll("$ ", `$${NBSP}`);
     const vote = item(1, {
       actor: { kind: "agent" },
-      text: `Propuse pagarle ${formatPesos(3_000n * WARS, "es")} a Caro por la pelota nueva. Lleva 1 de 2 votos.`,
+      text: `Propuse pagarle ${formatMoney(3_000n * WARS, es)} a Caro por la pelota nueva. Lleva 1 de 2 votos.`,
       action: { kind: "vote", proposalId: 1n, votes: 1, required: 2, canVote: false, voted: true, completes: false },
     });
-    const paid = item(2, { actor: { kind: "agent" }, text: `Le devolví ${formatPesos(45_000n * WARS, "es")} a Ana por la cancha.`, detail: "Entraba en el tope." });
+    const paid = item(2, { actor: { kind: "agent" }, text: `Le devolví ${formatMoney(45_000n * WARS, es)} a Ana por la cancha.`, detail: "Entraba en el tope." });
     const group = item(3, { actor: { kind: "group" }, text: "El grupo aprobó la propuesta." });
-    const waiting = item(4, { text: `Tu aporte de ${formatPesos(10_000n * WARS, "es")} está en camino.`, pending: true });
-    const old = item(60 * 24 * 3, { text: `Beto aportó ${formatPesos(2_500_500_000_000_000_000_000n, "es")}.` });
+    const waiting = item(4, { text: `Tu aporte de ${formatMoney(10_000n * WARS, es)} está en camino.`, pending: true });
+    const old = item(60 * 24 * 3, { text: `Beto aportó ${formatMoney(2_500_500_000_000_000_000_000n, es)}.` });
     expect(fundBrief(screen([vote, paid, group, waiting, old]), "Ana", NOW, es)).toBe(withNoBreakSpace(SPANISH_BRIEF_OF_OCTOBER_14));
     expect(fundBrief(screen(), "Ana", NOW, es)).toBe(withNoBreakSpace(SPANISH_EMPTY_BRIEF_OF_OCTOBER_14));
   });
@@ -98,13 +97,13 @@ describe("fundBrief: what the model reads of the fund (spec, 8.2)", () => {
     expect(brief.startsWith(`<${BRIEF_TAG}>\n`)).toBe(true);
     expect(brief.endsWith(`\n</${BRIEF_TAG}>`)).toBe(true);
     expect(brief).toContain("Fondo: Fútbol de los jueves.");
-    expect(brief).toContain(`Saldo: ${formatPesos(80_000n * WARS, "es")}.`);
-    expect(brief).toContain(`hasta ${formatPesos(60_000n * WARS, "es")} por semana por la cancha`);
-    expect(brief).toContain(`quedan ${formatPesos(15_000n * WARS, "es")}`);
+    expect(brief).toContain(`Saldo: ${formatMoney(80_000n * WARS, es)}.`);
+    expect(brief).toContain(`hasta ${formatMoney(60_000n * WARS, es)} por semana por la cancha`);
+    expect(brief).toContain(`quedan ${formatMoney(15_000n * WARS, es)}`);
     expect(brief).toContain("necesita 2 de 3 votos");
     expect(brief).toContain("El fondo va por su semana 3.");
     expect(brief).toContain("1. Ana (vos): pagó.");
-    expect(brief).toContain(`2. Beto: debe en total ${formatPesos(10_000n * WARS, "es")}.`);
+    expect(brief).toContain(`2. Beto: debe en total ${formatMoney(10_000n * WARS, es)}.`);
     expect(brief).toContain("Estás al día.");
     expect(brief).toContain("Si el fondo se cerrara hoy, te tocarían");
   });
@@ -127,8 +126,8 @@ describe("fundBrief: what the model reads of the fund (spec, 8.2)", () => {
     const sixty = Array.from({ length: 60 }, (_, i) => item(i + 1));
     const brief = fundBrief(screen(sixty), "Ana", NOW, es);
     expect(brief).toContain(`los ${BRIEF_MOVEMENTS} más nuevos de 60`);
-    expect(brief).toContain(`Beto aportó ${formatPesos(50n * WARS, "es")}.`);
-    expect(brief).not.toContain(`Beto aportó ${formatPesos(51n * WARS, "es")}.`);
+    expect(brief).toContain(`Beto aportó ${formatMoney(50n * WARS, es)}.`);
+    expect(brief).not.toContain(`Beto aportó ${formatMoney(51n * WARS, es)}.`);
   });
 
   it("can't be broken out of by what members wrote, and carries no address", () => {
@@ -170,7 +169,7 @@ function screenIn(
   return { fundId: "fund", block: BLOCK, view, timeline, viewerIsMember: true, publicView: false, contributionOnItsWay: false, cashOutOnItsWay: false, weekSummaries: [], invite: null, proposalsLeft: null, giveBackMax: null };
 }
 
-const ARS = (pesos: number) => formatPesos(BigInt(pesos) * WARS, "en");
+const ARS = (pesos: number) => formatMoney(BigInt(pesos) * WARS, en);
 
 /**
  * The English brief of the same fixture, as the page in English shows it to the model (spec, 9.3): the same lines, the
@@ -207,7 +206,7 @@ describe("fundBrief in English: what the model reads when the page is in English
     const paid = item(2, { actor: { kind: "agent" }, text: `I paid Ana back ${ARS(45_000)} for the pitch.`, detail: "It fit in the cap." });
     const group = item(3, { actor: { kind: "group" }, text: "The group approved the proposal." });
     const waiting = item(4, { text: `Your contribution of ${ARS(10_000)} is on its way.`, pending: true });
-    const old = item(60 * 24 * 3, { text: `Beto contributed ${formatPesos(2_500_500_000_000_000_000_000n, "en")}.` });
+    const old = item(60 * 24 * 3, { text: `Beto contributed ${formatMoney(2_500_500_000_000_000_000_000n, en)}.` });
     const older = item(60 * 24 * 20, { text: "Beto contributed something long ago." });
     const brief = fundBrief(screenIn(en, { timeline: [vote, paid, group, waiting, old, older] }), "Ana", NOW, en);
     expect(brief).toBe(ENGLISH_BRIEF.replaceAll("ARS ", `ARS${NBSP}`));
@@ -243,7 +242,7 @@ describe("fundBrief in English: what the model reads when the page is in English
     // Beto put in 20,000 of the 90,000 the fund counts, so his part of the 80,000 it holds is 20/90 of it.
     const betoShare = (80_000n * WARS * 20_000n) / 90_000n;
     const owes = fundBrief(screenIn(en, { viewer: BETO }), "Beto", NOW, en);
-    expect(owes).toContain(`Your situation: You owe ${ARS(10_000)}. If the fund closed today, you'd get ${formatPesos(betoShare, "en")}.`);
+    expect(owes).toContain(`Your situation: You owe ${ARS(10_000)}. If the fund closed today, you'd get ${formatMoney(betoShare, en)}.`);
     const ahead = fundBrief(screenIn(en, { contributed: [50_000n * WARS, 30_000n * WARS, 30_000n * WARS] }), "Ana", NOW, en);
     expect(ahead).toContain(`Your situation: You're up to date, ${ARS(20_000)} ahead. If the fund closed today, you'd get`);
   });
@@ -251,9 +250,9 @@ describe("fundBrief in English: what the model reads when the page is in English
   it("says the same three situations in Spanish as it always did", () => {
     const betoShare = (80_000n * WARS * 20_000n) / 90_000n;
     const owes = fundBrief(screenIn(es, { viewer: BETO }), "Beto", NOW, es);
-    expect(owes).toContain(`Tu situación: Debés ${formatPesos(10_000n * WARS, "es")}. Si el fondo se cerrara hoy, te tocarían ${formatPesos(betoShare, "es")}.`);
+    expect(owes).toContain(`Tu situación: Debés ${formatMoney(10_000n * WARS, es)}. Si el fondo se cerrara hoy, te tocarían ${formatMoney(betoShare, es)}.`);
     const ahead = fundBrief(screenIn(es, { contributed: [50_000n * WARS, 30_000n * WARS, 30_000n * WARS] }), "Ana", NOW, es);
-    expect(ahead).toContain(`Tu situación: Estás al día, con ${formatPesos(20_000n * WARS, "es")} adelantados. Si el fondo se cerrara hoy, te tocarían`);
+    expect(ahead).toContain(`Tu situación: Estás al día, con ${formatMoney(20_000n * WARS, es)} adelantados. Si el fondo se cerrara hoy, te tocarían`);
     expect(fundBrief(screen(), "Ana", NOW, es)).toContain("Tu situación: Estás al día. Si el fondo se cerrara hoy, te tocarían");
   });
 
@@ -287,7 +286,7 @@ describe("fundBrief in English: what the model reads when the page is in English
     expect(fundBrief(screen(), "Ana", NOW, es)).not.toContain("cerrado");
     const closed = screen();
     expect(fundBrief({ ...closed, view: { ...closed.view, closed: true } }, "Ana", NOW, es)).toContain(
-      `Saldo: ${formatPesos(80_000n * WARS, "es")}. El fondo está cerrado.`,
+      `Saldo: ${formatMoney(80_000n * WARS, es)}. El fondo está cerrado.`,
     );
   });
 
@@ -318,7 +317,7 @@ describe("fundBrief of a version 2 fund", () => {
     for (const m of [es, en]) {
       const lines = fundBrief(screenIn(m, { feeBps: FEE_BPS }), "Ana", NOW, m).split("\n");
       const rules = lines.findIndex((line) => line.startsWith(m === es ? "Reglas:" : "Rules:"));
-      expect(lines[rules + 1], m.locale).toBe(m.chat.brief.fee(formatPercent(FEE_BPS, m.locale)));
+      expect(lines[rules + 1], m.locale).toBe(m.chat.brief.fee(formatPercent(FEE_BPS, m)));
     }
     expect(fundBrief(screenIn(es, { feeBps: FEE_BPS }), "Ana", NOW, es)).toContain(
       `\nComisión: el 0,25${NBSP}% de cada aporte va a la cuenta de TesorerIA, una vez por semana, para cubrir lo que cuestan las operaciones del fondo. El monto que pide Aportar ya la incluye: lo demás cuenta como aporte.\n`,

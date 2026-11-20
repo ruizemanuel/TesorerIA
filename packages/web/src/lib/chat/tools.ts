@@ -1,18 +1,19 @@
 import { MAX_NOTE_LENGTH } from "@tesoreria/agent";
 import { type InferUITools, type UIMessage, tool } from "ai";
 import { z } from "zod";
-import { MAX_PESOS, parsePesosEitherWay } from "../format";
+import { COUNTRIES } from "../countries";
+import { MAX_PESOS, parseMoneyInChat } from "../format";
 
 /**
- * Pesos as the member said them, read in either language's way (parsePesosEitherWay): "45.000" or "45.000,50" in Spanish,
- * "45,000" or "45,000.50" in English; above zero, up to MAX_PESOS. The model writes as the page does, and one tool
- * serves both languages.
+ * Pesos as the member said them, read in either language's way in Argentina, the one country the chat serves
+ * (parseMoneyInChat): "45.000" or "45.000,50" in Spanish, "45,000" or "45,000.50" in English; above zero, up to
+ * MAX_PESOS. The model writes as the page does, and one tool serves both languages.
  */
 const pesos = z
   .string()
   .max(40)
   .refine((text) => {
-    const units = parsePesosEitherWay(text);
+    const units = parseMoneyInChat(text, COUNTRIES.AR);
     return units !== null && units <= MAX_PESOS;
   }, "Write the amount in pesos, like 45.000 or 45.000,50 in Spanish, 45,000 or 45,000.50 in English");
 

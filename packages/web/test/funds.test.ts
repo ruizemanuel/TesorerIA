@@ -19,7 +19,7 @@ import type { UserOperationFinder } from "../src/lib/chain";
 import { claimCreateFundNonce } from "../src/lib/create-fund-cap";
 import type { Db } from "../src/lib/db/client";
 import { createFundNonces, funds, memberships, operations } from "../src/lib/db/schema";
-import { MAX_PESOS, formatPesos } from "../src/lib/format";
+import { MAX_PESOS, formatMoney } from "../src/lib/format";
 import { DEFAULT_BALANCE_CAP } from "../src/lib/fund-abi";
 import {
   NEW_FUND_VERSION,
@@ -34,11 +34,10 @@ import {
   fundsOf,
   joinFund,
 } from "../src/lib/funds";
-import { en } from "../src/lib/i18n/en";
-import { es } from "../src/lib/i18n/es";
 import { PENDING_FOR_MS, finishOperation, recordOperation } from "../src/lib/operations";
 import { addLiveFund, addUser, randomAccount, recordTransactions, testDb } from "./support/db";
 import { AGENT, FUND as NEW_FUND, WARS } from "./support/fixtures";
+import { en, es } from "./support/messages";
 
 const TX: Hash = pad("0x7a", { size: 32 });
 const OP: Hash = pad("0x0b", { size: 32 });
@@ -132,7 +131,7 @@ describe("drafts and invitations", () => {
     expect(await createDraft(db, ana.id, { ...DRAFT, weeklyCap: DEFAULT_BALANCE_CAP + 1n }, es)).toEqual({
       ok: false,
       status: 400,
-      error: es.checks.capAboveFundCap(formatPesos(DEFAULT_BALANCE_CAP, "es")),
+      error: es.checks.capAboveFundCap(formatMoney(DEFAULT_BALANCE_CAP, es)),
     });
     expect(await createDraft(db, ana.id, { ...DRAFT, weeklyCap: DEFAULT_BALANCE_CAP }, es)).toMatchObject({ ok: true });
   });
@@ -427,7 +426,7 @@ describe("the fund's version: v1 `Fund` or v2 `FundV2`, taken when the draft is 
     expect(await deploy(db, fundId, people[0]!.id, 2)).toEqual({
       ok: false,
       status: 400,
-      error: es.checks.capAboveFundCap(formatPesos(DEFAULT_BALANCE_CAP, "es")),
+      error: es.checks.capAboveFundCap(formatMoney(DEFAULT_BALANCE_CAP, es)),
     });
     expect((await draftById(db, fundId))?.status).toBe("draft"); // nothing was frozen
     // v1 never had that rule: such a draft still creates its v1 fund, and a v1 one already frozen is sent again as it was.
@@ -970,7 +969,7 @@ describe("in the language of the dictionary", () => {
     expect(await createDraft(db, ana, { ...DRAFT, weeklyFee: MAX_PESOS + 1n }, en)).toEqual({
       ok: false,
       status: 400,
-      error: en.checks.feeTooBig(formatPesos(MAX_PESOS, "en")),
+      error: en.checks.feeTooBig(formatMoney(MAX_PESOS, en)),
     });
 
     // A fund that is being created takes nobody else, and one that is live takes their request (spec, 9.4).

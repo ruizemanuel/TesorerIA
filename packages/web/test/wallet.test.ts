@@ -28,8 +28,8 @@ vi.mock("../src/lib/client/api", () => api);
 
 import { OnItsWayError, UserFacingError, userMessage } from "../src/lib/client/errors";
 import { type Me, loadMe, sendCalls, settleOperation } from "../src/lib/client/wallet";
-import { es } from "../src/lib/i18n/es";
 import { LEGACY_RP_ID } from "../src/lib/passkey-sites";
+import { es } from "./support/messages";
 import { stubLocalStorage } from "./support/storage";
 
 const ACCOUNT = getAddress("0x2F8218c7cF6d822091EDe24Db9c46B0324c21A6F");

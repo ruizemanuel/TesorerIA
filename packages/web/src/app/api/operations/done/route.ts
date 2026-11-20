@@ -19,7 +19,7 @@ const Done = z.object({
 });
 
 export async function POST(request: Request) {
-  const m = messagesFor(localeOf(request));
+  const m = messagesFor(localeOf(request), "AR");
   const user = await currentUser();
   if (user === null) return jsonError(401, m.errors.logIn);
   const body = await readJson(request, Done);

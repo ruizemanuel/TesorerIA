@@ -17,7 +17,7 @@ import { celoClient, logReader, nodeLogReader } from "./chain";
 import { blockTime, weekAt } from "./chain-time";
 import type { Db } from "./db/client";
 import { type StoredWeekSummary, funds, weekSummaries } from "./db/schema";
-import { formatDay, formatPesos } from "./format";
+import { formatDay, formatMoney } from "./format";
 import { readBalance } from "./fund-balance";
 import { giveBackTransactions, proposalsIn } from "./give-backs";
 import { completeHistory } from "./history";
@@ -194,8 +194,8 @@ export function weekSummaryText(
   const s = m.summary;
   const t = m.timeline;
   const who = (account: Address) => names.get(getAddress(account)) ?? t.someone;
-  const pesos = (units: bigint) => formatPesos(units, m.locale);
-  const day = (seconds: bigint) => formatDay(new Date(Number(seconds) * 1000), m.locale);
+  const pesos = (units: bigint) => formatMoney(units, m);
+  const day = (seconds: bigint) => formatDay(new Date(Number(seconds) * 1000), m);
   const owing = facts.dues.filter((d) => d.owed > 0n);
   const dues =
     owing.length === 0

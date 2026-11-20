@@ -3,7 +3,7 @@
 import type { Address } from "viem";
 import { useAccountBalances } from "../lib/client/account";
 import { WARS_SPECK, heldAmounts } from "../lib/format";
-import { useLocale, useMessages } from "../lib/i18n/client";
+import { useMessages } from "../lib/i18n/client";
 import { PanelLink } from "./panel-link";
 import { buttonClass } from "./ui";
 
@@ -18,10 +18,9 @@ const LOOK_EVERY_MS = 30_000;
  */
 export function AccountHolding({ account }: { account: Address }) {
   const m = useMessages();
-  const locale = useLocale();
   const { balances } = useAccountBalances(account, LOOK_EVERY_MS);
   if (balances === null) return null;
-  const amounts = heldAmounts(balances, locale);
+  const amounts = heldAmounts({ currency: balances.wars, dollar: balances.usdt }, m);
   if (amounts.length === 0) return null;
   return (
     <p className="mt-1 text-sm text-muted">

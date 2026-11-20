@@ -16,7 +16,7 @@ import { getSession } from "../../../lib/session";
 const CHAIN_READ_MS = 3_000;
 
 export async function GET(request: Request) {
-  const m = messagesFor(localeOf(request));
+  const m = messagesFor(localeOf(request), "AR");
   const user = await currentUser();
   if (user === null) return jsonError(401, m.errors.logIn);
   const db = await getDb();

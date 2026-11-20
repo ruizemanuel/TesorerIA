@@ -11,7 +11,7 @@ import { messagesFor } from "../../../../../lib/i18n/messages";
 
 /** "Crear fondo": the fund if it's already there, the operation to check if one is on its way, or the call to sign (with the nonce to pin it to, for a resend). */
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
-  const m = messagesFor(localeOf(request));
+  const m = messagesFor(localeOf(request), "AR");
   const user = await currentUser();
   if (user === null) return jsonError(401, m.errors.logIn);
   const body = await readJson(request, z.object({ votesRequired: z.number().int() }));
@@ -36,7 +36,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
  * cross-site fetch carries no cookie (sameSite lax), so it needs no JSON body to be safe.
  */
 export async function DELETE(request: Request, { params }: { params: Promise<{ id: string }> }) {
-  const m = messagesFor(localeOf(request));
+  const m = messagesFor(localeOf(request), "AR");
   const user = await currentUser();
   if (user === null) return jsonError(401, m.errors.logIn);
   const result = await cancelDeploy(await getDb(), { fundId: (await params).id, userId: user.id, m });

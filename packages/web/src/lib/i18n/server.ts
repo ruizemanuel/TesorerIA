@@ -1,5 +1,6 @@
 import { cookies, headers } from "next/headers";
 import { cache } from "react";
+import { type CountryCode, DEFAULT_COUNTRY } from "../countries";
 import { type Locale, LOCALE_COOKIE, pickLocale } from "./locales";
 import { type Messages, messagesFor } from "./messages";
 
@@ -9,7 +10,7 @@ export const getLocale = cache(async (): Promise<Locale> => {
   return pickLocale({ cookie: jar.get(LOCALE_COOKIE)?.value, acceptLanguage: list.get("accept-language") });
 });
 
-/** The page's dictionary. */
-export async function getMessages(): Promise<Messages> {
-  return messagesFor(await getLocale());
+/** The page's dictionary, for `country`: Argentina when the page doesn't say. */
+export async function getMessages(country: CountryCode = DEFAULT_COUNTRY): Promise<Messages> {
+  return messagesFor(await getLocale(), country);
 }

@@ -9,12 +9,12 @@ const sentenceStart = (who: string) => (who === SOMEONE ? "Alguien" : who);
 /**
  * Everything the web says, in Rioplatense Spanish (spec, 9.3): the texts it always had, moved here word for word
  * (except that "alguien" now starts a sentence capitalized).
- * `en` has this same shape (Messages), so a sentence missing in English doesn't compile. A fixed sentence is a
+ * `en` has this same shape (Dictionary), so a sentence missing in English doesn't compile. A fixed sentence is a
  * string; one with values is a function that takes them already formatted; a value that stands out on screen comes
  * in as a ReactNode, and the sentence is a fragment around it.
  */
 export const es = {
-  /** The dictionary's own language: what a function that has `m` passes to the formats (formatPesos(x, m.locale)). */
+  /** The dictionary's own language: with the country `Messages` adds, it makes `m` what the formats take (formatMoney(x, m)). */
   locale: "es" as Locale,
   /** The link preview (spec, 9.6): the site's description, and the pages that say their own. `fund` is the fund's name. */
   meta: {
@@ -742,4 +742,4 @@ export const es = {
   },
 };
 
-export type Messages = typeof es;
+export type Dictionary = typeof es;

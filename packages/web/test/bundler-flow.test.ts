@@ -25,10 +25,10 @@ import { contributeCalls } from "../src/lib/contribute";
 import type { Db } from "../src/lib/db/client";
 import { userMessage } from "../src/lib/client/errors";
 import { createDraft, deployCall, joinFund } from "../src/lib/funds";
-import { es } from "../src/lib/i18n/es";
 import { voteCalls } from "../src/lib/vote";
 import { WARS, addLiveFund, addUser, randomAccount, testDb } from "./support/db";
 import { type RpcOperation, entryPointHash } from "./support/entry-point";
+import { es } from "./support/messages";
 
 const POLICY = "sp_server";
 const FAST = 5_000_000_000n;

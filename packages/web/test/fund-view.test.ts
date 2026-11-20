@@ -1,9 +1,8 @@
 import { type Address, getAddress } from "viem";
 import { describe, expect, it } from "vitest";
 import { buildFundView } from "../src/lib/fund-view";
-import { en } from "../src/lib/i18n/en";
-import { es } from "../src/lib/i18n/es";
 import { ANA, BETO, CARO, USDT_UNIT, WARS, snapshot } from "./support/fixtures";
+import { en, es } from "./support/messages";
 
 const NAMES = new Map<Address, string>([
   [ANA, "Ana"],

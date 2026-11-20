@@ -1,11 +1,15 @@
 import { type ReactNode, createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { NBSP, WARS_UNIT, formatPercent, parsePesos } from "../src/lib/format";
+import { COUNTRIES } from "../src/lib/countries";
+import { NBSP, WARS_UNIT, formatPercent, parseMoney } from "../src/lib/format";
 import { en } from "../src/lib/i18n/en";
 import { es } from "../src/lib/i18n/es";
 import { LOCALES, LOCALE_NAMES } from "../src/lib/i18n/locales";
-import { MESSAGES, type Messages, messagesFor } from "../src/lib/i18n/messages";
+import { DICTIONARIES, type Dictionary, messagesFor } from "../src/lib/i18n/messages";
+
+/** The dictionaries with Argentina, which every format takes: what a page of an Argentine fund passes as `m`. */
+const [AR_ES, AR_EN] = [messagesFor("es", "AR"), messagesFor("en", "AR")];
 
 /** Every path to a leaf of a dictionary, so a missing or extra sentence shows by name. */
 function paths(value: unknown, prefix = ""): string[] {
@@ -14,11 +18,19 @@ function paths(value: unknown, prefix = ""): string[] {
 }
 
 describe("the dictionaries", () => {
-  it("give each language its own", () => {
-    expect(messagesFor("es")).toBe(es);
-    expect(messagesFor("en")).toBe(en);
-    expect(Object.keys(MESSAGES).sort()).toEqual([...LOCALES].sort());
-    for (const locale of LOCALES) expect(MESSAGES[locale].locale).toBe(locale);
+  it("give each language its own, with the country it speaks for", () => {
+    expect(AR_ES).toEqual({ ...es, country: COUNTRIES.AR });
+    expect(AR_EN).toEqual({ ...en, country: COUNTRIES.AR });
+    // One object per language and country: a page asks for its `m` many times.
+    expect(messagesFor("es", "AR")).toBe(AR_ES);
+    expect(Object.keys(DICTIONARIES).sort()).toEqual([...LOCALES].sort());
+    for (const locale of LOCALES) expect(DICTIONARIES[locale].locale).toBe(locale);
+  });
+
+  it("carries the country with the dictionary", () => {
+    expect(messagesFor("es", "AR").country.code).toBe("AR");
+    expect(messagesFor("en", "MX").country.code).toBe("MX");
+    expect(messagesFor("es", "AR").home.create).toBe(es.home.create);
   });
 
   it("have the same sentences in both languages, and each the same kind of thing", () => {
@@ -40,10 +52,10 @@ describe("the dictionaries", () => {
   });
 
   it("offer the defaults of a new fund in each language's own way of writing amounts", () => {
-    expect(parsePesos(es.create.defaults.weeklyFee, "es")).toBe(10_000n * WARS_UNIT);
-    expect(parsePesos(en.create.defaults.weeklyFee, "en")).toBe(10_000n * WARS_UNIT);
-    expect(parsePesos(es.create.defaults.weeklyCap, "es")).toBe(60_000n * WARS_UNIT);
-    expect(parsePesos(en.create.defaults.weeklyCap, "en")).toBe(60_000n * WARS_UNIT);
+    expect(parseMoney(es.create.defaults.weeklyFee, AR_ES)).toBe(10_000n * WARS_UNIT);
+    expect(parseMoney(en.create.defaults.weeklyFee, AR_EN)).toBe(10_000n * WARS_UNIT);
+    expect(parseMoney(es.create.defaults.weeklyCap, AR_ES)).toBe(60_000n * WARS_UNIT);
+    expect(parseMoney(en.create.defaults.weeklyCap, AR_EN)).toBe(60_000n * WARS_UNIT);
     expect(es.create.defaults.agreedExpense).toBe("la cancha");
   });
 
@@ -61,7 +73,7 @@ describe("the dictionaries", () => {
     expect(html(en.invitation.rules(dollars.fee, dollars.cap, "la cancha"))).toBe(
       `Each person puts in ${dollars.fee} per week. The agent pays back up to ${dollars.cap} per week for “la cancha”. Everything else is voted on. No one can change this alone, not even the agent.`,
     );
-    const judges = (m: Messages) => {
+    const judges = (m: Dictionary) => {
       const { celo, contracts, agent, code } = m.home.judgesLinks;
       return html(m.home.judges(link(celo), contracts(link("v1"), link("v2")), link(agent), link(code)));
     };
@@ -464,16 +476,16 @@ describe("the dictionaries", () => {
     ]);
     expect(s.movementsCut(50, 60)).toBe("Movimientos, del más nuevo al más viejo (los 50 más nuevos de 60; los anteriores no los ves):");
     expect(e.movementsCut(50, 60)).toBe("Activity, newest first (the newest 50 of 60; you can't see the older ones):");
-    expect(s.fee(formatPercent(25, "es"))).toBe(
+    expect(s.fee(formatPercent(25, AR_ES))).toBe(
       `Comisión: el 0,25${NBSP}% de cada aporte va a la cuenta de TesorerIA, una vez por semana, para cubrir lo que cuestan las operaciones del fondo. El monto que pide Aportar ya la incluye: lo demás cuenta como aporte.`,
     );
-    expect(e.fee(formatPercent(25, "en"))).toBe(
+    expect(e.fee(formatPercent(25, AR_EN))).toBe(
       "Fee: 0.25% of each contribution goes to TesorerIA's account, once a week, to cover what the fund's operations cost. The amount Contribute asks for already includes it: the rest counts as the contribution.",
     );
   });
 
   it("say a version 2 fund's fee before it's created, before joining it and in its rules (spec, 5.5)", () => {
-    const [percentEs, percentEn] = [formatPercent(25, "es"), formatPercent(25, "en")];
+    const [percentEs, percentEn] = [formatPercent(25, AR_ES), formatPercent(25, AR_EN)];
     const beforeEs = `De cada aporte, el 0,25${NBSP}% va a TesorerIA para cubrir lo que cuestan las operaciones del fondo. Queda fijo cuando se crea.`;
     const beforeEn = "0.25% of each contribution goes to TesorerIA to cover what the fund's operations cost. It's fixed once the fund is created.";
     expect([es.deploy.feeNote(percentEs), es.invitation.feeNote(percentEs)]).toEqual([beforeEs, beforeEs]);

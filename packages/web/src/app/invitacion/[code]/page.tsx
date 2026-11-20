@@ -8,7 +8,7 @@ import { currentUser } from "../../../lib/current-user";
 import { getDb } from "../../../lib/db/client";
 import { formatPercent } from "../../../lib/format";
 import { draftByInvite } from "../../../lib/funds";
-import { getLocale, getMessages } from "../../../lib/i18n/server";
+import { getMessages } from "../../../lib/i18n/server";
 import { invitationFor } from "../../../lib/invitation";
 import { NO_JOIN, joinStateOf, openRequestsFromOthers } from "../../../lib/join-requests";
 
@@ -26,7 +26,7 @@ export default async function InvitePage({ params }: { params: Promise<{ code: s
   const db = await getDb();
   let draft = await draftByInvite(db, code);
   if (draft === null) notFound();
-  const [locale, m] = await Promise.all([getLocale(), getMessages()]);
+  const m = await getMessages();
   const user = await currentUser();
   const join = user === null ? NO_JOIN : await joinStateOf(db, celoClient(), draft, user, m);
   // Admitted just now: the fund lists them, and the invitation takes them to it.
@@ -44,12 +44,12 @@ export default async function InvitePage({ params }: { params: Promise<{ code: s
         <h1 className="text-2xl font-bold [font-stretch:87%]">{m.invitation.title(draft.creatorName, <em>{draft.name}</em>)}</h1>
         <p>
           {m.invitation.rules(
-            <Money units={draft.weeklyFee} locale={locale} />,
-            <Money units={draft.weeklyCap} locale={locale} />,
+            <Money units={draft.weeklyFee} speech={m} />,
+            <Money units={draft.weeklyCap} speech={m} />,
             draft.agreedExpense,
           )}
         </p>
-        {draft.feeBps > 0 && <p>{m.invitation.feeNote(formatPercent(draft.feeBps, locale))}</p>}
+        {draft.feeBps > 0 && <p>{m.invitation.feeNote(formatPercent(draft.feeBps, m))}</p>}
         {invitation.kind === "closed" ? (
           <>
             <p role="status" className="font-semibold">

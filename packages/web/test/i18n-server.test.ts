@@ -8,6 +8,7 @@ vi.mock("next/headers", () => ({
 
 const { getLocale, getMessages } = await import("../src/lib/i18n/server");
 const { en } = await import("../src/lib/i18n/en");
+const { COUNTRIES } = await import("../src/lib/countries");
 
 beforeEach(() => {
   request.cookie = undefined;
@@ -25,8 +26,9 @@ describe("getLocale", () => {
     expect(await getLocale()).toBe("es");
   });
 
-  it("hands over that language's dictionary", async () => {
+  it("hands over that language's dictionary, for Argentina when the page names no country", async () => {
     request.cookie = "en";
-    expect(await getMessages()).toBe(en);
+    expect(await getMessages()).toEqual({ ...en, country: COUNTRIES.AR });
+    expect((await getMessages("MX")).country).toBe(COUNTRIES.MX);
   });
 });

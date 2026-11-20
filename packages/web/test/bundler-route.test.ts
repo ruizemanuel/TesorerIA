@@ -11,12 +11,12 @@ import { contributeCalls } from "../src/lib/contribute";
 import { acquireLock, releaseLock } from "../src/lib/db/lock";
 import { credentials, operations } from "../src/lib/db/schema";
 import { cancelDeploy, createDraft, deployCall, joinFund } from "../src/lib/funds";
-import { es } from "../src/lib/i18n/es";
 import { keyChangeLock } from "../src/lib/key-change";
 import { LEGACY_RP_ID } from "../src/lib/passkey-sites";
 import type { Session } from "../src/lib/session";
 import { WARS, addLiveFund, addUser, randomAccount, testDb } from "./support/db";
 import { type RpcOperation, entryPointHash } from "./support/entry-point";
+import { es } from "./support/messages";
 import { safeCallData } from "./support/safe";
 import { fakeSession } from "./support/session";
 

@@ -1,7 +1,14 @@
 import { type ReactNode, useId } from "react";
+import type { Speech } from "../lib/countries";
 
-/** The currency each tab's amount is in, as the pill beside it says it: the same in both languages. */
-const UNITS = { usdt: { mark: "₮", code: "USDT" }, wars: { mark: "$", code: "ARS" } } as const;
+/**
+ * The currency each tab's amount is in, as the pill beside it says it: a sign, and the code. The fund's currency takes
+ * its country's: the sign as the country writes it ("$", the same in both languages, since the code beside it says
+ * which pesos) and the code in the screen's language ("ARS", "MXN").
+ */
+function unitOf(token: "usdt" | "wars", { locale, country }: Speech): { mark: string; code: string } {
+  return token === "usdt" ? { mark: "₮", code: "USDT" } : { mark: country.money.es.mark, code: country.words[locale].code };
+}
 
 /**
  * Aportar's amount (spec, 9.7): in a box of its own, the label and what the account holds over the amount, large,
@@ -19,6 +26,7 @@ export function ContributeAmount({
   note,
   disabled,
   onChange,
+  speech,
 }: {
   label: string;
   /** What the account holds, short: `contribute.youHold`. */
@@ -29,9 +37,11 @@ export function ContributeAmount({
   note?: string;
   disabled: boolean;
   onChange: (text: string) => void;
+  /** The screen's language and the fund's country, whose currency the pill names. */
+  speech: Speech;
 }) {
   const id = useId();
-  const unit = UNITS[token];
+  const unit = unitOf(token, speech);
   return (
     <div className="grid gap-1.5 rounded-[14px] bg-bg p-4 focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-primary">
       <div className="flex flex-wrap items-baseline justify-between gap-x-2 text-[13px] text-muted">

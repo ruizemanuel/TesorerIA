@@ -9,12 +9,11 @@ import type { CurrentUser } from "../src/lib/current-user";
 import type { Db } from "../src/lib/db/client";
 import { chatMessages } from "../src/lib/db/schema";
 import { buildFundView } from "../src/lib/fund-view";
-import { en } from "../src/lib/i18n/en";
-import { es } from "../src/lib/i18n/es";
 import type { Messages } from "../src/lib/i18n/messages";
 import type { FundScreen } from "../src/lib/read-fund";
 import { addLiveFund, addUser, testDb } from "./support/db";
 import { ANA, BETO, BLOCK, FUND, WARS, snapshot } from "./support/fixtures";
+import { en, es } from "./support/messages";
 
 // The route as the server runs it: the session, the database, the fund's screen and the model stand in.
 const state = vi.hoisted(() => ({

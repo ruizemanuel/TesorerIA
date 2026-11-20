@@ -5,9 +5,9 @@ import type { ChatUIMessage } from "../lib/chat/tools";
 import { type ProposalRules, proposalPreview } from "../lib/chat/view";
 import { post } from "../lib/client/api";
 import { userMessage } from "../lib/client/errors";
-import { pesosText } from "../lib/contribute";
+import { moneyText } from "../lib/contribute";
 import { expenseOutcome } from "../lib/expense-outcome";
-import { formatPesos } from "../lib/format";
+import { formatMoney } from "../lib/format";
 import { useMessages } from "../lib/i18n/client";
 import { useConfirmingCards } from "./chat-provider";
 import { useRefresh } from "./refresh-provider";
@@ -69,7 +69,7 @@ export function ExpenseProposalCard({
         clientKey: confirmDuplicate ? `${toolCallId}:another` : toolCallId,
         kind: input.kind,
         // The amount in the page's format, never the model's text: the route reads it with the request's language.
-        amount: pesosText(units, m.locale),
+        amount: moneyText(units, m),
         note: input.note,
         confirmDuplicate,
       });
@@ -98,7 +98,7 @@ export function ExpenseProposalCard({
         </div>
         <div>
           <dt className="sr-only">{m.chat.card.amountLabel}</dt>
-          <dd className="money text-lg font-bold">{formatPesos(units, m.locale)}</dd>
+          <dd className="money text-lg font-bold">{formatMoney(units, m)}</dd>
         </div>
         {preview.note !== "" && (
           <div>
@@ -111,7 +111,7 @@ export function ExpenseProposalCard({
       {twin !== null ? (
         <div className="grid gap-2">
           <p role="status" className="font-semibold">
-            {m.expense.twin(<span className="money">{formatPesos(twin.amount, m.locale)}</span>)}
+            {m.expense.twin(<span className="money">{formatMoney(twin.amount, m)}</span>)}
           </p>
           <Button disabled={busy} onClick={() => confirm(true)}>
             {busy ? m.expense.looking : m.expense.another}

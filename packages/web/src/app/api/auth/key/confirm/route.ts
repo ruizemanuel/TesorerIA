@@ -9,7 +9,7 @@ import { confirmKeyChange } from "../../../../../lib/key-change";
 
 /** The member's key change, confirmed from the chain (spec, 9.5): `result` is "changed", "waiting" or "none". */
 export async function POST(request: Request) {
-  const m = messagesFor(localeOf(request));
+  const m = messagesFor(localeOf(request), "AR");
   const user = await currentUser();
   if (user === null) return jsonError(401, m.errors.logIn);
   const result = await confirmKeyChange(await getDb(), user, (account) => readSafeKey(celoClient(), account));

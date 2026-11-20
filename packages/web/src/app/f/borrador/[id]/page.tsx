@@ -52,7 +52,7 @@ export default async function DraftPage({ params }: { params: Promise<{ id: stri
         />
       </Card>
       <Card className="grid gap-3">
-        {draft.feeBps > 0 && <p className="text-muted">{m.deploy.feeNote(formatPercent(draft.feeBps, m.locale))}</p>}
+        {draft.feeBps > 0 && <p className="text-muted">{m.deploy.feeNote(formatPercent(draft.feeBps, m))}</p>}
         {canDeploy && <DeployForm fundId={draft.id} memberCount={draft.members.length} chosenVotes={draft.votesRequired} />}
         {isCreator && !canDeploy && <p className="text-muted">{m.deploy.waitingForMembers}</p>}
         {!isCreator && <p className="text-muted">{m.deploy.waitingForCreator(draft.creatorName)}</p>}

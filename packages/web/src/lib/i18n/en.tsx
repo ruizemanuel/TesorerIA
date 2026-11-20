@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import type { Messages } from "./es";
+import type { Dictionary } from "./es";
 
 const SOMEONE = "someone";
 const NEW_ACCOUNT = "a new account";
@@ -14,7 +14,7 @@ const STAND_INS = new Map([
 const sentenceStart = (who: string) => STAND_INS.get(who) ?? who;
 
 /** Everything the web says, in English (spec, 9.3): the voice and the glossary of the spec, never a word of jargon. */
-export const en: Messages = {
+export const en: Dictionary = {
   locale: "en",
   meta: {
     description: "The group's treasury, without a treasurer.",

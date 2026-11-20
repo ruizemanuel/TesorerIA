@@ -3,7 +3,7 @@ import { type Address, type Hash, getAddress, isAddressEqual } from "viem";
 import { type BlockClock, blockTime, weekAt } from "./chain-time";
 import type { ExpenseStatus } from "./db/schema";
 import { ProposalAction } from "./fund-abi";
-import { formatPercent, formatPesos, formatUsdt, upToCentavo } from "./format";
+import { formatMoney, formatPercent, formatUsdt, upToCentavo } from "./format";
 import type { Messages } from "./i18n/messages";
 import { sameName } from "./same-name";
 
@@ -140,7 +140,7 @@ export function buildTimeline({
   feeBps?: number;
   viewerIsMember: boolean;
   now: Date;
-  /** The page's dictionary: its sentences, and `m.locale` for the amounts. */
+  /** The page's dictionary: its sentences, and the language and country it writes the amounts in. */
   m: Messages;
 }): TimelineItem[] {
   const t = m.timeline;
@@ -156,7 +156,7 @@ export function buildTimeline({
   const beingProposed = new Set<Address>();
   const newcomer = (address: Address) => names.get(getAddress(address)) ?? t.newAccount;
   /** A contribution in pesos, as Aportar's button said it. */
-  const contributedPesos = (amount: bigint) => formatPesos(version === 2 ? upToCentavo(amount) : amount, m.locale);
+  const contributedPesos = (amount: bigint) => formatMoney(version === 2 ? upToCentavo(amount) : amount, m);
   let cap = initialWeeklyCap;
 
   for (const event of events) {
@@ -168,14 +168,14 @@ export function buildTimeline({
     switch (event.eventName) {
       case "Contribution": {
         const { member, token, amount } = event.args;
-        const what = isAddressEqual(token, USDT) ? formatUsdt(amount, m.locale) : contributedPesos(amount);
+        const what = isAddressEqual(token, USDT) ? formatUsdt(amount, m) : contributedPesos(amount);
         items.push({ ...base, actor: { kind: "member", name: who(member) }, text: t.contributed(who(member), what) });
         break;
       }
       case "Conversion": {
         const { dollarIn, currencyOut } = event.args;
-        const usdt = formatUsdt(dollarIn, m.locale);
-        const pesos = formatPesos(currencyOut, m.locale);
+        const usdt = formatUsdt(dollarIn, m);
+        const pesos = formatMoney(currencyOut, m);
         if ("member" in event.args) {
           // Version 2 converts each member's own pending dollars and credits what they gave: whose they were, never a
           // difference to cover. `currencyOut` is that member's part of the swap, before the fee.
@@ -189,7 +189,7 @@ export function buildTimeline({
         if (found !== undefined && size >= CENTAVO) {
           const whose = found.members.length === 1 ? who(found.members[0]!) : null;
           const said = found.difference > 0n ? t.convertedLess : t.convertedMore;
-          text = said(usdt, pesos, formatPesos(size, m.locale), whose);
+          text = said(usdt, pesos, formatMoney(size, m), whose);
         }
         items.push({ ...base, actor: { kind: "agent" }, text, detail: t.convertedDetail });
         break;
@@ -198,13 +198,13 @@ export function buildTimeline({
         const { member, amount, week } = event.args;
         const total = (spent.get(week) ?? 0n) + amount;
         spent.set(week, total);
-        const left = formatPesos(cap > total ? cap - total : 0n, m.locale);
+        const left = formatMoney(cap > total ? cap - total : 0n, m);
         const tail = week === currentWeek ? t.reimbursedLeftThisWeek(left) : t.reimbursedLeftThatWeek(left);
         items.push({
           ...base,
           actor: { kind: "agent" },
-          text: `${t.reimbursed(formatPesos(amount, m.locale), who(member), agreedExpense)} ${tail}`,
-          detail: t.reimbursedDetail(agreedExpense, formatPesos(cap, m.locale)),
+          text: `${t.reimbursed(formatMoney(amount, m), who(member), agreedExpense)} ${tail}`,
+          detail: t.reimbursedDetail(agreedExpense, formatMoney(cap, m)),
         });
         break;
       }
@@ -212,7 +212,7 @@ export function buildTimeline({
         const { id, action, a, amount, proposer, note } = event.args;
         const what =
           action === ProposalAction.Pay && giveBacks.has(id)
-            ? t.proposal.giveBack(formatPesos(amount, m.locale), who(a), note)
+            ? t.proposal.giveBack(formatMoney(amount, m), who(a), note)
             : proposalText(m, action, a, amount, note, who, newcomer, agreedExpense);
         const byAgent = isAddressEqual(proposer, agent);
         const state = proposals.get(id);
@@ -228,7 +228,7 @@ export function buildTimeline({
             // it pays out, a payment or a version 2 give-back.
             const paysOut = action === ProposalAction.Pay || action === ProposalAction.GiveBack;
             const short = paysOut && amount > currencyBalance ? amount - currencyBalance : 0n;
-            if (short > 0n) tail = t.proposal.short(formatPesos(upToCentavo(short), m.locale));
+            if (short > 0n) tail = t.proposal.short(formatMoney(upToCentavo(short), m));
             else {
               tail = t.proposal.needsCarryingOut;
               proposalAction = { kind: "execute", proposalId: id, canExecute: viewerIsMember && !executeOnItsWay };
@@ -261,18 +261,18 @@ export function buildTimeline({
         const { member, amount } = event.args;
         const id = paidProposal(events, event);
         const paid = id !== undefined && giveBacks.has(id) ? t.givenBack : t.paid;
-        items.push({ ...base, actor: { kind: "group" }, text: paid(formatPesos(amount, m.locale), who(member)) });
+        items.push({ ...base, actor: { kind: "group" }, text: paid(formatMoney(amount, m), who(member)) });
         break;
       }
       case "ContributionGivenBack": {
         // Version 2's GiveBack, which the contract takes off what the member contributed: told as version 1's give-back.
         const { member, amount } = event.args;
-        items.push({ ...base, actor: { kind: "group" }, text: t.givenBack(formatPesos(amount, m.locale), who(member)) });
+        items.push({ ...base, actor: { kind: "group" }, text: t.givenBack(formatMoney(amount, m), who(member)) });
         break;
       }
       case "FeePaid": {
-        const percent = formatPercent(feeBps, m.locale);
-        items.push({ ...base, actor: { kind: "agent" }, text: t.feePaid(formatPesos(event.args.amount, m.locale), percent), detail: t.feePaidDetail(percent) });
+        const percent = formatPercent(feeBps, m);
+        items.push({ ...base, actor: { kind: "agent" }, text: t.feePaid(formatMoney(event.args.amount, m), percent), detail: t.feePaidDetail(percent) });
         break;
       }
       case "MemberAdded": {
@@ -288,7 +288,7 @@ export function buildTimeline({
         break;
       case "WeeklyCapChanged":
         cap = event.args.cap;
-        items.push({ ...base, actor: { kind: "group" }, text: t.weeklyCapChanged(agreedExpense, formatPesos(cap, m.locale)) });
+        items.push({ ...base, actor: { kind: "group" }, text: t.weeklyCapChanged(agreedExpense, formatMoney(cap, m)) });
         break;
       case "VotesRequiredChanged":
         items.push({ ...base, actor: { kind: "group" }, text: t.votesRequiredChanged(event.args.votes, agreedExpense) });
@@ -315,7 +315,7 @@ export function buildTimeline({
       id: "conversion-hold",
       at: conversionHold.at,
       actor: { kind: "agent" },
-      text: t.hold(formatUsdt(conversionHold.usdt, m.locale), holdWhy(m, conversionHold.code)),
+      text: t.hold(formatUsdt(conversionHold.usdt, m), holdWhy(m, conversionHold.code)),
     });
   }
 
@@ -330,7 +330,7 @@ export function buildTimeline({
   }
 
   for (const expense of expenses) {
-    const what = t.expense.what(formatPesos(expense.amount, m.locale), expense.by, expense.note);
+    const what = t.expense.what(formatMoney(expense.amount, m), expense.by, expense.note);
     const text: Partial<Record<ExpenseStatus, string>> = {
       new: t.expense.looking(what),
       sending: t.expense.looking(what),
@@ -385,7 +385,7 @@ export function buildTimeline({
           : operation.kind === "propose"
             ? t.onItsWay.propose
             : t.onItsWay.contribution(
-                operation.token === "usdt" ? formatUsdt(operation.amount ?? 0n, m.locale) : contributedPesos(operation.amount ?? 0n),
+                operation.token === "usdt" ? formatUsdt(operation.amount ?? 0n, m) : contributedPesos(operation.amount ?? 0n),
               );
     items.push({ id: `op:${operation.userOpHash}`, at: operation.createdAt, actor: { kind: "member", name: t.you }, text, pending: true });
   }
@@ -433,7 +433,7 @@ function proposalText(
   const t = m.timeline.proposal;
   switch (action) {
     case ProposalAction.Pay:
-      return t.pay(formatPesos(amount, m.locale), who(a), note);
+      return t.pay(formatMoney(amount, m), who(a), note);
     case ProposalAction.AddMember:
       return t.addMember(newcomer(a));
     case ProposalAction.RemoveMember:
@@ -441,13 +441,13 @@ function proposalText(
     case ProposalAction.ReplaceMember:
       return t.replaceMember(who(a));
     case ProposalAction.SetWeeklyCap:
-      return t.setWeeklyCap(agreedExpense, formatPesos(amount, m.locale));
+      return t.setWeeklyCap(agreedExpense, formatMoney(amount, m));
     case ProposalAction.SetVotesRequired:
       return t.setVotesRequired(Number(amount), agreedExpense);
     case ProposalAction.SetAgent:
       return t.setAgent;
     case ProposalAction.GiveBack:
-      return t.giveBack(formatPesos(amount, m.locale), who(a), note);
+      return t.giveBack(formatMoney(amount, m), who(a), note);
     default:
       return t.close;
   }

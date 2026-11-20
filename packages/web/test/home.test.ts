@@ -4,8 +4,8 @@ import { getAddress } from "viem";
 import { describe, expect, it } from "vitest";
 import { HomeJudges } from "../src/components/home-judges";
 import { type YourFund, fundTag, homeTarget, yourFunds } from "../src/lib/home";
-import { en } from "../src/lib/i18n/en";
-import { type Messages, es } from "../src/lib/i18n/es";
+import type { Messages } from "../src/lib/i18n/messages";
+import { en, es } from "./support/messages";
 
 const A = getAddress("0x9A74F670F3c59Ae4B8450fdD477b0461b89D2dfD");
 const B = getAddress("0x00000000000000000000000000000000000f00d1");

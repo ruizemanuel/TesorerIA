@@ -2,7 +2,7 @@ import { USDT, WARS } from "@tesoreria/agent";
 import type { Call } from "@tesoreria/wallet";
 import { type Address, encodeFunctionData, erc20Abi, getAddress, isAddress, isAddressEqual, zeroAddress } from "viem";
 import { plainPesos } from "./contribute";
-import { WARS_SPECK, formatPesos, parsePesos } from "./format";
+import { WARS_SPECK, formatMoney, parseMoney } from "./format";
 import type { Messages } from "./i18n/messages";
 
 /**
@@ -49,10 +49,10 @@ export type CashOutReading = { ok: true; amount: bigint } | { ok: false; error: 
 export function readCashOutAmount(text: string | null, held: bigint, m: Messages): CashOutReading {
   if (held < WARS_SPECK) return { ok: false, error: m.cashOut.nothingToPass };
   if (text === null) return { ok: true, amount: held };
-  const amount = parsePesos(text, m.locale);
+  const amount = parseMoney(text, m);
   if (amount === null) return { ok: false, error: m.errors.amountFormat };
-  if (formatPesos(amount, m.locale) === formatPesos(held, m.locale)) return { ok: true, amount: held };
-  if (amount > held) return { ok: false, error: m.cashOut.accountHolds(formatPesos(held, m.locale)) };
+  if (formatMoney(amount, m) === formatMoney(held, m)) return { ok: true, amount: held };
+  if (amount > held) return { ok: false, error: m.cashOut.accountHolds(formatMoney(held, m)) };
   return { ok: true, amount };
 }
 

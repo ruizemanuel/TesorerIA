@@ -5,8 +5,6 @@ import type { Db } from "../src/lib/db/client";
 import { funds, joinRequests, memberships } from "../src/lib/db/schema";
 import { MAX_MEMBERS } from "../src/lib/fund-abi";
 import { draftById, joinFund } from "../src/lib/funds";
-import { en } from "../src/lib/i18n/en";
-import { es } from "../src/lib/i18n/es";
 import {
   JOIN_REQUEST_DAYS,
   JOIN_REQUEST_REACH_DAYS,
@@ -22,6 +20,7 @@ import {
   sponsoredJoinRequests,
 } from "../src/lib/join-requests";
 import { addLiveFund, addUser, randomAccount, recordTransactions, testDb } from "./support/db";
+import { en, es } from "./support/messages";
 
 /** A live fund of Ana, Beto and Caro, and Lucas, who isn't in it. */
 async function liveFund(db: Db) {

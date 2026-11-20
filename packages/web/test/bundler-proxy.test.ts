@@ -33,11 +33,11 @@ import * as schema from "../src/lib/db/schema";
 import { createFundNonces, funds, joinRequests, memberships } from "../src/lib/db/schema";
 import { MAX_MEMBERS, ProposalAction, memberFundAbi } from "../src/lib/fund-abi";
 import { cancelDeploy, createDraft, deployCall, frozenCreateFunds, joinFund } from "../src/lib/funds";
-import { es } from "../src/lib/i18n/es";
 import { addMemberCalls, voteCalls } from "../src/lib/vote";
 import { type RpcOperation, entryPointHash } from "./support/entry-point";
 import { AGENT } from "./support/fixtures";
 import { WARS as WARS_UNIT, addLiveFund, addUser, randomAccount, testDb } from "./support/db";
+import { es } from "./support/messages";
 import { MULTI_SEND, MULTI_SEND_CALL_ONLY, execute, multiSend, multiSendAbi, packed, safeCallData } from "./support/safe";
 
 const ME = getAddress("0x2F8218c7cF6d822091EDe24Db9c46B0324c21A6F");

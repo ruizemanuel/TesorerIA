@@ -23,7 +23,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
   return (
     <html lang={locale === "es" ? "es-AR" : "en"} className={encodeSans.variable}>
       <body className="min-h-dvh font-sans antialiased">
-        <LocaleProvider locale={locale}>{children}</LocaleProvider>
+        <LocaleProvider locale={locale} country="AR">{children}</LocaleProvider>
       </body>
     </html>
   );

@@ -5,8 +5,7 @@ import { chatInstructions } from "../src/lib/chat/instructions";
 import { MAX_HISTORY_CHARS, MAX_MESSAGE_CHARS } from "../src/lib/chat/limits";
 import { messageChars, readChatRequest, trimHistory } from "../src/lib/chat/request";
 import { proposeExpenseInput } from "../src/lib/chat/tools";
-import { en } from "../src/lib/i18n/en";
-import { es } from "../src/lib/i18n/es";
+import { en, es } from "./support/messages";
 
 /**
  * The Spanish instructions as they were on October 13, when the group's chat went live: a literal copy, so a change to the

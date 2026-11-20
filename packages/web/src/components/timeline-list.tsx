@@ -1,7 +1,6 @@
 import { useId } from "react";
 import type { Address } from "viem";
 import { formatWhen } from "../lib/format";
-import type { Locale } from "../lib/i18n/locales";
 import type { Messages } from "../lib/i18n/messages";
 import type { TimelineItem } from "../lib/timeline";
 import { Avatar } from "./avatar";
@@ -22,7 +21,6 @@ export function TimelineList({
   basePath = "",
   viewerName = "",
   m,
-  locale,
 }: {
   items: readonly TimelineItem[];
   fund: Address;
@@ -36,7 +34,6 @@ export function TimelineList({
   /** Whose initials your own operations on their way wear: the timeline names their actor "Vos" ("You" in English). */
   viewerName?: string;
   m: Messages;
-  locale: Locale;
 }) {
   // Each sentence's id, for the links under it to say what they're about: the inicio shows the list twice (phone, desktop).
   const listId = useId();
@@ -69,7 +66,7 @@ export function TimelineList({
                 {item.text}
               </p>
               {proposeMember?.headsUp && <p className="mt-0.5 text-[13px] leading-snug text-muted">{proposeMember.headsUp}</p>}
-              <p className="mt-0.5 text-xs text-muted">{item.pending ? m.movements.onItsWay : formatWhen(item.at, now, locale)}</p>
+              <p className="mt-0.5 text-xs text-muted">{item.pending ? m.movements.onItsWay : formatWhen(item.at, now, m)}</p>
               {item.action?.kind === "receipt" && (
                 // 44 px to tap, all of them inside its own row: a box down to the divider read as the next row's.
                 <PanelLink

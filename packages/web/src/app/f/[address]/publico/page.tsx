@@ -23,7 +23,7 @@ export default async function PublicFundPage({ params }: { params: Promise<{ add
   const locale = await getLocale();
   const screen = await loadPublicFundScreen(address, locale);
   if (screen === null) notFound();
-  const receipts = receiptPanels(screen.timeline, new Date(), m, locale);
+  const receipts = receiptPanels(screen.timeline, new Date(), m);
   const summaries = summaryPanels(screen.weekSummaries, { shareable: false });
   const panel = <PanelHost closeHref={`/f/${screen.view.address}/publico`} receipts={receipts} summaries={summaries} />;
   return <FundScreenView screen={screen} user={null} panel={panel} />;

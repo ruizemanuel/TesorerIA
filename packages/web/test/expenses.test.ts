@@ -7,12 +7,12 @@ import type { Db } from "../src/lib/db/client";
 import { acquireLock, releaseLock } from "../src/lib/db/lock";
 import { decisions, expenses } from "../src/lib/db/schema";
 import { submitExpense } from "../src/lib/expenses";
-import { MAX_PESOS, formatPesos } from "../src/lib/format";
-import { en } from "../src/lib/i18n/en";
-import { type Messages, es } from "../src/lib/i18n/es";
+import { MAX_PESOS, formatMoney } from "../src/lib/format";
+import type { Messages } from "../src/lib/i18n/messages";
 import { SENT_HASH, fakeAgent } from "./support/agent";
 import { addLiveFund, addUser, testDb } from "./support/db";
 import { AGENT, ANA, BETO, BLOCK, CARO, FUND, WARS, event, snapshot } from "./support/fixtures";
+import { en, es } from "./support/messages";
 
 const always = (status: "success" | "reverted" | "pending") => async () => status;
 /** No agent transaction is waiting to be mined. */
@@ -69,8 +69,8 @@ describe("submitExpense", () => {
 
     expect(await refuse({ amount: 0n }, es)).toEqual(refused("El monto tiene que ser más que cero."));
     expect(await refuse({ amount: 0n }, en)).toEqual(refused(en.expenses.amountZero));
-    expect(await refuse({ amount: MAX_PESOS + 1n }, es)).toEqual(refused(`El monto no puede pasar de ${formatPesos(MAX_PESOS, "es")}.`));
-    expect(await refuse({ amount: MAX_PESOS + 1n }, en)).toEqual(refused(`The amount can't be more than ${formatPesos(MAX_PESOS, "en")}.`));
+    expect(await refuse({ amount: MAX_PESOS + 1n }, es)).toEqual(refused(`El monto no puede pasar de ${formatMoney(MAX_PESOS, es)}.`));
+    expect(await refuse({ amount: MAX_PESOS + 1n }, en)).toEqual(refused(`The amount can't be more than ${formatMoney(MAX_PESOS, en)}.`));
     expect(await refuse({ note: "x".repeat(141) }, es)).toEqual(refused("La nota puede tener hasta 140 letras."));
     expect(await refuse({ note: "x".repeat(141) }, en)).toEqual(refused("The note can be up to 140 letters long."));
     expect(await refuse({ clientKey: "" }, es)).toEqual(refused("Algo falló. Probá de nuevo."));

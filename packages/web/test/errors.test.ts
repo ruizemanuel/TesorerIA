@@ -4,8 +4,7 @@ import { UserOperationExecutionError, UserOperationSignatureError } from "viem/a
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { post } from "../src/lib/client/api";
 import { OnItsWayError, RefusedError, UserFacingError, isOnItsWay, loginMessage, userMessage } from "../src/lib/client/errors";
-import { en } from "../src/lib/i18n/en";
-import { es } from "../src/lib/i18n/es";
+import { en, es } from "./support/messages";
 
 const CANCELLED = "Cancelaste la confirmación. Probá de nuevo.";
 const GENERIC = "No se pudo completar. Probá de nuevo en un rato.";

@@ -2,10 +2,9 @@ import type { WeekSummaryFacts } from "@tesoreria/agent";
 import { type Address, getAddress, pad, toHex } from "viem";
 import { describe, expect, it } from "vitest";
 import { NBSP } from "../src/lib/format";
-import { en } from "../src/lib/i18n/en";
-import { es } from "../src/lib/i18n/es";
 import { weekSummaryText } from "../src/lib/week-summaries";
 import { WARS } from "./support/fixtures";
+import { en, es } from "./support/messages";
 
 const account = (n: number): Address => getAddress(pad(toHex(n), { size: 20 }));
 const [EMA, JUAN, PEDRO, ALE, CARO, DANI, FEDE, GABI] = [1, 2, 3, 4, 5, 6, 7, 8].map(account) as [
@@ -40,7 +39,7 @@ function facts(change: Partial<WeekSummaryFacts> = {}): WeekSummaryFacts {
 
 const text = (f: WeekSummaryFacts, m = es, link: string | null = LINK, names = NAMES) =>
   weekSummaryText(f, { fundName: "Fútbol de los jueves", agreedExpense: "la cancha", names, link }, m);
-/** The amounts keep their non-breaking space, as everywhere (formatPesos). */
+/** The amounts keep their non-breaking space, as everywhere (formatMoney). */
 const $ = (written: string) => written.replaceAll("$ ", `$${NBSP}`).replaceAll("ARS ", `ARS${NBSP}`);
 
 describe("weekSummaryText: the summary that goes to the group (spec, 9.4)", () => {

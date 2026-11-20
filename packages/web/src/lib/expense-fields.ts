@@ -1,5 +1,5 @@
 import { expenseOutcome } from "./expense-outcome";
-import { downToCentavo, formatPesos } from "./format";
+import { downToCentavo, formatMoney } from "./format";
 import type { Messages } from "./i18n/messages";
 
 /** The kind of expense the Cargar gasto panel sends: "give-back" is part of a contribution, given back (spec, 7.3). */
@@ -33,6 +33,6 @@ export function expenseLimits(
   const voted = kind === "other" || kind === "give-back";
   return {
     quota: !voted || proposalsLeft === null ? null : proposalsLeft > 0 ? e.proposalsLeft(proposalsLeft) : e.noProposalsLeft,
-    giveBackMax: kind !== "give-back" || giveBackMax === null ? null : e.giveBackMax(formatPesos(downToCentavo(giveBackMax), m.locale)),
+    giveBackMax: kind !== "give-back" || giveBackMax === null ? null : e.giveBackMax(formatMoney(downToCentavo(giveBackMax), m)),
   };
 }
