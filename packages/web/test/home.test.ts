@@ -4,7 +4,7 @@ import { getAddress } from "viem";
 import { describe, expect, it } from "vitest";
 import { HomeJudges } from "../src/components/home-judges";
 import { type YourFund, fundTag, homeTarget, yourFunds } from "../src/lib/home";
-import type { Messages } from "../src/lib/i18n/messages";
+import { type Messages, messagesFor } from "../src/lib/i18n/messages";
 import { en, es } from "./support/messages";
 
 const A = getAddress("0x9A74F670F3c59Ae4B8450fdD477b0461b89D2dfD");
@@ -135,5 +135,18 @@ describe("HomeJudges: the portada's line for the judges", () => {
       expect(addresses).toEqual([`https://celo.blockscout.com/address/${FACTORY}`, `https://celo.blockscout.com/address/${FACTORY_V2}`]);
       expect(html).toContain('href="https://celo.blockscout.com"');
     }
+  });
+});
+
+describe("the portada's steps for the visitor's country (spec, 12)", () => {
+  it("tells a Mexican visitor to load pesos with Ripio, without USDT", () => {
+    expect(messagesFor("es", "MX").home.steps(false).join(" ")).not.toContain("USDT");
+  });
+
+  it("is told with the dollar only for a country whose currency has one: the flag the portada passes", () => {
+    const hasDollar = (m: Messages) => m.country.currency.dollar !== null;
+    expect([hasDollar(messagesFor("es", "AR")), hasDollar(messagesFor("en", "AR"))]).toEqual([true, true]);
+    expect([hasDollar(messagesFor("es", "MX")), hasDollar(messagesFor("en", "MX"))]).toEqual([false, false]);
+    expect(messagesFor("es", "AR").home.steps(hasDollar(messagesFor("es", "AR"))).join(" ")).toContain("USDT");
   });
 });

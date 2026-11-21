@@ -4,8 +4,10 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { type Address, getAddress } from "viem";
 import { describe, expect, it } from "vitest";
 import { HomeRules } from "../src/components/home-rules";
+import { WeekList } from "../src/components/week-list";
 import { NBSP, WARS_UNIT } from "../src/lib/format";
 import type { FundView } from "../src/lib/fund-view";
+import { messagesFor } from "../src/lib/i18n/messages";
 import { en, es } from "./support/messages";
 
 const FUND = getAddress("0x9A74F670F3c59Ae4B8450fdD477b0461b89D2dfD");
@@ -44,7 +46,7 @@ function view(): FundView {
 
 describe("HomeRules: the portada's card with the real fund's own numbers", () => {
   it("says the fund's agreed expense, its whole weekly cap, its votes and its members, read from it", () => {
-    const html = renderToStaticMarkup(createElement(HomeRules, { view: view(), m: es }));
+    const html = renderToStaticMarkup(createElement(HomeRules, { view: view(), m: es, fundCountry: "AR" }));
     expect(html).toContain("Qué hace el agente solo y qué se vota");
     // The cap, not what's left of it this week.
     expect(html).toMatch(new RegExp(`devuelve la cancha hasta <span[^>]*>\\$${NBSP}60\\.000</span> por semana`));
@@ -53,15 +55,54 @@ describe("HomeRules: the portada's card with the real fund's own numbers", () =>
   });
 
   it("links the fund's own contract, not the FundFactory", () => {
-    const html = renderToStaticMarkup(createElement(HomeRules, { view: view(), m: es }));
+    const html = renderToStaticMarkup(createElement(HomeRules, { view: view(), m: es, fundCountry: "AR" }));
     expect(html).toContain(`href="https://celo.blockscout.com/address/${FUND}"`);
     expect(html).toMatch(/<a [^>]*href="https:\/\/celo\.blockscout\.com\/address\/0x9A74F670F3c59Ae4B8450fdD477b0461b89D2dfD"[^>]*>el contrato del propio fondo<\/a>/);
   });
 
   it("says it in English, with the amounts as English writes them", () => {
-    const html = renderToStaticMarkup(createElement(HomeRules, { view: view(), m: en })).replaceAll("&#x27;", "'");
+    const html = renderToStaticMarkup(createElement(HomeRules, { view: view(), m: en, fundCountry: "AR" })).replaceAll("&#x27;", "'");
     expect(html).toMatch(new RegExp(`pays back “la cancha” up to <span[^>]*>ARS${NBSP}60,000</span> a week`));
     expect(html).toContain("In Fútbol de los jueves, it takes 5 of 8 votes.");
     expect(html).toContain(">the fund's own contract</a>");
+  });
+
+  it("writes the Argentine showcase's cap with its code and Mexico's separators on a Mexican page", () => {
+    const html = renderToStaticMarkup(createElement(HomeRules, { view: view(), m: messagesFor("es", "MX"), fundCountry: "AR" }));
+    expect(html).toContain(`ARS${NBSP}60,000`);
+    expect(html).not.toContain("$60,000");
+  });
+
+  it("writes it as today on an Argentine page, and a Mexican fund's own cap as Mexico writes it", () => {
+    const html = renderToStaticMarkup(createElement(HomeRules, { view: view(), m: messagesFor("es", "AR"), fundCountry: "AR" }));
+    expect(html).toContain(`$${NBSP}60.000`);
+    const own = renderToStaticMarkup(createElement(HomeRules, { view: view(), m: messagesFor("es", "MX"), fundCountry: "MX" }));
+    expect(own).toContain("$60,000");
+  });
+
+  it("writes the code the same way in English on a Mexican page", () => {
+    const html = renderToStaticMarkup(createElement(HomeRules, { view: view(), m: messagesFor("en", "MX"), fundCountry: "AR" }));
+    expect(html).toContain(`ARS${NBSP}60,000`);
+  });
+});
+
+describe("WeekList: the week's list in the fund's own money", () => {
+  const rows = (owed: bigint) => view().rows.map((row, i) => ({ ...row, owed: i === 0 ? owed : 0n }));
+
+  it("writes the showcase's dues and what a member owes with the code and the screen's separators on a Mexican page", () => {
+    const showcase = { ...view(), rows: rows(1_500n * WARS_UNIT) };
+    const html = renderToStaticMarkup(createElement(WeekList, { view: showcase, m: messagesFor("es", "MX"), fundCountry: "AR" }));
+    expect(html).toContain(`ARS${NBSP}10,000`);
+    expect(html).toContain(`ARS${NBSP}1,500`);
+  });
+
+  it("writes them as today on an Argentine page and on a fund's own screen", () => {
+    const showcase = { ...view(), rows: rows(1_500n * WARS_UNIT) };
+    const html = renderToStaticMarkup(createElement(WeekList, { view: showcase, m: messagesFor("es", "AR"), fundCountry: "AR" }));
+    expect(html).toContain(`$${NBSP}10.000`);
+    expect(html).toContain(`$${NBSP}1.500`);
+    const mexican = renderToStaticMarkup(createElement(WeekList, { view: showcase, m: messagesFor("es", "MX"), fundCountry: "MX" }));
+    expect(mexican).toContain("$10,000");
+    expect(mexican).toContain("$1,500");
   });
 });

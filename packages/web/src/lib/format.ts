@@ -82,6 +82,15 @@ export function formatForeignMoney(units: bigint, of: Country, speech: Speech): 
 }
 
 /**
+ * How a screen writes a fund's money: as its own (formatMoney) when the fund is of the screen's country, and as another
+ * country's (formatForeignMoney) when it isn't, so the portada's showcase, which is Argentine, reads "ARS 16,050.37" on
+ * a Mexican screen and "$ 16.050,37" on an Argentine one.
+ */
+export function moneyFor(fund: Country, speech: Speech): (units: bigint) => string {
+  return fund.code === speech.country.code ? (units) => formatMoney(units, speech) : (units) => formatForeignMoney(units, fund, speech);
+}
+
+/**
  * The currency's units up to the next whole centavo: what's missing said so it's enough. formatMoney rounds to the
  * nearest, so a shortfall of a fraction of a centavo would read "$ 0".
  */

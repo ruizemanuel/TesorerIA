@@ -76,7 +76,7 @@ export function FundScreenView({
           <div className="mx-auto grid w-full max-w-[560px] gap-3 px-4 lg:max-w-none lg:gap-4 lg:px-0">
             {!publicView && keyChange !== undefined && <KeyChangeCard due={keyChange.due} resume={keyChange.resume} />}
             <YourTurn items={yourTurn} {...list} />
-            <WeekList view={view} justPaid={previousBalance !== undefined} m={m} />
+            <WeekList view={view} justPaid={previousBalance !== undefined} m={m} fundCountry={screen.country} />
             <Card className="lg:hidden">
               <CardTitle>{m.movements.latest}</CardTitle>
               <LatestMovements shown={PHONE_LATEST} {...movements} />

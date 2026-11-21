@@ -13,13 +13,17 @@ import { LocaleProvider } from "../../../lib/i18n/client";
 import { getMessages } from "../../../lib/i18n/server";
 import { invitationFor } from "../../../lib/invitation";
 import { NO_JOIN, joinStateOf, openRequestsFromOthers } from "../../../lib/join-requests";
+import { fundPageMetadata } from "../../../lib/site-metadata";
 
-/** The link preview names the fund it invites to (spec, 9.6): it's what the group sees in the chat, in the fund's country. */
+/**
+ * The link preview names the fund it invites to (spec, 9.6): it's what the group sees in the chat, in the fund's country,
+ * and in neutral Spanish with its image.
+ */
 export async function generateMetadata({ params }: { params: Promise<{ code: string }> }): Promise<Metadata> {
   const draft = await draftByInvite(await getDb(), (await params).code);
   if (draft === null) return {};
   const m = await getMessages(countryCodeOf(draft.currency));
-  return { title: m.meta.invitationTitle(draft.name), description: m.meta.invitationDescription };
+  return fundPageMetadata(m, { title: m.meta.invitationTitle(draft.name), description: m.meta.invitationDescription });
 }
 
 /**

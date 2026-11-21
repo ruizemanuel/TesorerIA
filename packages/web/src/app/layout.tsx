@@ -12,8 +12,7 @@ import "./globals.css";
 const encodeSans = Encode_Sans({ subsets: ["latin"], axes: ["wdth"], variable: "--font-encode-sans" });
 
 export async function generateMetadata(): Promise<Metadata> {
-  const [m, locale] = await Promise.all([getMessages(), getLocale()]);
-  return siteMetadata(m, locale, env().ORIGIN);
+  return siteMetadata(await getMessages(), env().ORIGIN);
 }
 
 export const viewport: Viewport = { themeColor: "#ffffff", width: "device-width", initialScale: 1 };

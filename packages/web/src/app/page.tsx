@@ -80,7 +80,7 @@ export default async function Home() {
           {real && (
             <div className="grid gap-2">
               <p className="text-sm text-muted">{m.home.live(<span className="font-semibold text-ink">{real.view.name}</span>)}</p>
-              <WeekList view={real.view} m={m} />
+              <WeekList view={real.view} m={m} fundCountry={real.country} />
             </div>
           )}
         </div>
@@ -88,7 +88,7 @@ export default async function Home() {
       <Card className="grid gap-3">
         <h2 className="text-lg font-bold [font-stretch:87%]">{m.home.howItWorks}</h2>
         <ol className="grid gap-2">
-          {m.home.steps(true).map((step, i) => (
+          {m.home.steps(m.country.currency.dollar !== null).map((step, i) => (
             <li key={step} className="flex gap-3">
               <span className="w-6 text-xl font-bold text-num [font-stretch:75%]">{i + 1}</span>
               <span>{step}</span>
@@ -96,7 +96,7 @@ export default async function Home() {
           ))}
         </ol>
       </Card>
-      {real && <HomeRules view={real.view} m={m} />}
+      {real && <HomeRules view={real.view} m={m} fundCountry={real.country} />}
       <HomeJudges m={m} />
     </main>
   );

@@ -24,6 +24,8 @@ export const es = {
     publicDescription: (fund: string) => `${fund}, en vivo: lo que hay en el fondo, quién pagó la cuota y lo que hizo el agente.`,
     invitationTitle: (fund: string) => `Te invitaron a ${fund}`,
     invitationDescription: "Sumate al fondo del grupo en TesorerIA.",
+    /** What the link preview's image says (app/opengraph-image.alt.txt), for whoever can't see it. */
+    imageAlt: "TesorerIA: la plata del grupo, sin tesorero.",
   },
   language: {
     label: "Idioma",

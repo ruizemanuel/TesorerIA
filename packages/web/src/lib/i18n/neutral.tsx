@@ -19,6 +19,7 @@ export const neutral: Dictionary = {
     publicDescription: (fund: string) => `${fund}, en vivo: lo que hay en el fondo, quién pagó la cuota y lo que hizo el agente.`,
     invitationTitle: (fund: string) => `Te invitaron a ${fund}`,
     invitationDescription: "Únete al fondo del grupo en TesorerIA.",
+    imageAlt: "TesorerIA: el dinero del grupo, sin tesorero.",
   },
   language: {
     label: "Idioma",

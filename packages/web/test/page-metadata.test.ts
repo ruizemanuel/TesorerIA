@@ -2,6 +2,7 @@ import { USDT, WARS as WARS_TOKEN } from "@tesoreria/agent";
 import type { Metadata } from "next";
 import { getAddress } from "viem";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { COUNTRIES, type CountryCode } from "../src/lib/countries";
 import type { Db } from "../src/lib/db/client";
 import type { FundView } from "../src/lib/fund-view";
 import type { Locale } from "../src/lib/i18n/locales";
@@ -10,7 +11,12 @@ import { WARS, addLiveFund, addUser, testDb } from "./support/db";
 
 const FUND = getAddress("0x9A74F670F3c59Ae4B8450fdD477b0461b89D2dfD");
 
-const state: { db: Db | null; acceptLanguage: string; reads: string[] } = { db: null, acceptLanguage: "es-AR", reads: [] };
+const state: { db: Db | null; acceptLanguage: string; reads: string[]; country: CountryCode } = {
+  db: null,
+  acceptLanguage: "es-AR",
+  reads: [],
+  country: "AR",
+};
 
 vi.mock("next/headers", () => ({
   cookies: async () => ({ get: () => undefined }),
@@ -60,7 +66,7 @@ function screen(): FundScreen {
   return {
     fundId: "fund-1",
     block: 81_300_000n,
-    country: "AR",
+    country: state.country,
     view,
     timeline: [],
     weekSummaries: [],
@@ -89,6 +95,7 @@ beforeEach(async () => {
   state.db = await testDb();
   state.acceptLanguage = "es-AR";
   state.reads = [];
+  state.country = "AR";
 });
 
 describe("each page's title in the link preview", () => {
@@ -99,6 +106,27 @@ describe("each page's title in the link preview", () => {
       title: "Te invitaron a Fútbol de los jueves",
       description: "Sumate al fondo del grupo en TesorerIA.",
     });
+    state.acceptLanguage = "en-US,en;q=0.9";
+    expect(ownOnly(await invitation.generateMetadata(params({ code: fund.inviteCode })))).toEqual({
+      title: "You're invited to Fútbol de los jueves",
+      description: "Join the group's fund on TesorerIA.",
+    });
+  });
+
+  it("gives the invitation to a fund of Mexico the neutral Spanish, Mexico's locale and the neutral image, which a page's own Open Graph has to carry whole", async () => {
+    const ana = await addUser(state.db!, "Ana");
+    const fund = await addLiveFund(state.db!, { creatorId: ana.id, address: FUND, members: [ana.id], currency: COUNTRIES.MX.currency.token });
+    expect(await invitation.generateMetadata(params({ code: fund.inviteCode }))).toEqual({
+      title: "Te invitaron a Fútbol de los jueves",
+      description: "Únete al fondo del grupo en TesorerIA.",
+      openGraph: {
+        type: "website",
+        siteName: "TesorerIA",
+        locale: "es_MX",
+        images: [{ url: "/og/neutral.png", width: 1200, height: 630, alt: "TesorerIA: el dinero del grupo, sin tesorero." }],
+      },
+    });
+    // In English it is the image of today, so the site's Open Graph stays.
     state.acceptLanguage = "en-US,en;q=0.9";
     expect(ownOnly(await invitation.generateMetadata(params({ code: fund.inviteCode })))).toEqual({
       title: "You're invited to Fútbol de los jueves",
@@ -119,6 +147,22 @@ describe("each page's title in the link preview", () => {
     }
     // The page's own read, in its language: the same one the page makes, kept for 45 seconds.
     expect(state.reads).toEqual([`es:${FUND.toLowerCase()}`, `es:${FUND.toLowerCase()}`]);
+  });
+
+  it("gives the public view of a fund of Mexico the neutral image the same way", async () => {
+    state.country = "MX";
+    for (const page of [publicView, publicMovements]) {
+      expect(await page.generateMetadata(params({ address: FUND.toLowerCase() }))).toEqual({
+        title: "Fútbol de los jueves",
+        description: "Fútbol de los jueves, en vivo: lo que hay en el fondo, quién pagó la cuota y lo que hizo el agente.",
+        openGraph: {
+          type: "website",
+          siteName: "TesorerIA",
+          locale: "es_MX",
+          images: [{ url: "/og/neutral.png", width: 1200, height: 630, alt: "TesorerIA: el dinero del grupo, sin tesorero." }],
+        },
+      });
+    }
   });
 
   it("leaves a fund that isn't public, or isn't an address, to the site's title", async () => {

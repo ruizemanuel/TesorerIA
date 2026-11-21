@@ -21,6 +21,7 @@ export const en: Dictionary = {
     publicDescription: (fund: string) => `${fund}, live: what's in the fund, who paid their dues and what the agent did.`,
     invitationTitle: (fund: string) => `You're invited to ${fund}`,
     invitationDescription: "Join the group's fund on TesorerIA.",
+    imageAlt: "TesorerIA: the group's treasury, without a treasurer.",
   },
   language: {
     label: "Language",

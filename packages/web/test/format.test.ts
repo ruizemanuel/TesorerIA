@@ -13,6 +13,7 @@ import {
   formatWhen,
   heldAmounts,
   initials,
+  moneyFor,
   parseMoney,
   parseMoneyInChat,
   parseUsdt,
@@ -246,6 +247,18 @@ describe("in Mexico", () => {
 
   it("writes another country's money with the screen's separators", () => {
     expect(formatForeignMoney((16_050_37n * U) / 100n, COUNTRIES.AR, MX_ES)).toBe(`ARS${NBSP}16,050.37`);
+  });
+
+  it("writes a fund's money as the screen does when the fund is the screen's country, and as another country's when it isn't", () => {
+    const units = (16_050_37n * U) / 100n;
+    // The screen's own: formatMoney, in each language.
+    expect(moneyFor(COUNTRIES.AR, AR_ES)(units)).toBe(formatMoney(units, AR_ES));
+    expect(moneyFor(COUNTRIES.AR, AR_EN)(units)).toBe(formatMoney(units, AR_EN));
+    expect(moneyFor(COUNTRIES.MX, MX_ES)(units)).toBe(`$16,050.37`);
+    // Another's: its code and the screen's separators.
+    expect(moneyFor(COUNTRIES.AR, MX_ES)(units)).toBe(`ARS${NBSP}16,050.37`);
+    expect(moneyFor(COUNTRIES.AR, MX_EN)(units)).toBe(`ARS${NBSP}16,050.37`);
+    expect(moneyFor(COUNTRIES.MX, AR_ES)(units)).toBe(`MXN${NBSP}16.050,37`);
   });
 
   it("tells the time in the fund's country", () => {
