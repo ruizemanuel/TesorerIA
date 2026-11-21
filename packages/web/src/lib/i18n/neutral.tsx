@@ -47,6 +47,7 @@ export const neutral: Dictionary = {
     notInAFund: "No estás en ningún fondo.",
     agentJustRan: "El agente acaba de correr.",
     notYourDraft: "Ese borrador no es tuyo.",
+    countryNotOffered: "Todavía no se pueden crear fondos de ese país.",
   },
   checks: {
     personName: "Escribe tu nombre, de hasta 30 letras.",
@@ -173,6 +174,8 @@ export const neutral: Dictionary = {
   create: {
     title: "Arma el fondo del grupo",
     lead: "Después te damos un enlace para compartir por WhatsApp. Cuando se unan al menos 3, lo creas. Los votos necesarios se eligen en ese momento.",
+    country: "¿De dónde es el grupo?",
+    countryName: { AR: "Argentina", MX: "México" },
     fundName: "Nombre del fondo",
     weeklyFee: "Cuota de cada uno por semana",
     agreedExpense: "Gasto acordado",

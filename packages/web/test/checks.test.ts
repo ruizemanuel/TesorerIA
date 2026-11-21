@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { personProblem, readDraft } from "../src/lib/checks";
+import { fundCapProblem, personProblem, readDraft } from "../src/lib/checks";
+import { COUNTRIES } from "../src/lib/countries";
 import { MAX_PESOS, NBSP, WARS_UNIT, formatMoney } from "../src/lib/format";
-import { DEFAULT_BALANCE_CAP } from "../src/lib/fund-abi";
+import { messagesFor } from "../src/lib/i18n/messages";
 import { en, es } from "./support/messages";
 
 const DRAFT = { name: "Fútbol de los jueves", agreedExpense: "la cancha", weeklyFee: "10.000", weeklyCap: "60.000" };
@@ -33,7 +34,7 @@ describe("readDraft", () => {
 
 describe("a weekly cap against the fund's cap", () => {
   it("refuses a weekly cap above the fund's cap", () => {
-    expect(DEFAULT_BALANCE_CAP).toBe(450_000n * WARS_UNIT);
+    expect(COUNTRIES.AR.currency.limits.balanceCap).toBe(450_000n * WARS_UNIT);
     const error = (weeklyCap: string, locale: "es" | "en" = "es") => {
       const read = readDraft({ ...DRAFT, weeklyFee: locale === "es" ? "10.000" : "10,000", weeklyCap }, locale === "es" ? es : en);
       return read.ok ? "" : read.error;
@@ -42,8 +43,21 @@ describe("a weekly cap against the fund's cap", () => {
     expect(error("450,001", "en")).toBe(`The weekly cap can't be above the fund's cap of ARS${NBSP}450,000.`);
     expect(error("450.000,01")).toBe(`El tope semanal no puede pasar el tope del fondo, de $${NBSP}450.000.`);
     // Up to it, it's fine; the sentence for an amount nobody means still comes first.
-    expect(readDraft({ ...DRAFT, weeklyCap: "450.000" }, es)).toMatchObject({ ok: true, draft: { weeklyCap: DEFAULT_BALANCE_CAP } });
+    expect(readDraft({ ...DRAFT, weeklyCap: "450.000" }, es)).toMatchObject({ ok: true, draft: { weeklyCap: 450_000n * WARS_UNIT } });
     expect(error("1.000.000.000.001")).toBe(`El tope no puede pasar de ${formatMoney(MAX_PESOS, es)}.`);
+  });
+
+  it("caps a Mexican weekly cap at wMXN's balance cap, said the Mexican way", () => {
+    const m = messagesFor("es", "MX");
+    expect(fundCapProblem(600n * WARS_UNIT, m)).toBeNull();
+    expect(fundCapProblem(5_000n * WARS_UNIT, m)).toBeNull();
+    expect(fundCapProblem(6_000n * WARS_UNIT, m)).toBe(m.checks.capAboveFundCap("$5,000"));
+    expect(fundCapProblem(6_000n * WARS_UNIT, m)).toBe("El tope semanal no puede superar el tope del fondo, de $5,000.");
+    // The form reads it the Mexican way, and checks it against the same cap before the passkey is made.
+    const read = readDraft({ ...DRAFT, weeklyFee: "100", weeklyCap: "5,000.01" }, m);
+    expect(read).toEqual({ ok: false, error: m.checks.capAboveFundCap("$5,000") });
+    // An Argentine one is still checked against wARS's.
+    expect(fundCapProblem(6_000n * WARS_UNIT, es)).toBeNull();
   });
 });
 

@@ -49,6 +49,7 @@ export const en: Dictionary = {
     notInAFund: "You aren't in any fund.",
     agentJustRan: "The agent just ran.",
     notYourDraft: "That draft isn't yours.",
+    countryNotOffered: "You can't create funds from that country yet.",
   },
   checks: {
     personName: "Enter your name, up to 30 letters.",
@@ -177,6 +178,8 @@ export const en: Dictionary = {
   create: {
     title: "Set up the group's fund",
     lead: "Next we'll give you a link to send on WhatsApp. When at least 3 people have joined, you create the fund. The votes needed are chosen at that point.",
+    country: "Where is the group from?",
+    countryName: { AR: "Argentina", MX: "Mexico" },
     fundName: "Fund name",
     weeklyFee: "Each person's weekly dues",
     agreedExpense: "Agreed expense",

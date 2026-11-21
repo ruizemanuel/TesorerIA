@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import type { CountryCode } from "../countries";
 import type { Locale } from "./locales";
 
 const SOMEONE = "alguien";
@@ -60,6 +61,8 @@ export const es = {
     notInAFund: "No estás en ningún fondo.",
     agentJustRan: "El agente acaba de correr.",
     notYourDraft: "Ese borrador no es tuyo.",
+    /** A new draft for a country this deployment doesn't offer (spec, 13). */
+    countryNotOffered: "Todavía no se pueden crear fondos de ese país.",
   },
   /** What the forms check, in the browser and on the server (checks.ts). */
   checks: {
@@ -213,6 +216,9 @@ export const es = {
   create: {
     title: "Armá el fondo del grupo",
     lead: "Después te damos un link para pasar por WhatsApp. Cuando se sumen al menos 3, lo creás. Los votos necesarios se eligen en ese momento.",
+    /** Above the form, only when more than one country is offered (spec, 9): a link per country, by its name. */
+    country: "¿De dónde es el grupo?",
+    countryName: { AR: "Argentina", MX: "México" } satisfies Record<CountryCode, string>,
     fundName: "Nombre del fondo",
     weeklyFee: "Cuota de cada uno por semana",
     agreedExpense: "Gasto acordado",

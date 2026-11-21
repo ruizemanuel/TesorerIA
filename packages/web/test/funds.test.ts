@@ -11,17 +11,18 @@ import {
   fundFactoryV2Abi,
 } from "@tesoreria/agent";
 import { and, eq } from "drizzle-orm";
-import { type Address, type Hash, type Hex, decodeFunctionData, encodeAbiParameters, encodeEventTopics, getAddress, pad } from "viem";
+import { type Address, type Hash, type Hex, decodeFunctionData, encodeAbiParameters, encodeEventTopics, getAddress, pad, zeroAddress } from "viem";
 import { generatePrivateKey, privateKeyToAddress } from "viem/accounts";
 import { describe, expect, it, vi } from "vitest";
 import { agentAddress } from "../src/lib/agent-address";
 import type { UserOperationFinder } from "../src/lib/chain";
+import type { DraftSettings } from "../src/lib/checks";
 import { COUNTRIES } from "../src/lib/countries";
+import { offeredNow } from "../src/lib/countries-env";
 import { claimCreateFundNonce } from "../src/lib/create-fund-cap";
 import type { Db } from "../src/lib/db/client";
 import { createFundNonces, funds, memberships, operations } from "../src/lib/db/schema";
 import { MAX_PESOS, formatMoney } from "../src/lib/format";
-import { DEFAULT_BALANCE_CAP } from "../src/lib/fund-abi";
 import { countryCodeOf, fundCountryOf } from "../src/lib/fund-country";
 import {
   NEW_FUND_VERSION,
@@ -36,30 +37,49 @@ import {
   fundsOf,
   joinFund,
 } from "../src/lib/funds";
+import { type Messages, messagesFor } from "../src/lib/i18n/messages";
 import { PENDING_FOR_MS, finishOperation, recordOperation } from "../src/lib/operations";
 import { addLiveFund, addUser, randomAccount, recordTransactions, testDb } from "./support/db";
 import { AGENT, FUND as NEW_FUND, WARS } from "./support/fixtures";
 import { en, es } from "./support/messages";
+
+// The server's settings as it reads them from its variables, EXTRA_COUNTRIES through the real parser, so a test can
+// turn Mexico on and off (mockEnv): a draft frozen while it was on is created all the same once it's off.
+const server = vi.hoisted(() => ({ env: {} as Record<string, string> }));
+vi.mock("../src/lib/env", async (importOriginal) => {
+  const { parseEnv } = await importOriginal<typeof import("../src/lib/env")>();
+  const base = { CHAIN_MODE: "fork", RP_ID: "localhost", ORIGIN: "http://localhost:3000", SESSION_SECRET: "s".repeat(32) };
+  return { parseEnv, env: () => parseEnv({ ...base, ...server.env }) };
+});
+const mockEnv = (env: Record<string, string>) => {
+  server.env = env;
+};
 
 const TX: Hash = pad("0x7a", { size: 32 });
 const OP: Hash = pad("0x0b", { size: 32 });
 const RESEND: Hash = pad("0x0c", { size: 32 });
 const DRAFT = { name: "Fútbol de los jueves", agreedExpense: "la cancha", weeklyFee: 10_000n * WARS, weeklyCap: 60_000n * WARS };
 
-async function group(db: Db, size = 3) {
+/** A draft of `size` people, the first its creator, made from `draft` in the country of `m` (Argentina's, unless it says). */
+async function group(db: Db, size = 3, { m = es, draft = DRAFT }: { m?: Messages; draft?: DraftSettings } = {}) {
   const people = [];
   for (const name of ["Ana", "Beto", "Caro", "Dani"].slice(0, size)) people.push(await addUser(db, name));
-  const created = await createDraft(db, people[0]!.id, DRAFT, es);
+  const created = await createDraft(db, people[0]!.id, draft, m);
   if (!created.ok) throw new Error(created.error);
-  for (const person of people.slice(1)) await joinFund(db, person.id, created.inviteCode, es);
+  for (const person of people.slice(1)) await joinFund(db, person.id, created.inviteCode, m);
   return { people, fundId: created.id, inviteCode: created.inviteCode };
 }
 
 /**
  * A receipt with these FundCreated logs (version 2's, with the currency indexed and the dollar in the data, if `version`
- * is 2), a chain where every fund has `settings`, and the EntryPoint's nonce for anyone.
+ * is 2: wARS and USDT unless `created` says), a chain where every fund has `settings`, and the EntryPoint's nonce for anyone.
  */
-function fakeClient(logs: { address: Address; fund: Address; creator: Address }[], settings: unknown[], version: FundVersion = 1) {
+function fakeClient(
+  logs: { address: Address; fund: Address; creator: Address }[],
+  settings: unknown[],
+  version: FundVersion = 1,
+  created: { currency: Address; dollar: Address } = { currency: WARS_TOKEN, dollar: USDT },
+) {
   const name = "Fútbol de los jueves";
   return {
     getTransactionReceipt: vi.fn(async (_: { hash: Hash }) => ({
@@ -74,8 +94,8 @@ function fakeClient(logs: { address: Address; fund: Address; creator: Address }[
             }
           : {
               address,
-              topics: encodeEventTopics({ abi: fundFactoryV2Abi, eventName: "FundCreated", args: { fund, creator, currency: WARS_TOKEN } }),
-              data: encodeAbiParameters([{ type: "address" }, { type: "string" }], [USDT, name]),
+              topics: encodeEventTopics({ abi: fundFactoryV2Abi, eventName: "FundCreated", args: { fund, creator, currency: created.currency } }),
+              data: encodeAbiParameters([{ type: "address" }, { type: "string" }], [created.dollar, name]),
             },
       ),
     })),
@@ -130,12 +150,12 @@ describe("drafts and invitations", () => {
     expect(await createDraft(db, ana.id, { ...DRAFT, weeklyFee: MAX_PESOS + 1n }, es)).toMatchObject({ ok: false, status: 400 });
     expect(await createDraft(db, ana.id, { ...DRAFT, weeklyCap: MAX_PESOS + 1n }, es)).toMatchObject({ ok: false, status: 400 });
     // A weekly cap can't pass the fund's cap, which is far below the most any amount may be.
-    expect(await createDraft(db, ana.id, { ...DRAFT, weeklyCap: DEFAULT_BALANCE_CAP + 1n }, es)).toEqual({
+    expect(await createDraft(db, ana.id, { ...DRAFT, weeklyCap: 450_000n * WARS + 1n }, es)).toEqual({
       ok: false,
       status: 400,
-      error: es.checks.capAboveFundCap(formatMoney(DEFAULT_BALANCE_CAP, es)),
+      error: es.checks.capAboveFundCap(formatMoney(450_000n * WARS, es)),
     });
-    expect(await createDraft(db, ana.id, { ...DRAFT, weeklyCap: DEFAULT_BALANCE_CAP }, es)).toMatchObject({ ok: true });
+    expect(await createDraft(db, ana.id, { ...DRAFT, weeklyCap: 450_000n * WARS }, es)).toMatchObject({ ok: true });
   });
 
   it("orders people who joined at the same instant by their id, so every reader gets the same list", async () => {
@@ -348,7 +368,7 @@ describe("the fund's version: v1 `Fund` or v2 `FundV2`, taken when the draft is 
     expect((await db.select().from(funds).where(eq(funds.id, fundId)))[0]).toMatchObject({
       version: 2,
       currency: WARS_TOKEN,
-      balanceCap: DEFAULT_BALANCE_CAP,
+      balanceCap: 450_000n * WARS,
     });
     const result = await deployCall(db, { fundId, userId: people[0]!.id, votesRequired: 2, agent: AGENT, m: es });
     if (!result.ok) throw new Error(result.error);
@@ -455,11 +475,11 @@ describe("the fund's version: v1 `Fund` or v2 `FundV2`, taken when the draft is 
   it("refuses to freeze as v2 a draft whose weekly cap is above the fund's cap, which FundV2 would revert", async () => {
     const db = await testDb();
     const { people, fundId } = await group(db);
-    await db.update(funds).set({ weeklyCap: DEFAULT_BALANCE_CAP + 1n }).where(eq(funds.id, fundId)); // an old draft: createDraft refuses it now
+    await db.update(funds).set({ weeklyCap: 450_000n * WARS + 1n }).where(eq(funds.id, fundId)); // an old draft: createDraft refuses it now
     expect(await deploy(db, fundId, people[0]!.id, 2)).toEqual({
       ok: false,
       status: 400,
-      error: es.checks.capAboveFundCap(formatMoney(DEFAULT_BALANCE_CAP, es)),
+      error: es.checks.capAboveFundCap(formatMoney(450_000n * WARS, es)),
     });
     expect((await draftById(db, fundId))?.status).toBe("draft"); // nothing was frozen
     // v1 never had that rule: such a draft still creates its v1 fund, and a v1 one already frozen is sent again as it was.
@@ -590,6 +610,106 @@ describe("the fund's version: v1 `Fund` or v2 `FundV2`, taken when the draft is 
     const landed = fakeClient([{ address: FUND_FACTORY_V2, fund: NEW_FUND, creator: members[0]! }], settingsFor(members, {}, 2), 2);
     expect(await step(landed)).toEqual({ ok: true, address: NEW_FUND });
     expect(await draftById(db, fundId)).toMatchObject({ status: "live", address: NEW_FUND, version: 2 });
+  });
+});
+
+describe("a fund in its country's currency (spec, 9: the draft is the deal)", () => {
+  const MX = messagesFor("es", "MX");
+  const WMXN = COUNTRIES.MX.currency.token;
+  /** One unit of any wFIAT: they all have 18 decimals. */
+  const U = WARS;
+  /** The football's draft in Mexico, with its defaults: $100 a week and a $600 cap. */
+  const MX_DRAFT = { ...DRAFT, weeklyFee: 100n * U, weeklyCap: 600n * U };
+  const fundRow = async (db: Db, fundId: string) => (await db.select().from(funds).where(eq(funds.id, fundId)))[0]!;
+  const v2Params = (data: Hex) => {
+    const decoded = decodeFunctionData({ abi: fundFactoryV2Abi, data });
+    return decoded.functionName === "createFund" ? decoded.args[0] : undefined;
+  };
+  /** What the chain's fund made from MX_DRAFT for `members` returns, with one thing changed. */
+  const mexicanSettings = (members: Address[], change: Partial<Record<string, unknown>> = {}) =>
+    settingsFor(members, { weeklyCap: 600n * U, balanceCap: 5_000n * U, currency: WMXN, dollar: zeroAddress, pool: zeroAddress, ...change }, 2);
+
+  it("creates a Mexican draft in wMXN with wMXN's balance cap", async () => {
+    const db = await testDb();
+    const creator = (await addUser(db, "Ana")).id;
+    const made = await createDraft(db, creator, { name: "Fútbol", agreedExpense: "la cancha", weeklyFee: 100n * U, weeklyCap: 600n * U }, MX);
+    if (!made.ok) throw new Error(made.error);
+    const row = await fundRow(db, made.id);
+    expect(row.currency).toBe(WMXN);
+    expect(row.balanceCap).toBe(5_000n * U);
+    expect(row.version).toBe(2);
+    expect(await draftById(db, made.id)).toMatchObject({ currency: WMXN, balanceCap: 5_000n * U, feeBps: FEE_BPS });
+    // A weekly cap above wMXN's balance cap is refused, in Mexico's words.
+    expect(await createDraft(db, creator, { ...MX_DRAFT, weeklyCap: 5_000n * U + 1n }, MX)).toEqual({
+      ok: false,
+      status: 400,
+      error: MX.checks.capAboveFundCap("$5,000"),
+    });
+  });
+
+  it("deploys a Mexican draft with wMXN, no dollar, no pool, the fee and its cap", async () => {
+    const db = await testDb();
+    const { people, fundId: mxDraft } = await group(db, 3, { m: MX, draft: MX_DRAFT });
+    const creator = people[0]!.id;
+    const result = await deployCall(db, { fundId: mxDraft, userId: creator, votesRequired: 2, agent: AGENT, m: MX });
+    if (!result.ok) throw new Error(result.error);
+    expect(result.call.to).toBe(FUND_FACTORY_V2);
+    expect(v2Params(result.call.data)).toEqual({
+      name: "Fútbol de los jueves",
+      members: people.map((p) => getAddress(p.account)),
+      votesRequired: 2,
+      agent: AGENT,
+      agreedExpense: "la cancha",
+      weeklyCap: 600n * U,
+      balanceCap: 5_000n * U,
+      currency: WMXN,
+      dollar: zeroAddress,
+      pool: zeroAddress,
+      feeBps: 25,
+    });
+    // The bundler gateway sponsors that call and no other: built from the same row.
+    expect(await frozenCreateFunds(db, creator, () => AGENT)).toEqual([result.call]);
+  });
+
+  it("still deploys a Mexican draft frozen before Mexico was turned off", async () => {
+    const db = await testDb();
+    mockEnv({ EXTRA_COUNTRIES: "MX" });
+    expect(offeredNow()).toEqual(["AR", "MX"]);
+    const { people, fundId: mxDraft } = await group(db, 3, { m: MX, draft: MX_DRAFT });
+    const creator = people[0]!.id;
+    const members = people.map((p) => getAddress(p.account));
+    const frozen = await deployCall(db, { fundId: mxDraft, userId: creator, votesRequired: 2, agent: AGENT, m: MX });
+    if (!frozen.ok) throw new Error(frozen.error);
+
+    mockEnv({});
+    expect(offeredNow()).toEqual(["AR"]);
+    // The creator comes back to a closed tab: the same call, still in wMXN.
+    expect(await deployCall(db, { fundId: mxDraft, userId: creator, votesRequired: 2, agent: AGENT, m: MX })).toEqual(frozen);
+    const confirm = (settings: unknown[]) =>
+      confirmDeploy(db, {
+        fundId: mxDraft,
+        userId: creator,
+        transactionHash: TX,
+        client: fakeClient([{ address: FUND_FACTORY_V2, fund: NEW_FUND, creator: members[0]! }], settings, 2, { currency: WMXN, dollar: zeroAddress }) as never,
+        agent: AGENT,
+        m: MX,
+      });
+    // Only the fund the row describes is ours: not one with wARS's cap, nor one in wARS with its dollar and pool.
+    expect(await confirm(mexicanSettings(members, { balanceCap: 450_000n * U }))).toEqual({ ok: false, status: 409, error: MX.funds.mismatch });
+    expect(await confirm(settingsFor(members, { weeklyCap: 600n * U, balanceCap: 5_000n * U }, 2))).toEqual({ ok: false, status: 409, error: MX.funds.mismatch });
+    expect((await confirm(mexicanSettings(members))).ok).toBe(true);
+    expect(await draftById(db, mxDraft)).toMatchObject({ status: "live", address: NEW_FUND, version: 2, currency: WMXN });
+  });
+
+  it("still creates the football's kind of draft exactly as before", async () => {
+    const db = await testDb();
+    const { people, fundId } = await group(db);
+    expect(await fundRow(db, fundId)).toMatchObject({ currency: WARS_TOKEN, balanceCap: 450_000n * WARS, version: 2 });
+    expect(await draftById(db, fundId)).toMatchObject({ currency: WARS_TOKEN, balanceCap: 450_000n * WARS, feeBps: 25 });
+    const result = await deployCall(db, { fundId, userId: people[0]!.id, votesRequired: 2, agent: AGENT, m: es });
+    if (!result.ok) throw new Error(result.error);
+    expect(v2Params(result.call.data)).toMatchObject({ currency: WARS_TOKEN, dollar: USDT, pool: POOL, feeBps: 25, balanceCap: 450_000n * WARS });
+    expect(await frozenCreateFunds(db, people[0]!.id, () => AGENT)).toEqual([result.call]);
   });
 });
 

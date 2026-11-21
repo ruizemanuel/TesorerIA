@@ -111,6 +111,7 @@ describe("the neutral Spanish (spec, 7)", () => {
     "esté",
     "guardé",
     "más",
+    "país",
     "pasé",
     "qué",
     "revisé",
@@ -175,6 +176,8 @@ describe("no Argentina in a page of Mexico (spec, 4)", () => {
     "contribute.ripioWithdraw", // Aportar shows it only with `ripioApp`, else contribute.rampOnly
     "cashOut.depositInstructions", // Pasar a pesos shows it only with `ripioApp`
   ]);
+  /** The names of the countries "¿De dónde es el grupo?" links to (spec, 9): with more than one offered, any page lists Argentina's. */
+  const NAMES_THE_COUNTRIES = new Set(["create.countryName.AR"]);
   const ARGENTINA = /wARS|\bARS\b|CBU|CVU|\balias\b|Argentin|app de Ripio|Ripio app|\bla app\b|\bthe app\b/i;
 
   /** What each country-bound sentence is said with in a page of Mexico: its words, no Ripio app and no dollar. */
@@ -189,7 +192,9 @@ describe("no Argentina in a page of Mexico (spec, 4)", () => {
       "chat.brief.now": ["X", "3", words.timeName],
       "home.steps": [MEXICO.currency.dollar !== null],
     };
-    return sentencesAt(dictionary, (path) => args[path] ?? STAND_INS).filter(([path]) => !ONLY_WITH_THE_APP_OR_A_DOLLAR.has(path));
+    return sentencesAt(dictionary, (path) => args[path] ?? STAND_INS).filter(
+      ([path]) => !ONLY_WITH_THE_APP_OR_A_DOLLAR.has(path) && !NAMES_THE_COUNTRIES.has(path),
+    );
   };
 
   it("names neither wARS, the CBU, Argentina nor Ripio's app, in neutral Spanish or in English", () => {

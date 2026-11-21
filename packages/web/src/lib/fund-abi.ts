@@ -1,4 +1,3 @@
-import { WARS, currencyOf } from "@tesoreria/agent";
 import { parseAbi } from "viem";
 
 /** The parts of `Fund` the web reads and members call, beyond @tesoreria/agent's fundAbi (contracts/src/Fund.sol). */
@@ -19,12 +18,6 @@ export const memberFundAbi = parseAbi([
   "function execute(uint256 id)",
   "function propose(uint8 action, address a, address b, uint256 amount, string note) returns (uint256 id)",
 ]);
-
-/**
- * The cap every fund the web makes live has on its balance, the spec's default (4): about US$ 300, the one the agent's
- * table gives wARS. `funds.ts` refuses to go live with any other, so Aportar can count on it.
- */
-export const DEFAULT_BALANCE_CAP = currencyOf(WARS)!.limits.balanceCap;
 
 /** Fund.MAX_MEMBERS: the most members a fund has, at creation and after an AddMember. */
 export const MAX_MEMBERS = 10;

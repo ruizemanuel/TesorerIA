@@ -22,7 +22,7 @@ import {
   weeklyContribution,
   withFee,
 } from "../src/lib/contribute";
-import { DEFAULT_BALANCE_CAP, memberFundAbi } from "../src/lib/fund-abi";
+import { memberFundAbi } from "../src/lib/fund-abi";
 import { buildFundView } from "../src/lib/fund-view";
 import { NBSP, USDT_UNIT, WARS_UNIT, formatMoney, upToCentavo } from "../src/lib/format";
 import { snapshot } from "./support/fixtures";
@@ -31,6 +31,8 @@ import { en, es } from "./support/messages";
 const FUND = getAddress("0x00000000000000000000000000000000000f00d1");
 const ME = getAddress("0x2F8218c7cF6d822091EDe24Db9c46B0324c21A6F");
 const pesos = (n: number) => BigInt(n) * WARS_UNIT;
+/** The cap on its balance every fund in wARS gets: wARS's, in the agent's table. */
+const BALANCE_CAP = pesos(450_000);
 
 describe("contributeCalls", () => {
   it("approves exactly the amount to the fund and contributes it, in one operation", () => {
@@ -82,10 +84,10 @@ describe("what Aportar offers", () => {
 
 describe("the fund's cap", () => {
   it("is $ 450.000 by default, and the room is what is left of it", () => {
-    expect(formatMoney(DEFAULT_BALANCE_CAP, es)).toBe(`$${NBSP}450.000`);
-    expect(roomUnderCap(pesos(440_000), DEFAULT_BALANCE_CAP, 0)).toBe(pesos(10_000));
-    expect(roomUnderCap(DEFAULT_BALANCE_CAP, DEFAULT_BALANCE_CAP, 0)).toBe(0n);
-    expect(roomUnderCap(DEFAULT_BALANCE_CAP + 1n, DEFAULT_BALANCE_CAP, 0)).toBe(0n);
+    expect(formatMoney(BALANCE_CAP, es)).toBe(`$${NBSP}450.000`);
+    expect(roomUnderCap(pesos(440_000), BALANCE_CAP, 0)).toBe(pesos(10_000));
+    expect(roomUnderCap(BALANCE_CAP, BALANCE_CAP, 0)).toBe(0n);
+    expect(roomUnderCap(BALANCE_CAP + 1n, BALANCE_CAP, 0)).toBe(0n);
   });
 
   it("fits what you hold under the room, in the token's own units", () => {
@@ -106,39 +108,39 @@ describe("readPesosAmount", () => {
   const held = pesos(45_000);
 
   it("reads what people write in Argentina", () => {
-    expect(readPesosAmount("10.000", { held, room: null, cap: DEFAULT_BALANCE_CAP }, es)).toEqual({ ok: true, amount: pesos(10_000) });
-    expect(readPesosAmount("$ 10.000,50", { held, room: null, cap: DEFAULT_BALANCE_CAP }, es)).toEqual({ ok: true, amount: pesos(10_000) + 50n * 10n ** 16n });
+    expect(readPesosAmount("10.000", { held, room: null, cap: BALANCE_CAP }, es)).toEqual({ ok: true, amount: pesos(10_000) });
+    expect(readPesosAmount("$ 10.000,50", { held, room: null, cap: BALANCE_CAP }, es)).toEqual({ ok: true, amount: pesos(10_000) + 50n * 10n ** 16n });
   });
 
   it("round-trips the amount it shows in the field", () => {
     for (const amount of [pesos(10_000), pesos(10_000) + 50n * 10n ** 16n, pesos(1)]) {
-      expect(readPesosAmount(moneyText(amount, es), { held, room: null, cap: DEFAULT_BALANCE_CAP }, es)).toEqual({ ok: true, amount });
+      expect(readPesosAmount(moneyText(amount, es), { held, room: null, cap: BALANCE_CAP }, es)).toEqual({ ok: true, amount });
     }
     expect(moneyText(pesos(10_000), es)).toBe("10.000");
   });
 
   it("teaches the format when it can't tell what was meant", () => {
     for (const bad of ["abc", "", "10.5", "10,000.50", "0"]) {
-      expect(readPesosAmount(bad, { held, room: null, cap: DEFAULT_BALANCE_CAP }, es), bad).toEqual({ ok: false, error: "Escribilo como 10.000 o 10.000,50." });
+      expect(readPesosAmount(bad, { held, room: null, cap: BALANCE_CAP }, es), bad).toEqual({ ok: false, error: "Escribilo como 10.000 o 10.000,50." });
     }
   });
 
   it("refuses an absurd amount before anything is encoded", () => {
-    const result = readPesosAmount("1.000.000.000.001", { held: 10n ** 40n, room: null, cap: DEFAULT_BALANCE_CAP }, es);
+    const result = readPesosAmount("1.000.000.000.001", { held: 10n ** 40n, room: null, cap: BALANCE_CAP }, es);
     expect(result).toEqual({ ok: false, error: `No puede pasar de ${formatMoney(1_000_000_000_000n * WARS_UNIT, es)}.` });
-    expect(readPesosAmount("1.000.000.000.000", { held: 10n ** 40n, room: null, cap: DEFAULT_BALANCE_CAP }, es).ok).toBe(true);
+    expect(readPesosAmount("1.000.000.000.000", { held: 10n ** 40n, room: null, cap: BALANCE_CAP }, es).ok).toBe(true);
   });
 
   it("refuses more than you have, and more than fits in the fund", () => {
-    expect(readPesosAmount("45.001", { held, room: null, cap: DEFAULT_BALANCE_CAP }, es)).toEqual({ ok: false, error: `En tu cuenta tenés ${formatMoney(held, es)}.` });
-    expect(readPesosAmount("45.000", { held, room: pesos(10_000), cap: DEFAULT_BALANCE_CAP }, es)).toEqual({
+    expect(readPesosAmount("45.001", { held, room: null, cap: BALANCE_CAP }, es)).toEqual({ ok: false, error: `En tu cuenta tenés ${formatMoney(held, es)}.` });
+    expect(readPesosAmount("45.000", { held, room: pesos(10_000), cap: BALANCE_CAP }, es)).toEqual({
       ok: false,
-      error: `Al fondo le entran hasta ${formatMoney(pesos(10_000), es)} más, porque tiene un tope de ${formatMoney(DEFAULT_BALANCE_CAP, es)}.`,
+      error: `Al fondo le entran hasta ${formatMoney(pesos(10_000), es)} más, porque tiene un tope de ${formatMoney(BALANCE_CAP, es)}.`,
     });
-    expect(readPesosAmount("10.000", { held, room: pesos(10_000), cap: DEFAULT_BALANCE_CAP }, es).ok).toBe(true);
-    expect(readPesosAmount("1", { held, room: 0n, cap: DEFAULT_BALANCE_CAP }, es)).toEqual({
+    expect(readPesosAmount("10.000", { held, room: pesos(10_000), cap: BALANCE_CAP }, es).ok).toBe(true);
+    expect(readPesosAmount("1", { held, room: 0n, cap: BALANCE_CAP }, es)).toEqual({
       ok: false,
-      error: `El fondo llegó a su tope de ${formatMoney(DEFAULT_BALANCE_CAP, es)}: no entra más.`,
+      error: `El fondo llegó a su tope de ${formatMoney(BALANCE_CAP, es)}: no entra más.`,
     });
   });
 });
@@ -176,7 +178,7 @@ describe("Aportar in USDT: what covers the week, at the fund's rate", () => {
   });
 
   it("offers, under the cap, an amount the field shows as it is and the cap still takes with a cent to spare", () => {
-    const capped = { held: usdt(20), rate, ...week, room: pesos(5_000), cap: DEFAULT_BALANCE_CAP };
+    const capped = { held: usdt(20), rate, ...week, room: pesos(5_000), cap: BALANCE_CAP };
     const offered = defaultUsdtAmount(capped);
     expect(offered % 10_000n).toBe(0n); // on the cent grid: "3,12" is what is sent
     expect(readUsdtAmount(usdtText(offered, es), capped, es)).toEqual({ ok: true, amount: offered }); // and what the field says reads back
@@ -207,13 +209,13 @@ describe("Aportar in USDT: what covers the week, at the fund's rate", () => {
   });
 
   it("reads the USDT typed, and says what to fix", () => {
-    const mine = { held: usdt(20), rate, room: pesos(400_000), cap: DEFAULT_BALANCE_CAP };
+    const mine = { held: usdt(20), rate, room: pesos(400_000), cap: BALANCE_CAP };
     expect(readUsdtAmount("10", mine, es)).toEqual({ ok: true, amount: usdt(10) });
     expect(readUsdtAmount("6,26", mine, es)).toEqual({ ok: true, amount: usdt(6.26) });
     expect(readUsdtAmount(usdtText(usdt(6.26), es), mine, es)).toEqual({ ok: true, amount: usdt(6.26) }); // round-trips the field
     expect(readUsdtAmount("6.26", mine, es)).toEqual({ ok: false, error: "Escribilo como 6 o 6,25." });
     expect(readUsdtAmount("21", mine, es)).toEqual({ ok: false, error: `En tu cuenta tenés 20${NBSP}USDT.` });
-    const cap = formatMoney(DEFAULT_BALANCE_CAP, es);
+    const cap = formatMoney(BALANCE_CAP, es);
     expect(readUsdtAmount("10", { ...mine, room: pesos(8_000) }, es)).toEqual({
       ok: false,
       error: `Al fondo le entran hasta 5${NBSP}USDT más, porque tiene un tope de ${cap}.`,
@@ -234,12 +236,12 @@ describe("what Aportar reads and writes in English", () => {
   it("reads and writes the field's amount in English", () => {
     expect(moneyText(10_000n * WARS_UNIT, en)).toBe("10,000");
     expect(usdtText(6_260_000n, en)).toBe("6.26");
-    expect(readPesosAmount("10,000", { held: 20_000n * WARS_UNIT, room: null, cap: DEFAULT_BALANCE_CAP }, en)).toEqual({ ok: true, amount: 10_000n * WARS_UNIT });
-    expect(readPesosAmount("10.000", { held: 20_000n * WARS_UNIT, room: null, cap: DEFAULT_BALANCE_CAP }, en)).toEqual({
+    expect(readPesosAmount("10,000", { held: 20_000n * WARS_UNIT, room: null, cap: BALANCE_CAP }, en)).toEqual({ ok: true, amount: 10_000n * WARS_UNIT });
+    expect(readPesosAmount("10.000", { held: 20_000n * WARS_UNIT, room: null, cap: BALANCE_CAP }, en)).toEqual({
       ok: false,
       error: "Write it like 10,000 or 10,000.50.",
     });
-    expect(readPesosAmount("30,000", { held: 20_000n * WARS_UNIT, room: null, cap: DEFAULT_BALANCE_CAP }, en)).toEqual({
+    expect(readPesosAmount("30,000", { held: 20_000n * WARS_UNIT, room: null, cap: BALANCE_CAP }, en)).toEqual({
       ok: false,
       error: `Your account holds ARS${NBSP}20,000.`,
     });
@@ -248,28 +250,28 @@ describe("what Aportar reads and writes in English", () => {
   it("round-trips what the field shows, in both languages", () => {
     for (const m of [es, en]) {
       for (const amount of [pesos(10_000), pesos(10_000) + 50n * 10n ** 16n, pesos(1)]) {
-        expect(readPesosAmount(moneyText(amount, m), { held, room: null, cap: DEFAULT_BALANCE_CAP }, m)).toEqual({ ok: true, amount });
+        expect(readPesosAmount(moneyText(amount, m), { held, room: null, cap: BALANCE_CAP }, m)).toEqual({ ok: true, amount });
       }
     }
     expect(moneyText(pesos(10_000) + 50n * 10n ** 16n, en)).toBe("10,000.50");
   });
 
   it("refuses an absurd amount, more than you have and more than fits, with the language's own amounts", () => {
-    expect(readPesosAmount("1,000,000,000,001", { held: 10n ** 40n, room: null, cap: DEFAULT_BALANCE_CAP }, en)).toEqual({
+    expect(readPesosAmount("1,000,000,000,001", { held: 10n ** 40n, room: null, cap: BALANCE_CAP }, en)).toEqual({
       ok: false,
       error: `It can't be more than ARS${NBSP}1,000,000,000,000.`,
     });
     const cap = `ARS${NBSP}450,000`;
-    expect(readPesosAmount("20,000", { held, room: pesos(10_000), cap: DEFAULT_BALANCE_CAP }, en)).toEqual({
+    expect(readPesosAmount("20,000", { held, room: pesos(10_000), cap: BALANCE_CAP }, en)).toEqual({
       ok: false,
       error: `The fund has room for up to ARS${NBSP}10,000 more, because its cap is ${cap}.`,
     });
-    expect(readPesosAmount("1", { held, room: 0n, cap: DEFAULT_BALANCE_CAP }, en)).toEqual({ ok: false, error: `The fund reached its cap of ${cap}: no more fits.` });
+    expect(readPesosAmount("1", { held, room: 0n, cap: BALANCE_CAP }, en)).toEqual({ ok: false, error: `The fund reached its cap of ${cap}: no more fits.` });
   });
 
   it("reads the USDT typed the way English writes it, and says what to fix", () => {
     const rate = 1_600n * WARS_UNIT;
-    const mine = { held: 20_000_000n, rate, room: pesos(400_000), cap: DEFAULT_BALANCE_CAP };
+    const mine = { held: 20_000_000n, rate, room: pesos(400_000), cap: BALANCE_CAP };
     expect(readUsdtAmount("6.26", mine, en)).toEqual({ ok: true, amount: 6_260_000n });
     expect(readUsdtAmount(usdtText(6_260_000n, en), mine, en)).toEqual({ ok: true, amount: 6_260_000n });
     expect(readUsdtAmount("6,26", mine, en)).toEqual({ ok: false, error: "Write it like 6 or 6.25." });
@@ -311,21 +313,21 @@ describe("Aportar in a v2 fund", () => {
   it("an untouched field sends the exact amount, not the rounded one it shows", () => {
     const x = withFee(pesos(10_000), 25);
     const offer = { held: pesos(45_000), ...week, feeBps: 25 };
-    expect(warsField(null, offer, 2, DEFAULT_BALANCE_CAP, es)).toEqual({ value: "10.025,07", reading: { ok: true, amount: x } });
-    expect(warsField(null, offer, 2, DEFAULT_BALANCE_CAP, en)).toEqual({ value: "10,025.07", reading: { ok: true, amount: x } });
+    expect(warsField(null, offer, 2, BALANCE_CAP, es)).toEqual({ value: "10.025,07", reading: { ok: true, amount: x } });
+    expect(warsField(null, offer, 2, BALANCE_CAP, en)).toEqual({ value: "10,025.07", reading: { ok: true, amount: x } });
     // What the field shows is a fraction of a centavo over it: typed, that is what goes.
-    expect(warsField("10.025,07", offer, 2, DEFAULT_BALANCE_CAP, es)).toEqual({
+    expect(warsField("10.025,07", offer, 2, BALANCE_CAP, es)).toEqual({
       value: "10.025,07",
       reading: { ok: true, amount: pesos(10_025) + 7n * 10n ** 16n },
     });
-    expect(warsField("10.025", offer, 2, DEFAULT_BALANCE_CAP, es).reading).toEqual({ ok: true, amount: pesos(10_025) });
-    expect(warsField("50.000", offer, 2, DEFAULT_BALANCE_CAP, es).reading).toEqual({
+    expect(warsField("10.025", offer, 2, BALANCE_CAP, es).reading).toEqual({ ok: true, amount: pesos(10_025) });
+    expect(warsField("50.000", offer, 2, BALANCE_CAP, es).reading).toEqual({
       ok: false,
       error: `En tu cuenta tenés ${formatMoney(pesos(45_000), es)}.`,
     });
     // A version 1 fund sends what its field shows, as it always did.
     const owed = pesos(9_940) + 123n * 10n ** 15n;
-    expect(warsField(null, { ...offer, owed, feeBps: 0 }, 1, DEFAULT_BALANCE_CAP, es)).toEqual({
+    expect(warsField(null, { ...offer, owed, feeBps: 0 }, 1, BALANCE_CAP, es)).toEqual({
       value: "9.940,12",
       reading: { ok: true, amount: pesos(9_940) + 12n * 10n ** 16n },
     });
@@ -333,18 +335,18 @@ describe("Aportar in a v2 fund", () => {
 
   it("rounds a default the cap or the account limits down, so the field shows what goes and takes it back", () => {
     // Up to the centavo is only for the fee's amount: what fits under the cap, or what the account holds, goes down to it.
-    const room = roomUnderCap(pesos(100_020), DEFAULT_BALANCE_CAP, 25); // $ 350.857,142857…
+    const room = roomUnderCap(pesos(100_020), BALANCE_CAP, 25); // $ 350.857,142857…
     const capped = { held: pesos(450_000), owed: 0n, weeklyFee: pesos(400_000), room, feeBps: 25 };
     const fits = pesos(350_857) + 14n * 10n ** 16n;
-    expect(warsField(null, capped, 2, DEFAULT_BALANCE_CAP, es)).toEqual({ value: "350.857,14", reading: { ok: true, amount: fits } });
-    expect(warsField("350.857,14", capped, 2, DEFAULT_BALANCE_CAP, es).reading).toEqual({ ok: true, amount: fits });
+    expect(warsField(null, capped, 2, BALANCE_CAP, es)).toEqual({ value: "350.857,14", reading: { ok: true, amount: fits } });
+    expect(warsField("350.857,14", capped, 2, BALANCE_CAP, es).reading).toEqual({ ok: true, amount: fits });
     for (const held of [pesos(5_000) + 4n * 10n ** 15n, pesos(5_000) + 6n * 10n ** 15n]) {
       const short = { held, ...week, feeBps: 25 };
-      expect(warsField(null, short, 2, DEFAULT_BALANCE_CAP, es)).toEqual({ value: "5.000", reading: { ok: true, amount: pesos(5_000) } });
+      expect(warsField(null, short, 2, BALANCE_CAP, es)).toEqual({ value: "5.000", reading: { ok: true, amount: pesos(5_000) } });
     }
     // An account that holds exactly the fee's amount still sends it whole.
     const exact = withFee(pesos(10_000), 25);
-    expect(warsField(null, { held: exact, ...week, feeBps: 25 }, 2, DEFAULT_BALANCE_CAP, es)).toEqual({ value: "10.025,07", reading: { ok: true, amount: exact } });
+    expect(warsField(null, { held: exact, ...week, feeBps: 25 }, 2, BALANCE_CAP, es)).toEqual({ value: "10.025,07", reading: { ok: true, amount: exact } });
   });
 
   it("a pesos default bound by the cap fits the contract's own count, with several members' dollars pending", () => {
@@ -434,7 +436,7 @@ describe("Aportar in a v2 fund", () => {
     expect(withStray.balance).toBe(pesos(580_020));
     expect(withStray.counted).toBe(pesos(100_020));
     expect(view(0n).counted).toBe(pesos(100_020));
-    expect([withStray.version, withStray.feeBps, withStray.balanceCap]).toEqual([2, 25, DEFAULT_BALANCE_CAP]);
+    expect([withStray.version, withStray.feeBps, withStray.balanceCap]).toEqual([2, 25, BALANCE_CAP]);
     // In pesos, what goes in before the fee: (450.000 − 100.020) × 10.000 / 9.975, down; its fee leaves the cap whole.
     const room = roomUnderCap(withStray.counted, withStray.balanceCap, withStray.feeBps);
     expect(room).toBe(350_857_142_857_142_857_142_857n);
@@ -453,6 +455,6 @@ describe("Aportar in a v2 fund", () => {
       viewer: null,
       m: es,
     });
-    expect([v1.version, v1.counted, v1.feeBps, v1.balanceCap, v1.currency, v1.dollar]).toEqual([1, pesos(87_500), 0, DEFAULT_BALANCE_CAP, WARS, USDT]);
+    expect([v1.version, v1.counted, v1.feeBps, v1.balanceCap, v1.currency, v1.dollar]).toEqual([1, pesos(87_500), 0, BALANCE_CAP, WARS, USDT]);
   });
 });

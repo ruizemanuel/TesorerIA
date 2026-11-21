@@ -1,5 +1,4 @@
 import { MAX_PESOS, amountExamples, formatMoney, parseMoney } from "./format";
-import { DEFAULT_BALANCE_CAP } from "./fund-abi";
 import type { Messages } from "./i18n/messages";
 
 // What the forms check, shared by the browser (before the passkey is made: see withAccount) and the server, so
@@ -28,9 +27,13 @@ export function draftProblem({ name, agreedExpense, weeklyFee, weeklyCap }: Draf
   return fundCapProblem(weeklyCap, m);
 }
 
-/** Whether a weekly cap is above the fund's cap on its balance, which FundV2 reverts at creation, and what to say of it. */
-export function fundCapProblem(weeklyCap: bigint, m: Messages): string | null {
-  return weeklyCap > DEFAULT_BALANCE_CAP ? m.checks.capAboveFundCap(formatMoney(DEFAULT_BALANCE_CAP, m)) : null;
+/**
+ * Whether a weekly cap is above the fund's cap on its balance, which FundV2 reverts at creation, and what to say of it.
+ * The cap is the one a new fund of `m`'s country gets, its currency's (createDraft keeps it in the draft); a draft that
+ * already has one passes its own (`cap`), the one its createFund names.
+ */
+export function fundCapProblem(weeklyCap: bigint, m: Messages, cap: bigint = m.country.currency.limits.balanceCap): string | null {
+  return weeklyCap > cap ? m.checks.capAboveFundCap(formatMoney(cap, m)) : null;
 }
 
 /** A draft as the form has it, with its amounts read the way `m` writes them (`parseMoney`), or what to fix in its words. */

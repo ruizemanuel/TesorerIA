@@ -128,9 +128,9 @@ describe("each page's title in the link preview", () => {
   });
 
   it("titles Crear and Entrar with their headings", async () => {
-    expect(ownOnly(await create.generateMetadata())).toEqual({ title: "Crear un fondo" });
+    expect(ownOnly(await create.generateMetadata({ searchParams: Promise.resolve({}) }))).toEqual({ title: "Crear un fondo" });
     expect(ownOnly(await enter.generateMetadata())).toEqual({ title: "Entrá a tu fondo" });
     state.acceptLanguage = "en";
-    expect(ownOnly(await create.generateMetadata())).toEqual({ title: "Create a fund" });
+    expect(ownOnly(await create.generateMetadata({ searchParams: Promise.resolve({}) }))).toEqual({ title: "Create a fund" });
   });
 });

@@ -3,9 +3,7 @@ import {
   FUND_FACTORY,
   FUND_FACTORY_V2,
   type FundVersion,
-  POOL,
-  USDT,
-  WARS,
+  currencyOf,
   fundAbi,
   fundFactoryAbi,
   fundFactoryV2Abi,
@@ -23,6 +21,7 @@ import {
   getAddress,
   isAddressEqual,
   parseEventLogs,
+  zeroAddress,
 } from "viem";
 import { entryPoint07Abi, entryPoint07Address } from "viem/account-abstraction";
 import { z } from "zod";
@@ -31,7 +30,7 @@ import { type DraftSettings, draftProblem, fundCapProblem } from "./checks";
 import { MAX_CREATE_FUND_NONCES, createFundRoom } from "./create-fund-cap";
 import { type Db, inTransaction } from "./db/client";
 import { funds, memberships, operations, users } from "./db/schema";
-import { DEFAULT_BALANCE_CAP, MAX_MEMBERS, memberFundAbi } from "./fund-abi";
+import { MAX_MEMBERS, memberFundAbi } from "./fund-abi";
 import { fail, isMember, lockFund } from "./fund-rows";
 import type { Messages } from "./i18n/messages";
 import { requestToJoin } from "./join-requests";
@@ -55,10 +54,15 @@ function factoryOf(version: FundVersion): Address {
 type V2Terms = { currency: Address; dollar: Address; pool: Address; feeBps: number };
 
 /**
- * What a v2 fund's createFund names beyond a v1's: its currency (wARS), the dollar it takes in (USDT) with the pool that
- * converts it, and the fee. The chain's fund is checked against it (`findDeployed`).
+ * What a v2 fund in `currency` names in its createFund beyond a v1's, from the agent's table (CURRENCIES, the only
+ * source): the currency, the dollar it takes in with the pool that converts it (none, zero for both, for a currency
+ * without one, as wMXN), and the fee. A draft's currency is in its row, so the call built from it and the fund the
+ * chain is checked against (`findDeployed`) are the same every time.
  */
-const V2_TERMS: V2Terms = { currency: WARS, dollar: USDT, pool: POOL, feeBps: FEE_BPS };
+function termsOf(currency: Address): V2Terms {
+  const c = currencyOf(currency)!;
+  return { currency, dollar: c.dollar?.token ?? zeroAddress, pool: c.dollar?.pool ?? zeroAddress, feeBps: FEE_BPS };
+}
 
 export type FundsResult<T> = ({ ok: true } & T) | { ok: false; status: number; error: string };
 
@@ -73,13 +77,15 @@ export type DraftSummary = {
   /** The contract it runs: the one it was frozen with once it's `deploying`; while it's a draft, the one it'd have if frozen then, or an older one. */
   version: FundVersion;
   /**
-   * What each contribution leaves for TesorerIA, in basis points (FundV2.feeBps): V2_TERMS' fee if it runs version 2
-   * (findDeployed takes a v2 fund live only with those terms), and 0 in version 1. While it's a draft, it's that of
-   * NEW_FUND_VERSION, which deployCall freezes it with.
+   * What each contribution leaves for TesorerIA, in basis points (FundV2.feeBps): its currency's terms' fee (termsOf) if
+   * it runs version 2 (findDeployed takes a v2 fund live only with those terms), and 0 in version 1. While it's a draft,
+   * it's that of NEW_FUND_VERSION, which deployCall freezes it with.
    */
   feeBps: number;
   /** The token it keeps its money in (funds.currency): what its pages and routes take the country from (countryCodeOf). */
   currency: Address;
+  /** The cap on its balance its createFund names (funds.balance_cap): its currency's when it was made (createDraft). */
+  balanceCap: bigint;
   address: Address | null;
   inviteCode: string;
   creatorId: string;
@@ -88,6 +94,11 @@ export type DraftSummary = {
   members: { userId: string; name: string; account: Address }[];
 };
 
+/**
+ * A new draft in the currency of `m`'s country, with that currency's cap on its balance (spec, 9: the draft is the
+ * deal). Its amounts are checked against that cap, in that country's words; the route only lets in a country that's
+ * offered.
+ */
 export async function createDraft(
   db: Db,
   creatorId: string,
@@ -99,6 +110,7 @@ export async function createDraft(
   const name = input.name.trim();
   const agreedExpense = input.agreedExpense.trim();
   const inviteCode = Base64.fromBytes(Bytes.random(9), { url: true, pad: false });
+  const { currency } = m.country;
   const [fund] = await db
     .insert(funds)
     .values({
@@ -106,9 +118,9 @@ export async function createDraft(
       agreedExpense,
       weeklyFee: input.weeklyFee,
       weeklyCap: input.weeklyCap,
-      balanceCap: DEFAULT_BALANCE_CAP,
+      balanceCap: currency.limits.balanceCap,
       version: NEW_FUND_VERSION,
-      currency: WARS,
+      currency: currency.token,
       creatorId,
       inviteCode,
     })
@@ -148,6 +160,7 @@ async function summarize(db: Db, where: SQL): Promise<DraftSummary | null> {
   const members = await membersOf(db, fund.id);
   const creator = members.find((member) => member.userId === fund.creatorId);
   const runs = fund.status === "draft" ? NEW_FUND_VERSION : fund.version;
+  const currency = getAddress(fund.currency);
   return {
     id: fund.id,
     name: fund.name,
@@ -157,8 +170,9 @@ async function summarize(db: Db, where: SQL): Promise<DraftSummary | null> {
     votesRequired: fund.votesRequired,
     status: fund.status,
     version: fund.version,
-    feeBps: runs === 2 ? V2_TERMS.feeBps : 0,
-    currency: getAddress(fund.currency),
+    feeBps: runs === 2 ? termsOf(currency).feeBps : 0,
+    currency,
+    balanceCap: fund.balanceCap,
     address: fund.address === null ? null : getAddress(fund.address),
     inviteCode: fund.inviteCode,
     creatorId: fund.creatorId,
@@ -255,11 +269,11 @@ export async function deployCall(
   if (draft.status === "deploying" && draft.votesRequired !== votesRequired) {
     return fail(409, m.funds.votesLocked(draft.votesRequired!));
   }
-  // A v2 fund reverts at creation with a weekly cap above its balance cap: createDraft refuses one now, but a draft
-  // made before may have it. Only for the version it's going to have: v1 never had the rule, and a draft that's
-  // already `deploying` keeps its own.
+  // A v2 fund reverts at creation with a weekly cap above its balance cap, the draft's own: createDraft refuses one
+  // now, but a draft made before may have it. Only for the version it's going to have: v1 never had the rule, and a
+  // draft that's already `deploying` keeps its own.
   const frozenWith = draft.status === "draft" ? version : draft.version;
-  const capProblem = frozenWith === 2 ? fundCapProblem(draft.weeklyCap, m) : null;
+  const capProblem = frozenWith === 2 ? fundCapProblem(draft.weeklyCap, m, draft.balanceCap) : null;
   if (capProblem !== null) return fail(400, capProblem);
   // Frozen and read under the fund's lock (see `lockFund`): whoever got in before is in the call, and nobody gets
   // in after. The version is only set while it's a draft: the statement reads the row as it was before it.
@@ -287,13 +301,13 @@ export async function deployCall(
 
 /**
  * The createFund call of a draft frozen with `version`: the factory of that version and its calldata, with `members`
- * in `membersQuery`'s order (joined at, then user id). A v2's has the currency, the dollar, the pool and the fee after
- * v1's fields (`V2_TERMS`). The only encoding of it: deployCall hands it to the creator to sign, and the bundler
- * gateway sponsors no other createFund (`frozenCreateFunds`), so the two can't drift.
+ * in `membersQuery`'s order (joined at, then user id), and the draft's row as it is: its balance cap, and for a v2 the
+ * terms of its currency (`termsOf`) after v1's fields. The only encoding of it: deployCall hands it to the creator to
+ * sign, and the bundler gateway sponsors no other createFund (`frozenCreateFunds`), so the two can't drift.
  */
 function createFundCall(
   version: FundVersion,
-  draft: Pick<DraftSummary, "name" | "agreedExpense" | "weeklyCap">,
+  draft: Pick<DraftSummary, "name" | "agreedExpense" | "weeklyCap" | "balanceCap" | "currency">,
   members: DraftSummary["members"],
   votesRequired: number,
   agent: Address,
@@ -305,12 +319,12 @@ function createFundCall(
     agent,
     agreedExpense: draft.agreedExpense,
     weeklyCap: draft.weeklyCap,
-    balanceCap: DEFAULT_BALANCE_CAP,
+    balanceCap: draft.balanceCap,
   };
   const data =
     version === 1
       ? encodeFunctionData({ abi: fundFactoryAbi, functionName: "createFund", args: [fields] })
-      : encodeFunctionData({ abi: fundFactoryV2Abi, functionName: "createFund", args: [{ ...fields, ...V2_TERMS }] });
+      : encodeFunctionData({ abi: fundFactoryV2Abi, functionName: "createFund", args: [{ ...fields, ...termsOf(draft.currency) }] });
   return { to: factoryOf(version), data };
 }
 
@@ -331,6 +345,8 @@ export async function frozenCreateFunds(db: Db, creatorId: string, agent: () => 
         name: funds.name,
         agreedExpense: funds.agreedExpense,
         weeklyCap: funds.weeklyCap,
+        balanceCap: funds.balanceCap,
+        currency: funds.currency,
         votesRequired: funds.votesRequired,
         version: funds.version,
       },
@@ -350,7 +366,9 @@ export async function frozenCreateFunds(db: Db, creatorId: string, agent: () => 
     frozen.set(draft.id, entry);
   }
   const named = agent();
-  return [...frozen.values()].map(({ draft, members }) => createFundCall(draft.version, draft, asMembers(members), draft.votesRequired!, named));
+  return [...frozen.values()].map(({ draft, members }) =>
+    createFundCall(draft.version, { ...draft, currency: getAddress(draft.currency) }, asMembers(members), draft.votesRequired!, named),
+  );
 }
 
 /**
@@ -450,8 +468,9 @@ const sameTerms = (a: V2Terms, b: V2Terms) =>
 /**
  * The fund the factory created in `transactionHash` for this draft: the FundCreated whose creator is the
  * creator's account, and only if that fund has exactly the draft's settings. Anyone can create funds in the
- * factory, so nothing else is taken for ours. The event and the fund are read as the draft's version has them, and a
- * v2 fund also has to have the draft's currency, dollar, pool and fee.
+ * factory, so nothing else is taken for ours. The event and the fund are read as the draft's version has them; the
+ * fund has to have the draft's balance cap, and a v2 one also the terms of the draft's currency (termsOf): its
+ * currency, dollar, pool and fee.
  * Otherwise, why not:
  * - "none": the factory created nothing for the creator there, so that operation failed;
  * - "mismatch": it created one for the creator, but with other settings. A real fund all the same, so it must
@@ -487,10 +506,10 @@ async function findDeployed(
         chain.votes === votesRequired &&
         isAddressEqual(chain.agent, agent) &&
         chain.weeklyCap === draft.weeklyCap &&
-        chain.balanceCap === DEFAULT_BALANCE_CAP &&
+        chain.balanceCap === draft.balanceCap &&
         chain.name === draft.name &&
         chain.agreedExpense === draft.agreedExpense &&
-        (chain.terms === null || sameTerms(chain.terms, V2_TERMS))
+        (chain.terms === null || sameTerms(chain.terms, termsOf(draft.currency)))
       ) {
         return { address: getAddress(fund), block: receipt.blockNumber, version };
       }
