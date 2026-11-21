@@ -59,8 +59,9 @@ const schema = z
      */
     CREATE_FUND_DAILY_LIMIT: blank(z.coerce.number().int().positive().default(10)),
     /**
-     * Countries to offer on top of the ones the agent's table offers, as "MX" or "AR,MX", for a local run to try one
-     * before it goes live. Empty when missing.
+     * Countries to offer on top of the ones the agent's table offers, as "MX" or "AR,MX", for a local run on the fork
+     * (and the end-to-end test) to try one before it goes live. Empty when missing; any other value is refused on
+     * mainnet and on a Vercel deployment, where it would create real funds in a country not yet offered.
      */
     EXTRA_COUNTRIES: blank(
       z
@@ -92,6 +93,10 @@ const schema = z
   .refine((settings) => settings.EXTRA_COUNTRIES.length === 0 || settings.VERCEL === undefined, {
     path: ["EXTRA_COUNTRIES"],
     message: "EXTRA_COUNTRIES is for local runs only, never on a Vercel deployment",
+  })
+  .refine((settings) => settings.EXTRA_COUNTRIES.length === 0 || settings.CHAIN_MODE === "fork", {
+    path: ["EXTRA_COUNTRIES"],
+    message: "EXTRA_COUNTRIES is for local runs on the fork only, never on mainnet",
   })
   .refine((settings) => settings.CHAT_MODEL !== "mock" || settings.CHAIN_MODE === "fork", {
     path: ["CHAT_MODEL"],

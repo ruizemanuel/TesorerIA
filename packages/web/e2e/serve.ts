@@ -113,7 +113,8 @@ const next = spawn(process.execPath, [nextBin, "dev", "--port", String(WEB_PORT)
     HEARTBEAT_SECRET,
     // The chat, with the scripted model: the real one is never asked from a test (spec, 11).
     CHAT_MODEL: "mock",
-    // Mexico, off in production, on here: /crear offers it, and mexico.spec creates a wMXN fund (refused on Vercel).
+    // Mexico, off in production, on here: /crear offers it, and mexico.spec creates a wMXN fund (refused on Vercel
+    // and outside the fork).
     EXTRA_COUNTRIES: "MX",
   },
 });

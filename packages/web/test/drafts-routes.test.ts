@@ -16,10 +16,12 @@ import { WARS } from "./support/fixtures";
 const state = vi.hoisted(() => ({ user: null as CurrentUser | null, db: null as unknown, env: {} as Record<string, string> }));
 vi.mock("../src/lib/current-user", () => ({ currentUser: async () => state.user }));
 // The server's settings as it reads them from its variables, read again each time so a test can turn Mexico off
-// (mockEnv): what this file stubs, and EXTRA_COUNTRIES through the real parser.
+// (mockEnv): a local run on the fork, and EXTRA_COUNTRIES through the real parser. A fixed base, not the shell's
+// variables, so an EXTRA_COUNTRIES exported there can't turn Mexico on behind a test.
 vi.mock("../src/lib/env", async (importOriginal) => {
   const { parseEnv } = await importOriginal<typeof import("../src/lib/env")>();
-  return { parseEnv, env: () => parseEnv({ ...process.env, ...state.env }) };
+  const base = { CHAIN_MODE: "fork", RP_ID: "localhost", ORIGIN: "http://localhost:3000", SESSION_SECRET: "a-session-secret-for-tests-only-0123456789" };
+  return { parseEnv, env: () => parseEnv({ ...base, ...state.env }) };
 });
 const mockEnv = (env: Record<string, string>) => {
   state.env = env;
@@ -62,10 +64,6 @@ async function draftOfThree() {
 }
 
 beforeAll(async () => {
-  vi.stubEnv("CHAIN_MODE", "fork");
-  vi.stubEnv("RP_ID", "localhost");
-  vi.stubEnv("ORIGIN", "http://localhost:3000");
-  vi.stubEnv("SESSION_SECRET", "a-session-secret-for-tests-only-0123456789");
   db = await testDb();
   state.db = db;
   people = [asUser(await addUser(db, "Ana")), asUser(await addUser(db, "Beto")), asUser(await addUser(db, "Caro"))];

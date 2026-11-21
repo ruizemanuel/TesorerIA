@@ -137,6 +137,7 @@ Its settings (the production values live in Vercel, never in the repo; see [`pac
 | `CHAT_MODEL` | The chat's model on the Vercel AI Gateway (`anthropic/claude-sonnet-5.5`). Without it there is no chat. `mock` is the end-to-end test's scripted model, on the fork only. |
 | `CHAT_MEMBER_DAILY_LIMIT`, `CHAT_DAILY_LIMIT` | The chat's messages in 24 hours: per member (30 by default) and among everyone (150). |
 | `CREATE_FUND_DAILY_LIMIT` | The new `createFund`s the paymaster signs in 24 hours among everyone (10 by default). Raise it when many people will create a fund at once. |
+| `EXTRA_COUNTRIES` | Optional: countries to offer on top of the ones the agent's table offers, as country codes (`MX`), to try one before it goes live, in local runs on the fork and in the end-to-end test (`e2e:serve` sets it). Refused outside the fork and on a Vercel deployment. |
 
 ## On Celo mainnet
 
