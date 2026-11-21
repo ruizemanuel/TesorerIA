@@ -1,9 +1,11 @@
-// Shared by the test and by serve.ts, which Node runs as is: so nothing here may import the workspace packages
-// (their TypeScript imports have no extensions), and the addresses are repeated from @tesoreria/agent. A unit
-// test (test/e2e-addresses.test.ts) checks they are the same. Playwright comes in for its types only.
+// Shared by the test, by the chat check's fork mode (scripts/fork-fund.ts), and by serve.ts, which Node runs as is: so
+// nothing here may import the workspace packages (their TypeScript imports have no extensions), and the addresses are
+// repeated from @tesoreria/agent. A unit test (test/e2e-addresses.test.ts) checks they are the same. Playwright comes
+// in for its types only.
 import type { BrowserContext, Locator, Page } from "@playwright/test";
 import {
   type Address,
+  type Hash,
   type Hex,
   createPublicClient,
   createTestClient,
@@ -174,15 +176,16 @@ export function fundV2(fund: Address) {
 
 /**
  * Sends `data` to `to` from `account`, a member's Safe, impersonated on the fork and given CELO for the gas: a call the
- * web doesn't offer, as the member would make it from any wallet. Throws if it reverts.
+ * web doesn't offer, as the member would make it from any wallet. Throws if it reverts; returns its transaction's hash.
  */
-export async function asAccount(account: Address, to: Address, data: Hex): Promise<void> {
+export async function asAccount(account: Address, to: Address, data: Hex): Promise<Hash> {
   await test.setBalance({ address: account, value: parseEther("10") });
   await test.impersonateAccount({ address: account });
   try {
     const hash = await wallet.sendTransaction({ account, to, data });
     const { status } = await client.waitForTransactionReceipt({ hash });
     if (status !== "success") throw new Error(`The call from ${account} to ${to} reverted: ${hash}`);
+    return hash;
   } finally {
     await test.stopImpersonatingAccount({ address: account });
   }
