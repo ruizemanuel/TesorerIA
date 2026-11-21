@@ -144,7 +144,7 @@ async function main(address: Address, position: number) {
   const brief = fundBrief(screen, viewer.name, new Date(), m);
   console.log(`Brief: ${brief.length} characters.${showBrief ? `\n${brief}` : ""}`);
 
-  const model = await chatModel();
+  const model = await chatModel(m.country);
   let input = 0;
   let output = 0;
 
@@ -156,8 +156,8 @@ async function main(address: Address, position: number) {
     if (!checked.ok) throw new CheckError(`The route would refuse this conversation (${checked.error}). Its parts: ${partTypes(conversation)}`);
     // One line with only what failed: the SDK would log the whole error, request included.
     const result = streamText({
-      ...chatCall({ model, brief, locale }),
-      messages: await toModelMessages(checked.messages),
+      ...chatCall({ model, brief, locale, country: m.country }),
+      messages: await toModelMessages(checked.messages, m.country),
       onError: ({ error }) => console.error(`  The model failed: ${describeError(error)}`),
     });
     let answer: ChatUIMessage | undefined;

@@ -2,44 +2,52 @@
 // does the check script (scripts/chat-check.ts), so the real model's answers take the same path as the browser's.
 import { MAX_NOTE_LENGTH } from "@tesoreria/agent";
 import { InvalidToolInputError, type ModelMessage, NoSuchToolError, type TextStreamPart, convertToModelMessages, toUIMessageStream } from "ai";
+import type { Country } from "../countries";
 import type { Messages } from "../i18n/messages";
-import { type ChatMetadata, type ChatUIMessage, chatTools } from "./tools";
+import { type ChatMetadata, type ChatTools, type ChatUIMessage, amountFormats, chatTools } from "./tools";
 
 /**
- * The history as the model reads it, from the conversation readChatRequest checked. A card the member never
- * answered is left out (the panel answers it first): an open tool call would fail the call.
+ * The history as the model reads it, from the conversation readChatRequest checked, with the tools of the fund's
+ * `country`. A card the member never answered is left out (the panel answers it first): an open tool call would fail
+ * the call.
  */
-export function toModelMessages(messages: ChatUIMessage[]): Promise<ModelMessage[]> {
-  return convertToModelMessages(messages, { tools: chatTools, ignoreIncompleteToolCalls: true });
+export function toModelMessages(messages: ChatUIMessage[], country: Country): Promise<ModelMessage[]> {
+  return convertToModelMessages(messages, { tools: chatTools(country), ignoreIncompleteToolCalls: true });
 }
 
-/** What the model reads when its card was wrong. Fixed text: the card's own input is never echoed back to it or to a log. */
-export const BAD_CARD_HINT = `Invalid input: write the amount in pesos, like 45.000 or 45.000,50 in Spanish, 45,000 or 45,000.50 in English, above zero, and a note of up to ${MAX_NOTE_LENGTH} characters.`;
+/**
+ * What the model reads when its card was wrong: how amounts are written in the fund's `country` (amountFormats). Fixed
+ * text for each country: the card's own input is never echoed back to it or to a log.
+ */
+export function badCardHint(country: Country): string {
+  return `Invalid input: write the amount in pesos, like ${amountFormats(country)}, above zero, and a note of up to ${MAX_NOTE_LENGTH} characters.`;
+}
 
 /**
  * The answer as the browser reads it, with the member's messages left today (`remaining`) and how it ended. Errors
  * are only mapped: a failure was logged by whoever called the model. A card the model got wrong, or a tool it doesn't
  * have, goes back to the model as a hint (the card itself says `chat.badCard`); a tool's own error reaches here as a
- * string. Anything else is the member's `chat.unavailable`, in the request's language (`m`). The provider's own
- * record of the answer (a custom part: Anthropic's message_start, through the AI Gateway, with the message's id and
- * usage) stays here: the panel shows nothing of it, and readChatRequest takes back only the parts a message may carry.
+ * string. Anything else is the member's `chat.unavailable`, in the request's language (`m`); the tools and the hint are
+ * those of `m`'s country, the fund's. The provider's own record of the answer (a custom part: Anthropic's
+ * message_start, through the AI Gateway, with the message's id and usage) stays here: the panel shows nothing of it,
+ * and readChatRequest takes back only the parts a message may carry.
  */
-export function toAnswerStream(stream: ReadableStream<TextStreamPart<typeof chatTools>>, remaining: number, m: Messages) {
-  return toUIMessageStream<typeof chatTools, ChatUIMessage>({
+export function toAnswerStream(stream: ReadableStream<TextStreamPart<ChatTools>>, remaining: number, m: Messages) {
+  return toUIMessageStream<ChatTools, ChatUIMessage>({
     stream: stream.pipeThrough(
-      new TransformStream<TextStreamPart<typeof chatTools>, TextStreamPart<typeof chatTools>>({
+      new TransformStream<TextStreamPart<ChatTools>, TextStreamPart<ChatTools>>({
         transform: (part, controller) => {
           if (part.type !== "custom") controller.enqueue(part);
         },
       }),
     ),
-    tools: chatTools,
+    tools: chatTools(m.country),
     messageMetadata: ({ part }): ChatMetadata | undefined => {
       if (part.type === "start") return { remaining };
       if (part.type === "finish") return { remaining, finish: part.rawFinishReason === "refusal" ? "refusal" : part.finishReason };
       return undefined;
     },
     onError: (error) =>
-      InvalidToolInputError.isInstance(error) || NoSuchToolError.isInstance(error) || typeof error === "string" ? BAD_CARD_HINT : m.chat.unavailable,
+      InvalidToolInputError.isInstance(error) || NoSuchToolError.isInstance(error) || typeof error === "string" ? badCardHint(m.country) : m.chat.unavailable,
   });
 }

@@ -5,11 +5,12 @@ import { getAddress } from "viem";
 import { type MockInstance, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BRIEF_TAG } from "../src/lib/chat/brief";
 import { chatInstructions } from "../src/lib/chat/instructions";
+import { COUNTRIES } from "../src/lib/countries";
 import type { CurrentUser } from "../src/lib/current-user";
 import type { Db } from "../src/lib/db/client";
 import { chatMessages } from "../src/lib/db/schema";
 import { buildFundView } from "../src/lib/fund-view";
-import type { Messages } from "../src/lib/i18n/messages";
+import { type Messages, messagesFor } from "../src/lib/i18n/messages";
 import type { FundScreen } from "../src/lib/read-fund";
 import { addLiveFund, addUser, testDb } from "./support/db";
 import { ANA, BETO, BLOCK, FUND, WARS, snapshot } from "./support/fixtures";
@@ -26,13 +27,17 @@ const state = vi.hoisted(() => ({
   screenLocales: [] as string[],
   memberLimit: 30,
   globalLimit: 150,
+  /** The countries this run offers besides the table's (EXTRA_COUNTRIES): what a request's IP may pick. */
+  extraCountries: [] as string[],
 }));
 vi.mock("../src/lib/current-user", () => ({ currentUser: async () => state.user }));
 vi.mock("../src/lib/db/client", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../src/lib/db/client")>()),
   getDb: async () => state.db,
 }));
-vi.mock("../src/lib/env", () => ({ env: () => ({ CHAT_MEMBER_DAILY_LIMIT: state.memberLimit, CHAT_DAILY_LIMIT: state.globalLimit }) }));
+vi.mock("../src/lib/env", () => ({
+  env: () => ({ CHAT_MEMBER_DAILY_LIMIT: state.memberLimit, CHAT_DAILY_LIMIT: state.globalLimit, EXTRA_COUNTRIES: state.extraCountries }),
+}));
 vi.mock("../src/lib/chat/model", () => ({
   chatEnabled: () => state.enabled,
   chatModel: async () => {
@@ -148,6 +153,7 @@ beforeEach(async () => {
   state.enabled = true;
   state.memberLimit = 30;
   state.globalLimit = 150;
+  state.extraCountries = [];
   state.model = answers("Beto debe $ 10.000 de esta semana.");
   fundId = fund.id;
   state.screenLocales = [];
@@ -212,6 +218,52 @@ describe("POST /api/funds/:address/chat (spec, 8.2)", () => {
     const response = await chat([user("Hola")]);
     expect(response.status).toBe(503);
     expect(await response.json()).toEqual({ error: "El agente no puede responder ahora. Inténtalo más tarde." });
+  });
+
+  it("answers in a fund's own country before it has read the fund's screen, from its row (spec, 6)", async () => {
+    const mexican = getAddress("0x00000000000000000000000000000000000f00d2");
+    await addLiveFund(db, { creatorId: ana.id, address: mexican, members: [ana.id], version: 2, currency: COUNTRIES.MX.currency.token });
+    const neutral = messagesFor("es", "MX");
+    // The history's card is checked the way a Mexican screen writes amounts: "5.000" isn't one there.
+    const card = (amount: string) => ({
+      id: `m${++n}`,
+      role: "assistant",
+      parts: [{ type: "tool-proposeExpense", toolCallId: `call-${n}`, state: "output-available", input: { kind: "other", amount, note: "Pelotas" }, output: { status: "dismissed" } }],
+    });
+    const refused = await chat([user("Pagué"), card("5.000"), user("¿Y?")], mexican);
+    expect(refused.status).toBe(400);
+    expect(await refused.json()).toEqual({ error: neutral.chat.badRequest });
+    state.screen = new Error("forno is down");
+    expect(await (await chat([user("Pagué"), card("5,000"), user("¿Y?")], mexican)).json()).toEqual({ error: neutral.chat.unavailable });
+    expect(neutral.chat.unavailable).not.toBe(es.chat.unavailable);
+    state.screen = null;
+    const missing = await chat([user("Hola")], mexican);
+    expect(missing.status).toBe(404);
+    expect(await missing.json()).toEqual({ error: neutral.chat.notFound });
+    // An Argentine fund's answers stay Rioplatense, whatever the request's IP says.
+    state.extraCountries = ["MX"];
+    state.screen = new Error("forno is down");
+    const fromMexico = { headers: { "content-type": "application/json", "x-vercel-ip-country": "MX" } };
+    expect(await (await chat([user("Hola")], FUND, fromMexico)).json()).toEqual({ error: es.chat.unavailable });
+    expect(errors.mock.calls.every(([line]) => String(line).startsWith("The chat could not read fund "))).toBe(true);
+  });
+
+  it("answers in the request's country before the screen when even the fund's row can't be read, and never throws for it", async () => {
+    state.db = {
+      select: () => {
+        throw new Error("the database is down");
+      },
+    };
+    state.screen = new Error("forno is down");
+    state.extraCountries = ["MX"];
+    const fromMexico = { headers: { "content-type": "application/json", "x-vercel-ip-country": "MX" } };
+    const there = await chat([user("Hola")], FUND, fromMexico);
+    expect(there.status).toBe(503);
+    expect(await there.json()).toEqual({ error: messagesFor("es", "MX").chat.unavailable });
+    const here = await chat([user("Hola")]);
+    expect(here.status).toBe(503);
+    expect(await here.json()).toEqual({ error: es.chat.unavailable });
+    expect(errors.mock.calls).toContainEqual([`The chat could not read the country of fund ${FUND}: the database is down`]);
   });
 
   it("refuses a body that's too big, a long message, and a conversation that doesn't end with the member, before counting", async () => {
@@ -292,7 +344,7 @@ describe("POST /api/funds/:address/chat (spec, 8.2)", () => {
 
     expect(state.screenLocales).toEqual(["es"]);
     const [call] = (state.model as MockLanguageModelV4).doStreamCalls;
-    expect(call!.prompt[0]).toMatchObject({ role: "system", content: chatInstructions("es") });
+    expect(call!.prompt[0]).toMatchObject({ role: "system", content: chatInstructions("es", COUNTRIES.AR) });
     expect(call!.prompt[1]).toMatchObject({ role: "system" });
     expect(JSON.stringify(call!.prompt[1])).toContain(`<${BRIEF_TAG}>`);
     expect(call!.tools?.map((t) => t.name)).toEqual(["proposeExpense"]);
@@ -313,13 +365,23 @@ describe("POST /api/funds/:address/chat (spec, 8.2)", () => {
     await response.text();
     expect(state.screenLocales).toEqual(["en"]);
     const [call] = (state.model as MockLanguageModelV4).doStreamCalls;
-    expect(call!.prompt[0]).toMatchObject({ role: "system", content: chatInstructions("en") });
+    expect(call!.prompt[0]).toMatchObject({ role: "system", content: chatInstructions("en", COUNTRIES.AR) });
     expect(call!.prompt[0]).toMatchObject({ content: expect.stringContaining("In plain English") });
     const brief = JSON.stringify(call!.prompt[1]);
     expect(brief).toContain(`<${BRIEF_TAG}>`);
     expect(brief).toContain("ARS");
     expect(brief).toContain("Fund: Thursday football.");
     expect(brief).not.toContain("Fondo:");
+  });
+
+  it("asks a Mexican fund's model with the neutral instructions, the Mexican tool and the Mexican brief", async () => {
+    state.screen = screenIn(messagesFor("es", "MX"));
+    await (await chat([user("¿Quién debe esta semana?")])).text();
+    const [call] = (state.model as MockLanguageModelV4).doStreamCalls;
+    expect(call!.prompt[0]).toMatchObject({ role: "system", content: chatInstructions("es", COUNTRIES.MX) });
+    expect(JSON.stringify(call!.prompt[1])).toContain("Saldo: $90,000.");
+    expect(JSON.stringify(call!.tools)).toContain('\\"45,000\\" or \\"45,000.50\\". Never guessed.');
+    expect(JSON.stringify(call!.tools)).not.toContain("45.000");
   });
 
   it("answers in English for a browser that asks for English and has no cookie, and in Spanish with neither", async () => {
@@ -330,8 +392,8 @@ describe("POST /api/funds/:address/chat (spec, 8.2)", () => {
     await (await chat([user("Hola")])).text();
     expect(state.screenLocales).toEqual(["en", "es"]);
     const [englishCall, spanishCall] = (state.model as MockLanguageModelV4).doStreamCalls;
-    expect(englishCall!.prompt[0]).toMatchObject({ content: chatInstructions("en") });
-    expect(spanishCall!.prompt[0]).toMatchObject({ content: chatInstructions("es") });
+    expect(englishCall!.prompt[0]).toMatchObject({ content: chatInstructions("en", COUNTRIES.AR) });
+    expect(spanishCall!.prompt[0]).toMatchObject({ content: chatInstructions("es", COUNTRIES.AR) });
     expect(JSON.stringify(spanishCall!.prompt[1])).toContain("Fondo: Fútbol de los jueves.");
   });
 
@@ -341,7 +403,7 @@ describe("POST /api/funds/:address/chat (spec, 8.2)", () => {
     expect(response.status).toBe(200);
     await response.text();
     const [call] = (state.model as MockLanguageModelV4).doStreamCalls;
-    expect(call!.prompt[0]).toMatchObject({ content: chatInstructions("en") });
+    expect(call!.prompt[0]).toMatchObject({ content: chatInstructions("en", COUNTRIES.AR) });
     const history = JSON.stringify(call!.prompt.slice(2));
     expect(history).toContain("¿Quién debe esta semana?");
     expect(history).toContain("Beto debe $ 10.000.");

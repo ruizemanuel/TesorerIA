@@ -50,12 +50,13 @@ function hasOnlyAllowedParts(message: UIMessage): boolean {
 export type ChatRequest = { ok: true; messages: ChatUIMessage[] } | { ok: false; error: string };
 
 /**
- * The conversation the browser sent, checked: a valid list of messages (tool parts against their schemas), no
- * system message, only the parts a message may carry, and the member's text last, up to MAX_MESSAGE_CHARS. Then it's
- * trimmed (trimHistory). What it refuses with is said in the request's language (`m`).
+ * The conversation the browser sent, checked: a valid list of messages (tool parts against their schemas, a card's
+ * amount as `m`'s country writes it), no system message, only the parts a message may carry, and the member's text
+ * last, up to MAX_MESSAGE_CHARS. Then it's trimmed (trimHistory). What it refuses with is said in the request's
+ * language (`m`).
  */
 export async function readChatRequest(messages: unknown, m: Messages): Promise<ChatRequest> {
-  const validated = await safeValidateUIMessages<ChatUIMessage>({ messages, tools: chatTools });
+  const validated = await safeValidateUIMessages<ChatUIMessage>({ messages, tools: chatTools(m.country) });
   if (!validated.success) return { ok: false, error: m.chat.badRequest };
   const all = validated.data;
   if (all.some((message) => message.role === "system" || !hasOnlyAllowedParts(message))) return { ok: false, error: m.chat.badRequest };

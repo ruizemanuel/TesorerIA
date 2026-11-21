@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { BRIEF_MOVEMENTS, BRIEF_TAG, briefText, fundBrief } from "../src/lib/chat/brief";
 import { NBSP, formatPercent, formatMoney } from "../src/lib/format";
 import { buildFundView } from "../src/lib/fund-view";
-import type { Messages } from "../src/lib/i18n/messages";
+import { type Messages, messagesFor } from "../src/lib/i18n/messages";
 import type { FundScreen } from "../src/lib/read-fund";
 import type { TimelineItem } from "../src/lib/timeline";
 import { ANA, BETO, BLOCK, CARO, NOW, WARS, snapshot } from "./support/fixtures";
@@ -326,5 +326,23 @@ describe("fundBrief of a version 2 fund", () => {
 
   it("says no fee for a version 1 fund, which has none", () => {
     for (const m of [es, en]) expect(fundBrief(screenIn(m), "Ana", NOW, m), m.locale).not.toContain("TesorerIA");
+  });
+});
+
+describe("fundBrief of a Mexican fund (spec, 12)", () => {
+  const mx = messagesFor("es", "MX");
+
+  it("tells the model the fund's own time", () => {
+    const brief = fundBrief(screenIn(mx), "Ana", new Date("2026-11-19T16:00:00Z"), mx);
+    expect(brief).toContain("hora de Ciudad de México");
+    expect(brief).toContain("10:00"); // 16:00 UTC is 10:00 in Mexico City
+    expect(brief.split("\n")[1]).toBe("Ahora es jueves, 19 de noviembre de 2026, 10:00, hora de Ciudad de México. El fondo va en su semana 3.");
+  });
+
+  it("writes the amounts as a Mexican screen does", () => {
+    const brief = fundBrief(screenIn(mx), "Ana", NOW, mx);
+    expect(brief).toContain("Saldo: $80,000.");
+    expect(brief).toContain("2. Beto: debe en total $10,000.");
+    expect(brief).not.toMatch(/\$\s\d/);
   });
 });

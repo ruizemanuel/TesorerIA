@@ -15,6 +15,7 @@ import {
 } from "../src/lib/chat/view";
 import { expenseOutcome } from "../src/lib/expense-outcome";
 import { NBSP, formatMoney } from "../src/lib/format";
+import { messagesFor } from "../src/lib/i18n/messages";
 import { WARS } from "./support/fixtures";
 import { en, es } from "./support/messages";
 
@@ -61,6 +62,16 @@ describe("proposalPreview: what the card says before it's confirmed (spec, 9.2)"
     expect(proposalPreview({ kind: "other", amount: "8.000", note: "" }, rules, en).amount).toBe(8_000n * WARS);
     expect(proposalPreview({ kind: "other", amount: "8.000,50", note: "" }, rules, en).amount).toBe(8_000n * WARS + 50n * 10n ** 16n);
     expect(proposalPreview({ kind: "other", amount: "forty", note: "" }, rules, en).amount).toBeNull();
+  });
+
+  it("reads the model's Mexican amount on the card, and not the Argentine way", () => {
+    const mx = messagesFor("es", "MX");
+    expect(proposalPreview({ kind: "other", amount: "1,500", note: "Pelotas" }, rules, mx).amount).toBe(1_500n * WARS);
+    expect(proposalPreview({ kind: "other", amount: "1,500", note: "Pelotas" }, rules, messagesFor("en", "MX")).amount).toBe(1_500n * WARS);
+    expect(proposalPreview({ kind: "other", amount: "1.500", note: "Pelotas" }, rules, mx).amount).toBeNull();
+    expect(proposalPreview({ kind: "agreed", amount: "1,500", note: "" }, rules, mx).next).toBe(
+      "Si entra en lo que queda del tope de la semana ($15,000), te lo devuelvo enseguida. Si no, se vota.",
+    );
   });
 });
 

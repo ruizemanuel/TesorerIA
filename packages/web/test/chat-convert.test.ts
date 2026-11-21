@@ -3,9 +3,14 @@ import { type LanguageModel, readUIMessageStream, simulateReadableStream, stream
 import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it } from "vitest";
 import { chatCall } from "../src/lib/chat/call";
-import { toAnswerStream, toModelMessages } from "../src/lib/chat/convert";
+import { badCardHint, toAnswerStream, toModelMessages } from "../src/lib/chat/convert";
 import { readChatRequest } from "../src/lib/chat/request";
+import { scriptedModel } from "../src/lib/chat/scripted-model";
 import type { ChatUIMessage } from "../src/lib/chat/tools";
+import { proposalPreview } from "../src/lib/chat/view";
+import { COUNTRIES } from "../src/lib/countries";
+import { type Messages, messagesFor } from "../src/lib/i18n/messages";
+import { WARS } from "./support/fixtures";
 import { es } from "./support/messages";
 
 const usage = { inputTokens: { total: 2_000, noCache: 2_000, cacheRead: 0, cacheWrite: 0 }, outputTokens: { total: 40, text: 0, reasoning: 30 } };
@@ -52,11 +57,12 @@ const answers = (text: string) =>
 let n = 0;
 const user = (text: string): ChatUIMessage => ({ id: `u${++n}`, role: "user", parts: [{ type: "text", text }] });
 
-/** One answer as the browser ends up holding it: the route's call and stream, read the way useChat reads them. */
-async function answerAs(model: LanguageModel, conversation: ChatUIMessage[]): Promise<ChatUIMessage> {
-  const result = streamText({ ...chatCall({ model, brief: "<estado_del_fondo>…</estado_del_fondo>", locale: "es" }), messages: await toModelMessages(conversation) });
+/** One answer as the browser ends up holding it: the route's call and stream, read the way useChat reads them, in `m`. */
+async function answerAs(model: LanguageModel, conversation: ChatUIMessage[], m: Messages = es): Promise<ChatUIMessage> {
+  const call = chatCall({ model, brief: "<estado_del_fondo>…</estado_del_fondo>", locale: m.locale, country: m.country });
+  const result = streamText({ ...call, messages: await toModelMessages(conversation, m.country) });
   let answer: ChatUIMessage | undefined;
-  for await (const message of readUIMessageStream<ChatUIMessage>({ stream: toAnswerStream(result.stream, 7, es) })) answer = message;
+  for await (const message of readUIMessageStream<ChatUIMessage>({ stream: toAnswerStream(result.stream, 7, m) })) answer = message;
   return { ...answer!, id: `a${++n}` };
 }
 
@@ -119,8 +125,59 @@ describe("the browser's round trip (spec, 8.2): an answer with signed thinking a
   it("leaves out a card nobody answered, so the next call doesn't fail", async () => {
     const asked = user("Pagué $ 8.000 de pelotas nuevas");
     const answer = await answerAs(thinksThenProposes(), [asked]);
-    const messages = await toModelMessages([asked, answer, user("¿Y?")]);
+    const messages = await toModelMessages([asked, answer, user("¿Y?")], es.country);
     expect(JSON.stringify(messages)).not.toContain("tool-call");
     expect(messages.map((message) => message.role)).toEqual(["user", "assistant", "user"]);
+  });
+});
+
+/** A model that proposes a card with `amount`, and nothing else. */
+const proposes = (amount: string) => {
+  const input = JSON.stringify({ kind: "other", amount, note: "Pelotas" });
+  return new MockLanguageModelV4({
+    doStream: async () => ({
+      stream: streamOf([
+        { type: "tool-input-start", id: "call-1", toolName: "proposeExpense" },
+        { type: "tool-input-delta", id: "call-1", delta: input },
+        { type: "tool-input-end", id: "call-1" },
+        { type: "tool-call", toolCallId: "call-1", toolName: "proposeExpense", input },
+        { type: "finish", finishReason: { unified: "tool-calls", raw: "tool_use" }, usage },
+      ]),
+    }),
+  });
+};
+
+describe("badCardHint: what the model reads when its card was wrong (spec, 12)", () => {
+  it("hints the Mexican formats when a card is malformed", () => {
+    expect(badCardHint(COUNTRIES.MX)).toContain("45,000 or 45,000.50");
+    expect(badCardHint(COUNTRIES.AR)).toBe(
+      "Invalid input: write the amount in pesos, like 45.000 or 45.000,50 in Spanish, 45,000 or 45,000.50 in English, above zero, and a note of up to 140 characters.",
+    );
+    expect(badCardHint(COUNTRIES.MX)).toBe("Invalid input: write the amount in pesos, like 45,000 or 45,000.50, above zero, and a note of up to 140 characters.");
+  });
+
+  it("goes to a Mexican fund's card the model wrote the Argentine way, and an Argentine one takes it", async () => {
+    const mx = messagesFor("es", "MX");
+    const wrong = await answerAs(proposes("5.000"), [user("Pagué $5,000 de pelotas")], mx);
+    expect(wrong.parts.at(-1)).toMatchObject({ state: "output-error", errorText: badCardHint(COUNTRIES.MX) });
+    const right = await answerAs(proposes("5,000"), [user("Pagué $5,000 de pelotas")], mx);
+    expect(right.parts.at(-1)).toMatchObject({ type: "tool-proposeExpense", state: "input-available" });
+    const argentine = await answerAs(proposes("5.000"), [user("Pagué $ 5.000 de pelotas")]);
+    expect(argentine.parts.at(-1)).toMatchObject({ type: "tool-proposeExpense", state: "input-available" });
+  });
+});
+
+describe("scriptedModel: the e2e's model, in the fund's country", () => {
+  it("proposes $ 5.000 of new balls to an Argentine fund and $5,000 to a Mexican one, as each card reads them", async () => {
+    const rules = { agreedExpense: "la cancha", leftThisWeek: 0n, votesRequired: 2, members: 3 };
+    for (const [m, amount] of [
+      [es, "5.000"],
+      [messagesFor("es", "MX"), "5,000"],
+    ] as const) {
+      const answer = await answerAs(scriptedModel(m.country), [user("Pagué $ 5.000 de pelotas nuevas")], m);
+      const card = answer.parts.find((part) => part.type === "tool-proposeExpense");
+      expect(card, m.country.code).toMatchObject({ state: "input-available", input: { kind: "other", amount, note: "Pelotas nuevas" } });
+      if (card?.type === "tool-proposeExpense" && card.state === "input-available") expect(proposalPreview(card.input, rules, m).amount).toBe(5_000n * WARS);
+    }
   });
 });

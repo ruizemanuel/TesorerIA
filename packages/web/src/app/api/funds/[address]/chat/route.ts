@@ -1,6 +1,6 @@
 import { shortMessage } from "@tesoreria/agent";
 import { APICallError, type LanguageModel, type ModelMessage, createUIMessageStreamResponse, streamText } from "ai";
-import { isAddress } from "viem";
+import { type Address, isAddress } from "viem";
 import { z } from "zod";
 import { fundBrief } from "../../../../../lib/chat/brief";
 import { chatCall } from "../../../../../lib/chat/call";
@@ -9,9 +9,11 @@ import { MAX_CHAT_BODY_BYTES } from "../../../../../lib/chat/limits";
 import { chatEnabled, chatModel } from "../../../../../lib/chat/model";
 import { recordChatUsage, reserveChatMessage } from "../../../../../lib/chat/quota";
 import { readChatRequest } from "../../../../../lib/chat/request";
+import type { CountryCode } from "../../../../../lib/countries";
 import { currentUser } from "../../../../../lib/current-user";
 import { getDb } from "../../../../../lib/db/client";
 import { env } from "../../../../../lib/env";
+import { fundCountryOf } from "../../../../../lib/fund-country";
 import { jsonError, readJson } from "../../../../../lib/http";
 import { localeOf } from "../../../../../lib/i18n/locales";
 import { messagesOf } from "../../../../../lib/i18n/request";
@@ -36,10 +38,25 @@ function sumTokens(counts: Array<number | undefined>): number | undefined {
 }
 
 /**
+ * The country of the fund at `address`, from its row (fundCountryOf: one select), for what the route answers before it
+ * has read the fund's screen. Undefined when even that read fails: the route then speaks the request's country, and the
+ * screen's own read meets the trouble and says so.
+ */
+async function countryBeforeTheScreen(address: Address): Promise<CountryCode | undefined> {
+  try {
+    return await fundCountryOf(await getDb(), address);
+  } catch (error) {
+    console.error(`The chat could not read the country of fund ${address}: ${shortMessage(error)}`);
+    return undefined;
+  }
+}
+
+/**
  * The chat with the agent (spec, 8.2): one message of a member of a live fund, answered as a stream. It reads the fund
  * and answers in the request's language (spec, 9.3): if the page changes language in the middle of a conversation, the
- * history stays as it was and the next answer comes in the new language. Once it has read the fund, it speaks the
- * fund's country (spec, 6); before, the request's.
+ * history stays as it was and the next answer comes in the new language. It speaks the fund's country (spec, 6 and
+ * 12): from the fund's row once it knows the address is one, and from the fund's screen once it has read it. Before
+ * that, and if the row can't be read, the request's.
  */
 export async function POST(request: Request, { params }: { params: Promise<{ address: string }> }) {
   const locale = localeOf(request);
@@ -48,10 +65,11 @@ export async function POST(request: Request, { params }: { params: Promise<{ add
   if (user === null) return jsonError(401, outside.errors.logIn);
   const { address } = await params;
   if (!chatEnabled() || !isAddress(address, { strict: false })) return jsonError(404, outside.chat.notFound);
+  const beforeScreen = messagesOf(request, await countryBeforeTheScreen(address));
   // The cap holds for the bytes actually read, not only for the length the request declares (a chunked body has none).
   const body = await readJson(request, ChatBody, { maxBytes: MAX_CHAT_BODY_BYTES });
   if (!body.ok) return body.response;
-  const conversation = await readChatRequest(body.value.messages, outside);
+  const conversation = await readChatRequest(body.value.messages, beforeScreen);
   if (!conversation.ok) return jsonError(400, conversation.error);
 
   // Everything that can fail before the model comes before the cap, so a failure costs the member nothing: the
@@ -61,15 +79,15 @@ export async function POST(request: Request, { params }: { params: Promise<{ add
     screen = await loadFundScreen(address, user, { locale });
   } catch (error) {
     console.error(`The chat could not read fund ${address}: ${shortMessage(error)}`);
-    return jsonError(503, outside.chat.unavailable);
+    return jsonError(503, beforeScreen.chat.unavailable);
   }
-  if (screen === null) return jsonError(404, outside.chat.notFound);
+  if (screen === null) return jsonError(404, beforeScreen.chat.notFound);
   const m = messagesOf(request, screen.country);
   let messages: ModelMessage[];
   let model: LanguageModel;
   try {
-    messages = await toModelMessages(conversation.messages);
-    model = await chatModel();
+    messages = await toModelMessages(conversation.messages, m.country);
+    model = await chatModel(m.country);
   } catch (error) {
     console.error(`The chat could not start for fund ${address}: ${describeError(error)}`);
     return jsonError(503, m.chat.unavailable);
@@ -86,7 +104,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ add
   if (!reservation.ok) return jsonError(429, reservation.limit === "member" ? m.chat.memberLimit : m.chat.unavailable);
 
   const result = streamText({
-    ...chatCall({ model, brief: fundBrief(screen, user.name, new Date(), m), locale }),
+    ...chatCall({ model, brief: fundBrief(screen, user.name, new Date(), m), locale, country: m.country }),
     messages,
     abortSignal: request.signal,
     onEnd: async ({ usage, finishReason, rawFinishReason }) => {
