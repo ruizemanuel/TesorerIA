@@ -46,7 +46,7 @@ export const neutral: Dictionary = {
     amountFormat: (whole: string, cents: string) => `Escríbelo como ${whole} o ${cents}.`,
     amountTooBig: (max: string) => `No puede pasar de ${max}.`,
     notInAFund: "No estás en ningún fondo.",
-    agentJustRan: "El agente acaba de correr.",
+    agentJustRan: "El agente se acaba de ejecutar.",
     notYourDraft: "Ese borrador no es tuyo.",
     countryNotOffered: "Todavía no se pueden crear fondos de ese país.",
   },
@@ -254,12 +254,12 @@ export const neutral: Dictionary = {
     newAccount: "una cuenta nueva",
     you: "Tú",
     contributed: (who: string, what: string) => `${sentenceStart(who)} aportó ${what}.`,
-    converted: (usdt: string, pesos: string) => `Pasé a pesos los ${usdt} que entraron: ${pesos}.`,
+    converted: (usdt: string, pesos: string) => `Convertí a pesos los ${usdt} que entraron: ${pesos}.`,
     convertedLess: (usdt: string, pesos: string, diff: string, who: string | null) =>
-      `Pasé a pesos los ${usdt} que entraron: ${pesos}, ${diff} menos de lo que valían al aportarlos. ${who === null ? "Esa diferencia la ponen quienes los aportaron." : `Esa diferencia la pone ${who}.`}`,
+      `Convertí a pesos los ${usdt} que entraron: ${pesos}, ${diff} menos de lo que valían al aportarlos. ${who === null ? "Esa diferencia la ponen quienes los aportaron." : `Esa diferencia la pone ${who}.`}`,
     convertedMore: (usdt: string, pesos: string, diff: string, who: string | null) =>
-      `Pasé a pesos los ${usdt} que entraron: ${pesos}, ${diff} más de lo que valían al aportarlos. ${who === null ? "Esa diferencia queda a favor de quienes los aportaron." : `Esa diferencia queda a favor de ${who}.`}`,
-    convertedFor: (usdt: string, pesos: string, who: string) => `Pasé a pesos los ${usdt} de ${who}: ${pesos}.`,
+      `Convertí a pesos los ${usdt} que entraron: ${pesos}, ${diff} más de lo que valían al aportarlos. ${who === null ? "Esa diferencia queda a favor de quienes los aportaron." : `Esa diferencia queda a favor de ${who}.`}`,
+    convertedFor: (usdt: string, pesos: string, who: string) => `Convertí a pesos los ${usdt} de ${who}: ${pesos}.`,
     convertedDetail: "Los cambié a pesos y revisé que el precio no se alejara más de 2 % del precio de referencia del dólar, como dicen mis reglas.",
     feePaid: (pesos: string, percent: string) =>
       `Envié ${pesos} de la comisión del ${percent} a TesorerIA, para cubrir lo que cuestan las operaciones del fondo.`,
@@ -303,7 +303,7 @@ export const neutral: Dictionary = {
     agentChanged: "Cambió el agente del fondo.",
     fundClosed: "Se cerró el fondo y se repartió el saldo según lo que aportó cada uno.",
     remainderDistributed: "Se repartió lo que llegó después del cierre.",
-    hold: (usdt: string, why: string) => `Todavía no pasé a pesos ${usdt}: ${why}. Lo vuelvo a intentar en unos minutos.`,
+    hold: (usdt: string, why: string) => `Todavía no he convertido a pesos ${usdt}: ${why}. Lo vuelvo a intentar en unos minutos.`,
     holdWhy: {
       "daily-limit": "ya cambié todo lo que puedo cambiar por día en este fondo",
       "price-reference": "el precio de referencia del dólar no está al día",
@@ -425,13 +425,13 @@ export const neutral: Dictionary = {
     sendAtLeast: (usdt: ReactNode, pesos: ReactNode) => (
       <>
         Envía al menos {usdt} a tu cuenta del fondo desde Binance o cualquier exchange: con eso cubres {pesos} al precio actual, incluido lo que se
-        pierde al pasarlos a pesos.
+        pierde al convertirlos a pesos.
       </>
     ),
     sendAtLeastMore: (usdt: ReactNode, pesos: ReactNode) => (
       <>
         Envía al menos {usdt} más a tu cuenta del fondo desde Binance o cualquier exchange: con lo que ya tienes, cubres {pesos} al precio actual,
-        incluido lo que se pierde al pasarlos a pesos.
+        incluido lo que se pierde al convertirlos a pesos.
       </>
     ),
     sendUsdt: "Envía USDT a tu cuenta del fondo desde Binance o cualquier exchange.",
@@ -480,7 +480,7 @@ export const neutral: Dictionary = {
   },
   outcome: {
     reimbursed: "Listo: el agente te devolvió el dinero.",
-    proposed: "No entraba sin votación: el agente lo propuso y ahora lo vota el grupo.",
+    proposed: "El agente no puede devolverlo por su cuenta: lo propuso y ahora lo vota el grupo.",
     waiting: "El fondo todavía no tiene esos pesos: el agente te lo devuelve cuando entren.",
     rejected: "El agente no puede devolver este gasto.",
     blocked: "No se pudo procesar ahora. El agente lo vuelve a intentar en un rato.",
@@ -503,7 +503,7 @@ export const neutral: Dictionary = {
     addressLabel: "Tu dirección de Ripio",
     savedAddress: "A tu cuenta de Ripio",
     change: "Cambiar",
-    onItsWay: "Tu pase a pesos está en camino.",
+    onItsWay: "Tu envío a Ripio está en camino.",
     nothingToPass: "No tienes pesos en tu cuenta para pasar.",
     amountLabel: "Cuánto pasas",
     submit: "Pasar a Ripio",
@@ -548,7 +548,7 @@ export const neutral: Dictionary = {
     count: (used: number, max: number) => `${used} de ${max}`,
     card: {
       otherExpense: "Otro gasto",
-      agreedNext: (left: string) => `Si entra en lo que queda del tope de la semana (${left}), te lo devuelvo enseguida. Si no, se vota.`,
+      agreedNext: (left: string) => `Si cabe en lo que queda del tope de la semana (${left}), te lo devuelvo enseguida. Si no, se vota.`,
       otherNext: (votes: number, members: number) => `Se vota: necesita ${votes} de ${members} votos.`,
       kindLabel: "Qué gasto es",
       amountLabel: "Cuánto",

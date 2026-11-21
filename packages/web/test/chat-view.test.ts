@@ -70,7 +70,7 @@ describe("proposalPreview: what the card says before it's confirmed (spec, 9.2)"
     expect(proposalPreview({ kind: "other", amount: "1,500", note: "Pelotas" }, rules, messagesFor("en", "MX")).amount).toBe(1_500n * WARS);
     expect(proposalPreview({ kind: "other", amount: "1.500", note: "Pelotas" }, rules, mx).amount).toBeNull();
     expect(proposalPreview({ kind: "agreed", amount: "1,500", note: "" }, rules, mx).next).toBe(
-      "Si entra en lo que queda del tope de la semana ($15,000), te lo devuelvo enseguida. Si no, se vota.",
+      "Si cabe en lo que queda del tope de la semana ($15,000), te lo devuelvo enseguida. Si no, se vota.",
     );
   });
 });

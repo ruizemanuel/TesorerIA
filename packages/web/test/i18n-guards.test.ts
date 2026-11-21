@@ -118,6 +118,7 @@ describe("the neutral Spanish (spec, 7)", () => {
     "sí",
     // The neutral's own
     "aquí",
+    "convertí",
     "envié",
     "podrás",
   ]);
