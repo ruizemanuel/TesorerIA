@@ -69,13 +69,15 @@ function onMexicoCityClock(date: Date) {
  * later): "Hoy, 9:05" ("Today, 9:05") on the server's day, "Ayer, 23:58" on the one before, and only its day, "28/11"
  * ("Nov 28"), when the fork's clock is past the server's day. That last is a full run's: fund.spec moves the fork a
  * week ahead (its step 14), and the web counts days from the server's clock. The web puts a block's time at one block a
- * second back from the latest, and the fork mines a block for each transaction too, so a few seconds off: the minutes
- * around `at` read it as well.
+ * second back from the latest, which the fork's blocks don't keep to: a block for each transaction puts it a little
+ * earlier, and an interval miner that lags puts it later, more the longer the wait since `at` (a minute and a half when
+ * the agent's run waits out its once-a-minute limit). So any minute from 2 before `at` to 10 after reads it: still
+ * hours away from Buenos Aires's.
  */
 function mexicoCityTime(at: Date, locale: "es" | "en"): RegExp {
   const words = locale === "es" ? { today: "Hoy", yesterday: "Ayer" } : { today: "Today", yesterday: "Yesterday" };
   const today = onMexicoCityClock(new Date()).dayNumber;
-  const texts = [-2, -1, 0, 1, 2].map((minutes) => {
+  const texts = Array.from({ length: 13 }, (_, i) => i - 2).map((minutes) => {
     const clock = onMexicoCityClock(new Date(at.getTime() + minutes * 60_000));
     const daysAgo = today - clock.dayNumber;
     if (daysAgo === 0) return `${words.today}, ${clock.time}`;
@@ -176,6 +178,9 @@ test("a Mexican group creates a wMXN fund, contributes through Ripio's ramp, get
   const contributedAt = operations[0]!;
   await ana.goto(`${fund}/movimientos`);
   const contribution = ana.getByRole("listitem").filter({ hasText: /Ana aportó \$100\.26\./ }).filter({ visible: true });
+  // After fund.spec (the default order) the fork is a week ahead of the server, so the web shows only the day and
+  // only Mexico City's date is checked here (run alone, its hour too). The hour in the fund's zone is pinned by
+  // test/timeline-list.test.ts ("when a movement happened, on its fund's clock").
   await expect(contribution).toContainText(mexicoCityTime(contributedAt, "es"));
 
   // 5. Ana enters the agreed expense, $50: the agent pays it back from the fund. The heartbeat then runs over the
@@ -218,7 +223,8 @@ test("a Mexican group creates a wMXN fund, contributes through Ripio's ramp, get
   await expect(ana.getByRole("dialog", { name: "Your account" })).toBeVisible();
   await expect(ana.locator("body > div[lang]")).toHaveAttribute("lang", "en");
   await open(ana, `${fund}/movimientos`);
-  await expect(onScreen(ana, /I paid Ana back MXN 50 for “la cancha”\./)).toBeVisible();
-  const contributionInEnglish = ana.getByRole("listitem").filter({ hasText: /Ana contributed MXN 100\.26\./ }).filter({ visible: true });
+  await expect(onScreen(ana, /I paid Ana back MXN\u00a050 for “la cancha”\./)).toBeVisible();
+  const contributionInEnglish = ana.getByRole("listitem").filter({ hasText: /Ana contributed MXN\u00a0100\.26\./ }).filter({ visible: true });
+  // As in step 4: after fund.spec only the date is checked, and the unit test pins the hour.
   await expect(contributionInEnglish).toContainText(mexicoCityTime(contributedAt, "en"));
 });

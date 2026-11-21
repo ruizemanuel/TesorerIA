@@ -1,8 +1,15 @@
+import { USDT, WARS as WARS_TOKEN } from "@tesoreria/agent";
 import { Fragment, createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import type { Address } from "viem";
 import { describe, expect, it, vi } from "vitest";
 import { TimelineList } from "../src/components/timeline-list";
-import type { TimelineItem } from "../src/lib/timeline";
+import { COUNTRIES } from "../src/lib/countries";
+import { countryCodeOf } from "../src/lib/fund-country";
+import type { Locale } from "../src/lib/i18n/locales";
+import { messagesFor } from "../src/lib/i18n/messages";
+import { type TimelineItem, buildTimeline } from "../src/lib/timeline";
+import { AGENT, ANA, BLOCK, FUND, WARS, event } from "./support/fixtures";
 import { es } from "./support/messages";
 
 // The button refreshes the page through the app router, which isn't mounted when a test renders on its own.
@@ -121,5 +128,54 @@ describe("TimelineList: the links under a movement", () => {
       expect(link.className).toContain("min-h-11");
       expect(link.className.split(" ")).not.toContainEqual(expect.stringMatching(/^-mb-/));
     }
+  });
+});
+
+describe("TimelineList: when a movement happened, on its fund's clock", () => {
+  // 2026-10-10 06:30 UTC: 3:30 that day in Buenos Aires, 0:30 that day in Mexico City. The contribution, two hours
+  // before, was at 1:30 in Buenos Aires and at 22:30 the day before in Mexico City.
+  const now = new Date(Date.UTC(2026, 9, 10, 6, 30));
+  const clock = { block: BLOCK, timestamp: BigInt(now.getTime() / 1000) };
+  const WMXN = COUNTRIES.MX.currency.token;
+
+  /**
+   * The movements of a version 2 fund in `currency`, with one contribution of Ana's two hours before `now`, as its
+   * page renders them in `locale`: in the dictionary of its currency's country (loadFundScreen's countryCodeOf).
+   */
+  function rendered(currency: Address, locale: Locale): string {
+    const m = messagesFor(locale, countryCodeOf(currency));
+    const items = buildTimeline({
+      events: [event("Contribution", { member: ANA, token: currency, amount: 100n * WARS, credited: 100n * WARS }, BLOCK - 7_200n)],
+      clock,
+      agent: AGENT,
+      names: new Map([[ANA, "Ana"]]),
+      agreedExpense: "la cancha",
+      initialWeeklyCap: 600n * WARS,
+      startTime: clock.timestamp - 86_400n,
+      votesRequired: 2,
+      memberCount: 3,
+      proposals: new Map(),
+      expenses: [],
+      pending: [],
+      dollar: currency === WMXN ? null : USDT,
+      currencyBalance: 100n * WARS,
+      version: 2,
+      feeBps: 25,
+      viewerIsMember: true,
+      now,
+      m,
+    });
+    return renderToStaticMarkup(createElement(TimelineList, { items, fund: FUND, fundName: "Fondo", now, m }));
+  }
+
+  it("says the same instant on Mexico City's clock in a wMXN fund, in either language, and on Buenos Aires's in a wARS one", () => {
+    const mexican = rendered(WMXN, "es");
+    expect(mexican).toContain("Ana aportó $100.");
+    expect(mexican).toContain("Ayer, 22:30");
+    expect(mexican).not.toContain("Hoy, 1:30");
+    expect(rendered(WMXN, "en")).toContain("Yesterday, 22:30");
+    const argentine = rendered(WARS_TOKEN, "es");
+    expect(argentine).toContain("Hoy, 1:30");
+    expect(argentine).not.toContain("22:30");
   });
 });
