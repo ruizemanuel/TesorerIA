@@ -171,6 +171,11 @@ test("a Mexican group creates a wMXN fund, contributes through Ripio's ramp, get
   expect([202, 429]).toContain(await runAfterContribution);
   expect(await wmxnOf(anaAccount)).toBe(0n);
   expect(await wmxnOf(fundAddress)).toBe(withFee(100n * U));
+  // The inicio's own text speaks the fund's country too, not only its panels (the layout's provider): without
+  // ?aporte=, whose count-up runs in the browser like them, the page itself writes the header's balance on the server.
+  // It's what the fund can pay, net of the fee set aside (balanceInCurrency): $100, with no space after the sign.
+  await open(ana, fund);
+  await expect(onScreen(ana, /^En el fondo$/).locator("xpath=following-sibling::p[1]")).toHaveText("$100");
 
   // 4. Movimientos tells her contribution as Aportar's button said it, at its time in Mexico City.
   const operations = await operationTimes(anaAccount, beforeContribution);
