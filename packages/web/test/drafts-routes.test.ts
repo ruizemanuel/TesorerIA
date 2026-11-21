@@ -259,7 +259,7 @@ describe("in the draft's country, and outside one in the IP's (spec, 6)", () => 
     const mexican = { ...DRAFT, country: "MX" };
     expect(await answer(await createDraftRoute(fromMexico(mexican)))).toEqual({
       status: 400,
-      error: "No entendimos la cuota. Escríbela como 10,000 o 10,000.50.",
+      error: "No entendimos la cuota. Escríbela como 100 o 100.50.",
     });
     expect(await answer(await createDraftRoute(fromMexico({ ...mexican, weeklyFee: "1,000.50", weeklyCap: "6,000" })))).toEqual({
       status: 400,

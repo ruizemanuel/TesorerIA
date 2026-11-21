@@ -101,7 +101,8 @@ describe("POST /api/funds/:address/expenses", () => {
     expect((await db.select().from(expenses)).map((kept) => kept.amount)).toEqual([1_000n * 10n ** 18n]);
     const bad = await expense({ clientKey: "k2", kind: "agreed", amount: "1.000", note: "Cancha" });
     expect(bad.status).toBe(400);
-    expect(((await bad.json()) as { error: string }).error).toContain("10,000.50"); // the example in Mexico's format (errors.amountFormat)
+    // The example in Mexico's format and at its scale: its weekly dues (errors.amountFormat).
+    expect(await bad.json()).toEqual({ error: "No entendimos el monto. Escríbelo como 100 o 100.50." });
   });
 
   it("keeps a contribution given back, which the agent always puts to the vote (spec, 7.3)", async () => {

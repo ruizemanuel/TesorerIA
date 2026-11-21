@@ -155,7 +155,7 @@ export function readPesosAmount(
   m: Messages,
 ): PesosReading {
   const amount = parseMoney(text, m);
-  if (amount === null) return { ok: false, error: m.errors.amountFormat(...amountExamples(10_000n, m)) };
+  if (amount === null) return { ok: false, error: m.errors.amountFormat(...amountExamples(m.country.defaults.weeklyFee, m)) };
   if (amount > MAX_PESOS) return { ok: false, error: m.errors.amountTooBig(formatMoney(MAX_PESOS, m)) };
   if (amount > held) return { ok: false, error: m.contribute.accountHolds(formatMoney(held, m)) };
   if (room !== null && amount > room) return { ok: false, error: overCap(room, formatMoney(room, m), cap, m) };

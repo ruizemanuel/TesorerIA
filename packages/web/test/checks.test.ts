@@ -59,6 +59,17 @@ describe("a weekly cap against the fund's cap", () => {
     // An Argentine one is still checked against wARS's.
     expect(fundCapProblem(6_000n * WARS_UNIT, es)).toBeNull();
   });
+
+  it("teaches a Mexican amount with Mexico's defaults, $100 and $600, which fit under its cap", () => {
+    const [mx, mxEn] = [messagesFor("es", "MX"), messagesFor("en", "MX")];
+    const mexican = { ...DRAFT, weeklyFee: "100", weeklyCap: "600" };
+    expect(readDraft({ ...mexican, weeklyFee: "10.000" }, mx)).toEqual({ ok: false, error: "No entendimos la cuota. Escríbela como 100 o 100.50." });
+    expect(readDraft({ ...mexican, weeklyCap: "1.0000" }, mx)).toEqual({ ok: false, error: "No entendimos el tope. Escríbelo como 600 o 600.50." });
+    expect(readDraft({ ...mexican, weeklyFee: "abc" }, mxEn)).toEqual({ ok: false, error: "We couldn't read the weekly dues. Write them like 100 or 100.50." });
+    expect(readDraft({ ...mexican, weeklyCap: "60.000" }, mxEn)).toEqual({ ok: false, error: "We couldn't read the weekly cap. Write it like 600 or 600.50." });
+    // Following the hint is never refused.
+    expect(readDraft({ ...mexican, weeklyFee: "100.50", weeklyCap: "600.50" }, mx)).toMatchObject({ ok: true });
+  });
 });
 
 describe("personProblem", () => {

@@ -48,7 +48,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ add
   const body = await readJson(request, Expense);
   if (!body.ok) return body.response;
   const amount = parseMoney(body.value.amount, m);
-  if (amount === null) return jsonError(400, `${m.expenses.amountUnreadable} ${m.errors.amountFormat(...amountExamples(10_000n, m))}`);
+  if (amount === null) return jsonError(400, `${m.expenses.amountUnreadable} ${m.errors.amountFormat(...amountExamples(m.country.defaults.weeklyFee, m))}`);
 
   const saved = await submitExpense(db, { userId: user.id, fundId: membership.fundId, input: { ...body.value, amount }, m });
   if (!saved.ok) return jsonError(saved.status, saved.error);

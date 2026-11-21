@@ -26,6 +26,7 @@ import { COUNTRIES } from "../src/lib/countries";
 import { memberFundAbi } from "../src/lib/fund-abi";
 import { buildFundView } from "../src/lib/fund-view";
 import { NBSP, USDT_UNIT, WARS_UNIT, formatMoney, upToCentavo } from "../src/lib/format";
+import { messagesFor } from "../src/lib/i18n/messages";
 import { snapshot } from "./support/fixtures";
 import { en, es } from "./support/messages";
 
@@ -139,6 +140,12 @@ describe("readPesosAmount", () => {
     for (const bad of ["abc", "", "10.5", "10,000.50", "0"]) {
       expect(readPesosAmount(bad, { held, room: null, cap: BALANCE_CAP }, es), bad).toEqual({ ok: false, error: "Escribilo como 10.000 o 10.000,50." });
     }
+  });
+
+  it("teaches a Mexican fund's format at Mexico's scale: its weekly dues, $100", () => {
+    const wmxnCap = COUNTRIES.MX.currency.limits.balanceCap;
+    expect(readPesosAmount("100,5", { held, room: null, cap: wmxnCap }, messagesFor("es", "MX"))).toEqual({ ok: false, error: "Escríbelo como 100 o 100.50." });
+    expect(readPesosAmount("100.000", { held, room: null, cap: wmxnCap }, messagesFor("en", "MX"))).toEqual({ ok: false, error: "Write it like 100 or 100.50." });
   });
 
   it("refuses an absurd amount before anything is encoded", () => {

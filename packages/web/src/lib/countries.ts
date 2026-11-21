@@ -47,8 +47,13 @@ export type Country = {
   words: Record<Locale, CountryWords>;
   /** Whether Ripio's app is where people buy and sell the token there. */
   ripioApp: boolean;
-  /** What a new fund proposes for its weekly fee and weekly cap, in the token's units. */
+  /**
+   * What a new fund proposes for its weekly fee and weekly cap, in the token's units. They are also the examples of how
+   * to write an amount that a hint shows (amountExamples): the fee's for any amount, the cap's for the cap.
+   */
   defaults: { weeklyFee: bigint; weeklyCap: bigint };
+  /** Amounts the screens show as examples, in the token's units: an expense, Cargar gasto's placeholder. */
+  examples: { expense: bigint };
 };
 
 /** What every format receives: the language, and the country whose money and clock it speaks. */
@@ -82,6 +87,7 @@ export const COUNTRIES: Record<CountryCode, Country> = {
     },
     ripioApp: true,
     defaults: { weeklyFee: 10_000n * UNIT, weeklyCap: 60_000n * UNIT },
+    examples: { expense: 45_000n * UNIT },
   },
   MX: {
     code: "MX",
@@ -101,6 +107,7 @@ export const COUNTRIES: Record<CountryCode, Country> = {
     },
     ripioApp: false,
     defaults: { weeklyFee: 100n * UNIT, weeklyCap: 600n * UNIT },
+    examples: { expense: 450n * UNIT },
   },
 };
 

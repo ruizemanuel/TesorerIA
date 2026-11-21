@@ -119,6 +119,11 @@ describe("readCashOutAmount", () => {
     expect(readCashOutAmount("45.000,02", held, es)).toEqual({ ok: false, error: `Tenés ${formatMoney(held, es)} en tu cuenta.` });
   });
 
+  it("teaches a Mexican fund's format at Mexico's scale: its weekly dues, $100", () => {
+    expect(readCashOutAmount("50,5", 50n * WARS_UNIT, messagesFor("es", "MX"))).toEqual({ ok: false, error: "Escríbelo como 100 o 100.50." });
+    expect(readCashOutAmount("50.000", 50n * WARS_UNIT, messagesFor("en", "MX"))).toEqual({ ok: false, error: "Write it like 100 or 100.50." });
+  });
+
   it("has nothing to pass below half a cent, whatever was typed", () => {
     for (const speck of [0n, 5n * 10n ** 15n - 1n]) {
       expect(readCashOutAmount(null, speck, es)).toEqual({ ok: false, error: "No tenés pesos en tu cuenta para pasar." });

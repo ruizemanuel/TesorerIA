@@ -25,4 +25,10 @@ describe("countries", () => {
   it("keeps each country's defaults under its currency's balance cap", () => {
     for (const c of Object.values(COUNTRIES)) expect(c.defaults.weeklyCap <= c.currency.limits.balanceCap).toBe(true);
   });
+
+  it("gives each country an example expense at its own scale, within its default weekly cap", () => {
+    expect(COUNTRIES.AR.examples.expense).toBe(45_000n * 10n ** 18n);
+    expect(COUNTRIES.MX.examples.expense).toBe(450n * 10n ** 18n);
+    for (const c of Object.values(COUNTRIES)) expect(c.examples.expense <= c.defaults.weeklyCap).toBe(true);
+  });
 });

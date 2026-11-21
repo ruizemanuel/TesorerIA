@@ -55,7 +55,7 @@ export function readCashOutAmount(text: string | null, held: bigint, m: Messages
   if (held < WARS_SPECK) return { ok: false, error: m.cashOut.nothingToPass };
   if (text === null) return { ok: true, amount: held };
   const amount = parseMoney(text, m);
-  if (amount === null) return { ok: false, error: m.errors.amountFormat(...amountExamples(10_000n, m)) };
+  if (amount === null) return { ok: false, error: m.errors.amountFormat(...amountExamples(m.country.defaults.weeklyFee, m)) };
   if (formatMoney(amount, m) === formatMoney(held, m)) return { ok: true, amount: held };
   if (amount > held) return { ok: false, error: m.cashOut.accountHolds(formatMoney(held, m)) };
   return { ok: true, amount };

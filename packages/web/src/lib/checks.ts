@@ -47,9 +47,9 @@ export function readDraft(
   m: Messages,
 ): { ok: true; draft: DraftSettings } | { ok: false; error: string } {
   const weeklyFee = parseMoney(input.weeklyFee, m);
-  if (weeklyFee === null) return { ok: false, error: m.checks.feeUnreadable(...amountExamples(10_000n, m)) };
+  if (weeklyFee === null) return { ok: false, error: m.checks.feeUnreadable(...amountExamples(m.country.defaults.weeklyFee, m)) };
   const weeklyCap = parseMoney(input.weeklyCap, m);
-  if (weeklyCap === null) return { ok: false, error: m.checks.capUnreadable(...amountExamples(60_000n, m)) };
+  if (weeklyCap === null) return { ok: false, error: m.checks.capUnreadable(...amountExamples(m.country.defaults.weeklyCap, m)) };
   const draft = { name: input.name.trim(), agreedExpense: input.agreedExpense.trim(), weeklyFee, weeklyCap };
   const problem = draftProblem(draft, m);
   return problem === null ? { ok: true, draft } : { ok: false, error: problem };

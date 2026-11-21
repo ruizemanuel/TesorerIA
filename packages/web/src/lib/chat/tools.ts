@@ -2,7 +2,7 @@ import { MAX_NOTE_LENGTH } from "@tesoreria/agent";
 import { type InferUITools, type UIMessage, tool } from "ai";
 import { z } from "zod";
 import { COUNTRIES, COUNTRY_CODES, type Country, type CountryCode } from "../countries";
-import { MAX_PESOS, amountExamples, parseMoneyInChat } from "../format";
+import { MAX_PESOS, WARS_UNIT, amountExamples, parseMoneyInChat } from "../format";
 import { LOCALES, type Locale } from "../i18n/locales";
 
 /** Each language's name in English: the model reads its tool, and the hint for a card it got wrong, in English. */
@@ -15,7 +15,7 @@ const LANGUAGE_NAMES: Record<Locale, string> = { es: "Spanish", en: "English" };
  */
 export function amountFormats(country: Country, quote: (amount: string) => string = (amount) => amount): string {
   const ways = LOCALES.map((locale) => {
-    const [whole, cents] = amountExamples(45_000n, { locale, country });
+    const [whole, cents] = amountExamples(45_000n * WARS_UNIT, { locale, country });
     return { locale, said: `${quote(whole)} or ${quote(cents)}` };
   });
   if (ways.every((way) => way.said === ways[0]!.said)) return ways[0]!.said;

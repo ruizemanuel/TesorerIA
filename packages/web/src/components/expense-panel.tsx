@@ -5,7 +5,7 @@ import { useRef, useState } from "react";
 import { post } from "../lib/client/api";
 import { userMessage } from "../lib/client/errors";
 import { type ExpenseKind, expenseFields, expenseLimits, panelOutcome } from "../lib/expense-fields";
-import { MAX_PESOS, WARS_UNIT, amountExamples, formatAmount, formatMoney, parseMoney } from "../lib/format";
+import { MAX_PESOS, amountExamples, formatAmount, formatMoney, parseMoney } from "../lib/format";
 import { useMessages } from "../lib/i18n/client";
 import { useRefresh } from "./refresh-provider";
 import { Button, FIELD } from "./ui";
@@ -51,7 +51,7 @@ export function ExpensePanel({
     // With the page's language, the same one the route reads the amount with.
     const units = parseMoney(amount, m);
     if (units === null || units > MAX_PESOS) {
-      setError(units === null ? m.errors.amountFormat(...amountExamples(10_000n, m)) : m.errors.amountTooBig(formatMoney(MAX_PESOS, m)));
+      setError(units === null ? m.errors.amountFormat(...amountExamples(m.country.defaults.weeklyFee, m)) : m.errors.amountTooBig(formatMoney(MAX_PESOS, m)));
       return;
     }
     // The agent gives back no more than what counts as contributed, to the wei: more isn't sent, and the panel says why.
@@ -116,7 +116,7 @@ export function ExpensePanel({
       {limits.quota !== null && <p className="text-sm text-muted">{limits.quota}</p>}
       <label className="grid gap-1">
         <span className="font-semibold">{fields.amountLabel}</span>
-        <input className={`${FIELD} money`} name="amount" required inputMode="decimal" autoComplete="off" placeholder={formatAmount(45_000n * WARS_UNIT, m)} />
+        <input className={`${FIELD} money`} name="amount" required inputMode="decimal" autoComplete="off" placeholder={formatAmount(m.country.examples.expense, m)} />
         {limits.giveBackMax !== null && <span className="text-sm text-muted">{limits.giveBackMax}</span>}
       </label>
       <label className="grid gap-1">

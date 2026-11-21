@@ -91,13 +91,14 @@ describe("the dictionaries", () => {
     expect(en.chat.brief.now("Thursday, November 19, 2026 at 10:00", "6", AR.en.timeName)).toBe(
       "It's Thursday, November 19, 2026 at 10:00, Argentina time. The fund is in week 6.",
     );
-    // The examples of how to write an amount, as Argentina writes them in each language.
-    expect(es.errors.amountFormat(...amountExamples(10_000n, AR_ES))).toBe("Escribilo como 10.000 o 10.000,50.");
-    expect(en.errors.amountFormat(...amountExamples(10_000n, AR_EN))).toBe("Write it like 10,000 or 10,000.50.");
-    expect(es.checks.feeUnreadable(...amountExamples(10_000n, AR_ES))).toBe("No entendimos la cuota. Escribila como 10.000 o 10.000,50.");
-    expect(en.checks.feeUnreadable(...amountExamples(10_000n, AR_EN))).toBe("We couldn't read the weekly dues. Write them like 10,000 or 10,000.50.");
-    expect(es.checks.capUnreadable(...amountExamples(60_000n, AR_ES))).toBe("No entendimos el tope. Escribilo como 60.000 o 60.000,50.");
-    expect(en.checks.capUnreadable(...amountExamples(60_000n, AR_EN))).toBe("We couldn't read the weekly cap. Write it like 60,000 or 60,000.50.");
+    // The examples of how to write an amount, as Argentina writes them in each language: its defaults, $ 10.000 and $ 60.000.
+    const { weeklyFee: arFee, weeklyCap: arCap } = COUNTRIES.AR.defaults;
+    expect(es.errors.amountFormat(...amountExamples(arFee, AR_ES))).toBe("Escribilo como 10.000 o 10.000,50.");
+    expect(en.errors.amountFormat(...amountExamples(arFee, AR_EN))).toBe("Write it like 10,000 or 10,000.50.");
+    expect(es.checks.feeUnreadable(...amountExamples(arFee, AR_ES))).toBe("No entendimos la cuota. Escribila como 10.000 o 10.000,50.");
+    expect(en.checks.feeUnreadable(...amountExamples(arFee, AR_EN))).toBe("We couldn't read the weekly dues. Write them like 10,000 or 10,000.50.");
+    expect(es.checks.capUnreadable(...amountExamples(arCap, AR_ES))).toBe("No entendimos el tope. Escribilo como 60.000 o 60.000,50.");
+    expect(en.checks.capUnreadable(...amountExamples(arCap, AR_EN))).toBe("We couldn't read the weekly cap. Write it like 60,000 or 60,000.50.");
   });
 
   it("asks Mexico for the CLABE and names wMXN", () => {
@@ -112,10 +113,13 @@ describe("the dictionaries", () => {
     );
     expect(neutral.chat.brief.now("jueves, 19 de noviembre de 2026, 10:00", "6", mx.timeName)).toContain(", hora de Ciudad de México.");
     expect(en.chat.brief.now("Thursday", "6", MX.en.timeName)).toBe("It's Thursday, Mexico City time. The fund is in week 6.");
-    // Mexico writes the examples its own way, in both languages.
-    expect(amountExamples(10_000n, MX_ES)).toEqual(["10,000", "10,000.50"]);
-    expect(neutral.errors.amountFormat(...amountExamples(10_000n, MX_ES))).toBe("Escríbelo como 10,000 o 10,000.50.");
-    expect(en.checks.capUnreadable(...amountExamples(60_000n, MX_EN))).toBe("We couldn't read the weekly cap. Write it like 60,000 or 60,000.50.");
+    // Mexico writes the examples its own way, in both languages, and at its own scale: its defaults, $100 and $600.
+    const { weeklyFee: mxFee, weeklyCap: mxCap } = COUNTRIES.MX.defaults;
+    expect(amountExamples(mxFee, MX_ES)).toEqual(["100", "100.50"]);
+    expect(neutral.errors.amountFormat(...amountExamples(mxFee, MX_ES))).toBe("Escríbelo como 100 o 100.50.");
+    expect(neutral.checks.feeUnreadable(...amountExamples(mxFee, MX_ES))).toBe("No entendimos la cuota. Escríbela como 100 o 100.50.");
+    expect(en.checks.capUnreadable(...amountExamples(mxCap, MX_EN))).toBe("We couldn't read the weekly cap. Write it like 600 or 600.50.");
+    expect(amountExamples(10_000n * WARS_UNIT, MX_ES)).toEqual(["10,000", "10,000.50"]); // its thousands, with a comma
   });
 
   it("say the page's description in each language", () => {
@@ -355,10 +359,10 @@ describe("the dictionaries", () => {
     expect([es.expense.other, en.expense.other]).toEqual(["Otro gasto (se vota)", "Other expense (voted on)"]);
     expect([es.expense.amountLabel, es.expense.noteLabel, es.expense.submit]).toEqual(["Cuánto pagaste", "Nota (opcional)", "Cargar el gasto"]);
     expect([en.expense.amountLabel, en.expense.noteLabel, en.expense.submit]).toEqual(["How much you paid", "Note (optional)", "Add the expense"]);
-    // The amount's example is the country's format (expense-panel.tsx), as the dictionary had it written.
-    expect([formatAmount(45_000n * WARS_UNIT, AR_ES), es.expense.notePlaceholder]).toEqual(["45.000", "La cancha del jueves"]);
-    expect([formatAmount(45_000n * WARS_UNIT, AR_EN), en.expense.notePlaceholder]).toEqual(["45,000", "Thursday's pitch"]);
-    expect(formatAmount(45_000n * WARS_UNIT, MX_ES)).toBe("45,000");
+    // The amount's example is the country's own expense, in its format (expense-panel.tsx), as the dictionary had it written.
+    expect([formatAmount(COUNTRIES.AR.examples.expense, AR_ES), es.expense.notePlaceholder]).toEqual(["45.000", "La cancha del jueves"]);
+    expect([formatAmount(COUNTRIES.AR.examples.expense, AR_EN), en.expense.notePlaceholder]).toEqual(["45,000", "Thursday's pitch"]);
+    expect(formatAmount(COUNTRIES.MX.examples.expense, MX_ES)).toBe("450");
     expect(html(es.expense.twin(money("$ 5.000")))).toBe('Hace unos minutos cargaste un gasto de <span class="money">$ 5.000</span>. ¿Es otro gasto igual?');
     expect(html(en.expense.twin(money("ARS 5,000")))).toBe(
       'A few minutes ago you added an expense of <span class="money">ARS 5,000</span>. Is this another expense just like it?',
