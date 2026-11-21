@@ -2,8 +2,10 @@ import { USDT, WARS } from "@tesoreria/agent";
 import { type Address, getAddress } from "viem";
 import { describe, expect, it } from "vitest";
 import { type BalanceClient, type Balances, accountReader } from "../src/lib/account-reader";
+import { COUNTRIES } from "../src/lib/countries";
 
 const ACCOUNT = getAddress("0x2F8218c7cF6d822091EDe24Db9c46B0324c21A6F");
+const WMXN = COUNTRIES.MX.currency.token;
 
 /**
  * A node with `wars` and `usdt` in the account, at block `head`. A read takes the balances when it starts; with
@@ -38,7 +40,7 @@ function node(start: { wars: bigint; usdt: bigint; head: bigint }) {
 
 function reads(client: BalanceClient) {
   const seen: (Balances | null)[] = [];
-  return { seen, reader: accountReader(client, ACCOUNT, (read) => seen.push(read)) };
+  return { seen, reader: accountReader(client, ACCOUNT, { currency: WARS, dollar: USDT }, (read) => seen.push(read)) };
 }
 
 /** A wait the test opens when it wants: a `sleep` for accountReader.changed that returns once `open()` is called. */
@@ -57,7 +59,29 @@ describe("accountReader: what a member's own account holds (spec, 9.2)", () => {
     await reader.look();
     state.fail = true;
     await reader.look();
-    expect(seen).toEqual([{ wars: 5_000n, usdt: 3n }, null]);
+    expect(seen).toEqual([{ currency: 5_000n, dollar: 3n }, null]);
+  });
+
+  it("reads the fund's own currency, and no dollar when it has none", async () => {
+    const read: Address[] = [];
+    const client = {
+      getBlockNumber: async () => 10n,
+      readContract: async ({ address }: { address: Address }) => {
+        read.push(address);
+        return 7n;
+      },
+    } as unknown as BalanceClient;
+    const seen: (Balances | null)[] = [];
+    await accountReader(client, ACCOUNT, { currency: WMXN, dollar: null }, (balances) => seen.push(balances)).look();
+    expect(seen).toEqual([{ currency: 7n, dollar: 0n }]);
+    expect(read).toEqual([WMXN]);
+  });
+
+  it("reads a fund's dollar when it has one, each from its own token", async () => {
+    const { client } = node({ wars: 5_000n, usdt: 3n, head: 10n });
+    const seen: (Balances | null)[] = [];
+    await accountReader(client, ACCOUNT, { currency: WARS, dollar: USDT }, (balances) => seen.push(balances)).look();
+    expect(seen).toEqual([{ currency: 5_000n, dollar: 3n }]);
   });
 
   it("drops a read begun before a pass landed, so the old balance doesn't come back after it", async () => {
@@ -70,7 +94,7 @@ describe("accountReader: what a member's own account holds (spec, 9.2)", () => {
     const after = reader.changed(11n);
     release();
     await Promise.all([inFlight, after]);
-    expect(seen).toEqual([{ wars: 3_000n, usdt: 0n }]);
+    expect(seen).toEqual([{ currency: 3_000n, dollar: 0n }]);
   });
 
   it("after a pass, waits for the node to have its block, and skips the routine looks meanwhile", async () => {
@@ -85,7 +109,7 @@ describe("accountReader: what a member's own account holds (spec, 9.2)", () => {
     await reader.look(); // while it waits: no read
     await after;
     expect(sleeps).toEqual([1_000, 1_000]);
-    expect(seen).toEqual([{ wars: 3_000n, usdt: 0n }]);
+    expect(seen).toEqual([{ currency: 3_000n, dollar: 0n }]);
   });
 
   it("lets the newest of two overlapping changes take over: the older one reads nothing and doesn't bring the looks back", async () => {
@@ -103,7 +127,7 @@ describe("accountReader: what a member's own account holds (spec, 9.2)", () => {
     Object.assign(state, { head: 13n, wars: 2_000n });
     newerWait.open();
     await newer;
-    expect(seen).toEqual([{ wars: 2_000n, usdt: 0n }]);
+    expect(seen).toEqual([{ currency: 2_000n, dollar: 0n }]);
   });
 
   it("reads anyway when the receipt had no block, or the node is too far behind to wait for", async () => {
@@ -112,8 +136,8 @@ describe("accountReader: what a member's own account holds (spec, 9.2)", () => {
     await reader.changed(undefined);
     await reader.changed(500n); // more than MAX_BLOCKS_AHEAD past the node
     expect(seen).toEqual([
-      { wars: 5_000n, usdt: 0n },
-      { wars: 5_000n, usdt: 0n },
+      { currency: 5_000n, dollar: 0n },
+      { currency: 5_000n, dollar: 0n },
     ]);
   });
 
@@ -124,8 +148,8 @@ describe("accountReader: what a member's own account holds (spec, 9.2)", () => {
     state.wars = 7_000n; // a reimbursement arrives later
     await reader.look();
     expect(seen).toEqual([
-      { wars: 5_000n, usdt: 0n },
-      { wars: 7_000n, usdt: 0n },
+      { currency: 5_000n, dollar: 0n },
+      { currency: 7_000n, dollar: 0n },
     ]);
   });
 

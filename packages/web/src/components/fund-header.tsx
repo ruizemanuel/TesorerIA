@@ -51,7 +51,9 @@ export function FundHeader({
           </>
         )}
         {/* Keyed on the fund's balance: a contribution changes it, and the line reads the account again at once. */}
-        {!readOnly && account !== undefined && <AccountHolding key={view.balance.toString()} account={account} />}
+        {!readOnly && account !== undefined && (
+          <AccountHolding key={view.balance.toString()} account={account} currency={view.currency} dollar={view.dollar} />
+        )}
         {!readOnly && (
           <div className="mt-4 grid grid-cols-2 gap-2">
             <PanelLink href="?p=aportar" className={buttonClass("primary")}>

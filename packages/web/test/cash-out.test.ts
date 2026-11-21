@@ -1,41 +1,77 @@
-import { USDT, WARS } from "@tesoreria/agent";
+import { CURRENCIES, USDT, WARS, currencyOf } from "@tesoreria/agent";
 import { decodeFunctionData, erc20Abi, getAddress } from "viem";
 import { describe, expect, it } from "vitest";
 import { cashOutCalls, cashOutProblem, offRampUrl, readCashOutAmount, rememberRipioAddress, rememberedRipioAddress } from "../src/lib/cash-out";
+import { COUNTRIES } from "../src/lib/countries";
 import { NBSP, WARS_UNIT, formatMoney } from "../src/lib/format";
+import { messagesFor } from "../src/lib/i18n/messages";
 import { en, es } from "./support/messages";
 
 const ACCOUNT = getAddress("0x2F8218c7cF6d822091EDe24Db9c46B0324c21A6F");
 const FUND = getAddress("0x00000000000000000000000000000000000f00d1");
+/** A Mexican fund: its currency is wMXN and it has no dollar. */
+const MX_FUND = getAddress("0x00000000000000000000000000000000000f00d2");
+const WMXN = COUNTRIES.MX.currency.token;
 /** Anvil's second account: it stands in for a Ripio deposit address. */
 const RIPIO = getAddress("0x70997970C51812dc3A010C7d01b50e0d17dc79C8");
+/** Anvil's third: another Ripio deposit address. */
+const OTHER = getAddress("0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC");
 const ours = { account: ACCOUNT, fund: FUND };
 /** RIPIO with one capital turned small: the checksum no longer matches. */
 const MISTYPED = RIPIO.replace("C51812", "c51812");
+const wars = currencyOf(WARS)!;
+const wmxn = currencyOf(WMXN)!;
 
 describe("cashOutCalls", () => {
   it("is one transfer of wARS to the address, for the amount, with no value", () => {
-    const [call, ...rest] = cashOutCalls({ to: RIPIO, amount: 45_000n * WARS_UNIT });
+    const [call, ...rest] = cashOutCalls({ token: WARS, to: RIPIO, amount: 45_000n * WARS_UNIT });
     expect(rest).toEqual([]);
     expect(call!.to).toBe(WARS);
     expect(call!.value).toBeUndefined();
     expect(decodeFunctionData({ abi: erc20Abi, data: call!.data! })).toEqual({ functionName: "transfer", args: [RIPIO, 45_000n * WARS_UNIT] });
   });
+
+  it("passes the fund's currency, not wARS", () => {
+    const [call] = cashOutCalls({ token: WMXN, to: RIPIO, amount: 1n });
+    expect(call!.to).toBe(WMXN);
+    expect(decodeFunctionData({ abi: erc20Abi, data: call!.data! })).toEqual({ functionName: "transfer", args: [RIPIO, 1n] });
+  });
 });
 
 describe("offRampUrl", () => {
   it("opens Ripio's sale of wARS on Celo for pesos, which ends in the Celo address to send them to (5/11)", () => {
-    expect(offRampUrl()).toBe("https://ramp.ripio.com/offramp?country=AR&chain=42220&token=WARS");
-    expect(offRampUrl(0n)).toBe("https://ramp.ripio.com/offramp?country=AR&chain=42220&token=WARS");
+    expect(offRampUrl(wars)).toBe("https://ramp.ripio.com/offramp?country=AR&chain=42220&token=WARS");
+    expect(offRampUrl(wars, 0n)).toBe("https://ramp.ripio.com/offramp?country=AR&chain=42220&token=WARS");
   });
 
   it("carries the amount, in pesos as Ripio's form reads them", () => {
-    expect(offRampUrl(10_000n * WARS_UNIT)).toBe("https://ramp.ripio.com/offramp?country=AR&chain=42220&token=WARS&amount=10000");
-    expect(offRampUrl(2n * WARS_UNIT + 25n * 10n ** 16n)).toBe("https://ramp.ripio.com/offramp?country=AR&chain=42220&token=WARS&amount=2.25");
+    expect(offRampUrl(wars, 10_000n * WARS_UNIT)).toBe("https://ramp.ripio.com/offramp?country=AR&chain=42220&token=WARS&amount=10000");
+    expect(offRampUrl(wars, 2n * WARS_UNIT + 25n * 10n ** 16n)).toBe("https://ramp.ripio.com/offramp?country=AR&chain=42220&token=WARS&amount=2.25");
+  });
+
+  it("sells wMXN through Ripio's off-ramp for Mexico", () => {
+    expect(offRampUrl(wmxn, 50n * WARS_UNIT)).toBe("https://ramp.ripio.com/offramp?country=MX&chain=42220&token=WMXN&amount=50");
+    expect(offRampUrl(wmxn)).toBe("https://ramp.ripio.com/offramp?country=MX&chain=42220&token=WMXN");
+  });
+
+  it("has no off-ramp for a currency Ripio's ramp doesn't serve, rather than a link to a token called null", () => {
+    const wpen = CURRENCIES.find((currency) => currency.symbol === "wPEN")!;
+    expect(wpen.rampToken).toBeNull();
+    expect(() => offRampUrl(wpen)).toThrow("wPEN");
   });
 });
 
 describe("cashOutProblem: the Ripio address, checked before signing (spec, 9.2)", () => {
+  it("refuses any token of ours as the Ripio address, in any fund", () => {
+    const m = messagesFor("es", "MX");
+    expect(cashOutProblem(WARS, { account: ACCOUNT, fund: MX_FUND }, m)).toBe(m.cashOut.ours);
+    expect(cashOutProblem(USDT, { account: ACCOUNT, fund: MX_FUND }, m)).toBe(m.cashOut.ours);
+    expect(cashOutProblem(WMXN, { account: ACCOUNT, fund: MX_FUND }, m)).toBe(m.cashOut.ours);
+    expect(cashOutProblem(WMXN.toLowerCase(), { account: ACCOUNT, fund: FUND }, es)).toBe(es.cashOut.ours);
+    expect(cashOutProblem(MX_FUND, { account: ACCOUNT, fund: MX_FUND }, m)).toBe(m.cashOut.ours);
+    expect(cashOutProblem(RIPIO, { account: ACCOUNT, fund: MX_FUND }, m)).toBeNull();
+  });
+
   it("takes a Ripio address as the app shows it, checksummed or in lowercase, with the spaces of a paste", () => {
     for (const text of [RIPIO, RIPIO.toLowerCase(), `  ${RIPIO} `, `${RIPIO}\n`]) expect(cashOutProblem(text, ours, es), JSON.stringify(text)).toBeNull();
   });
@@ -113,18 +149,38 @@ describe("Pasar a pesos in English", () => {
 });
 
 describe("the Ripio address this browser remembers (spec, 9.2)", () => {
-  const memory = () => {
-    const items = new Map<string, string>();
-    return { getItem: (key: string) => items.get(key) ?? null, setItem: (key: string, value: string) => void items.set(key, value) };
+  const memory = (initial: Record<string, string> = {}) => {
+    const items = new Map(Object.entries(initial));
+    return { items, getItem: (key: string) => items.get(key) ?? null, setItem: (key: string, value: string) => void items.set(key, value) };
   };
+  /** What an earlier version kept, for wARS, before there was one address per currency. */
+  const OLD_KEY = `tesoreria:ripio:${ACCOUNT.toLowerCase()}`;
+  const keyOf = (token: string) => `${OLD_KEY}:${token.toLowerCase()}`;
 
-  it("remembers one per account, and gives it back checksummed", () => {
+  it("remembers one per account and currency, and gives it back checksummed", () => {
     const storage = memory();
-    rememberRipioAddress(storage, ACCOUNT, RIPIO);
-    expect(rememberedRipioAddress(storage, ACCOUNT)).toBe(RIPIO);
-    expect(rememberedRipioAddress(storage, FUND)).toBeNull();
-    storage.setItem(`tesoreria:ripio:${ACCOUNT.toLowerCase()}`, RIPIO.toLowerCase());
-    expect(rememberedRipioAddress(storage, ACCOUNT)).toBe(RIPIO);
+    rememberRipioAddress(storage, ACCOUNT, WARS, RIPIO);
+    expect(rememberedRipioAddress(storage, ACCOUNT, WARS)).toBe(RIPIO);
+    expect(rememberedRipioAddress(storage, FUND, WARS)).toBeNull();
+    storage.setItem(keyOf(WARS), RIPIO.toLowerCase());
+    expect(rememberedRipioAddress(storage, ACCOUNT, WARS)).toBe(RIPIO);
+  });
+
+  it("remembers the Ripio address per currency, and reads an old one as wARS's only", () => {
+    const storage = memory({ [OLD_KEY]: RIPIO });
+    expect(rememberedRipioAddress(storage, ACCOUNT, WARS)).toBe(RIPIO);
+    expect(rememberedRipioAddress(storage, ACCOUNT, WMXN)).toBeNull();
+    rememberRipioAddress(storage, ACCOUNT, WMXN, OTHER);
+    expect(rememberedRipioAddress(storage, ACCOUNT, WMXN)).toBe(OTHER);
+    expect(rememberedRipioAddress(storage, ACCOUNT, WARS)).toBe(RIPIO);
+  });
+
+  it("writes the key of the account and the currency in lowercase, and the new key wins over the old one", () => {
+    const storage = memory({ [OLD_KEY]: RIPIO });
+    rememberRipioAddress(storage, ACCOUNT, WARS, OTHER);
+    expect(storage.items.get(keyOf(WARS))).toBe(OTHER);
+    expect(storage.items.get(OLD_KEY)).toBe(RIPIO); // the old key is left as it was
+    expect(rememberedRipioAddress(storage, ACCOUNT, WARS)).toBe(OTHER);
   });
 
   it("gives back nothing it can't trust, and never throws: no storage, one that throws, or something that isn't an address", () => {
@@ -136,14 +192,14 @@ describe("the Ripio address this browser remembers (spec, 9.2)", () => {
         throw new Error("QuotaExceededError");
       },
     };
-    expect(() => rememberRipioAddress(throwing, ACCOUNT, RIPIO)).not.toThrow();
-    expect(rememberedRipioAddress(throwing, ACCOUNT)).toBeNull();
-    expect(() => rememberRipioAddress(undefined, ACCOUNT, RIPIO)).not.toThrow();
-    expect(rememberedRipioAddress(undefined, ACCOUNT)).toBeNull();
-    const storage = memory();
+    expect(() => rememberRipioAddress(throwing, ACCOUNT, WARS, RIPIO)).not.toThrow();
+    expect(rememberedRipioAddress(throwing, ACCOUNT, WARS)).toBeNull();
+    expect(() => rememberRipioAddress(undefined, ACCOUNT, WARS, RIPIO)).not.toThrow();
+    expect(rememberedRipioAddress(undefined, ACCOUNT, WARS)).toBeNull();
     for (const junk of ["not an address", `0x${"0".repeat(40)}`, MISTYPED]) {
-      storage.setItem(`tesoreria:ripio:${ACCOUNT.toLowerCase()}`, junk);
-      expect(rememberedRipioAddress(storage, ACCOUNT), junk).toBeNull();
+      for (const key of [keyOf(WARS), OLD_KEY]) {
+        expect(rememberedRipioAddress(memory({ [key]: junk }), ACCOUNT, WARS), `${junk} under ${key}`).toBeNull();
+      }
     }
   });
 });

@@ -1,6 +1,6 @@
 "use client";
 
-import { type FundVersion, fundV2Abi } from "@tesoreria/agent";
+import { type FundVersion, currencyOf, fundV2Abi } from "@tesoreria/agent";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { type Address, erc20Abi } from "viem";
@@ -98,9 +98,10 @@ export function ContributePanel({
   useEffect(() => {
     const client = celoBrowserClient();
     let live = true;
+    // Only a fund with a dollar asks for the rate (below), and a version 2 one asks for one unit of the table's dollar.
     const rate = () =>
       version === 2
-        ? client.readContract({ address: fund, abi: fundV2Abi, functionName: "quoteDollar", args: [USDT_UNIT] })
+        ? client.readContract({ address: fund, abi: fundV2Abi, functionName: "quoteDollar", args: [10n ** BigInt(currencyOf(currency)!.dollar!.decimals)] })
         : client.readContract({ address: fund, abi: memberFundAbi, functionName: "quoteUsdtInWars", args: [USDT_UNIT] });
     const read = async () => {
       const [usdt, wars, rateNow] = await Promise.all([
@@ -186,23 +187,27 @@ export function ContributePanel({
 
   return (
     <div className="grid gap-4">
-      <div className={`grid ${tokens.length === 2 ? "grid-cols-2" : "grid-cols-1"} gap-1 rounded-[14px] bg-tint p-1`} role="tablist">
-        {tokens.map((token) => (
-          <button
-            key={token}
-            type="button"
-            role="tab"
-            aria-selected={tab === token}
-            disabled={step !== "idle"}
-            onClick={() => setTab(token)}
-            className={`min-h-11 rounded-[11px] text-sm font-bold ${tab === token ? "bg-surface text-primary" : "text-muted"}`}
-          >
-            {token === "usdt" ? m.contribute.haveUsdt : m.contribute.havePesos}
-          </button>
-        ))}
-      </div>
+      {/* With one way to send there is nothing to choose between, and a lone "Tengo pesos en Ripio" tab would say the
+          member has an account there: a fund with no dollar shows its one form with no tabs. */}
+      {tokens.length > 1 && (
+        <div className="grid grid-cols-2 gap-1 rounded-[14px] bg-tint p-1" role="tablist">
+          {tokens.map((token) => (
+            <button
+              key={token}
+              type="button"
+              role="tab"
+              aria-selected={tab === token}
+              disabled={step !== "idle"}
+              onClick={() => setTab(token)}
+              className={`min-h-11 rounded-[11px] text-sm font-bold ${tab === token ? "bg-surface text-primary" : "text-muted"}`}
+            >
+              {token === "usdt" ? m.contribute.haveUsdt : m.contribute.havePesos}
+            </button>
+          ))}
+        </div>
+      )}
 
-      <div role="tabpanel" className="grid gap-4">
+      <div role={tokens.length > 1 ? "tabpanel" : undefined} className="grid gap-4">
         {tab === "usdt" ? (
           <p>
             {toSend !== null && toSend > 0n
@@ -215,7 +220,7 @@ export function ContributePanel({
             {/* Ripio's app only where the country has it: elsewhere (Mexico), its ramp alone. */}
             <p>{m.country.ripioApp ? m.contribute.ripioWithdraw(words.token) : m.contribute.rampOnly(words.token)}</p>
             <ButtonLink
-              href={rampUrl(account, rampAmount)}
+              href={rampUrl(account, currencyOf(currency)!, rampAmount)}
               target="_blank"
               rel="noreferrer"
               variant="secondary"

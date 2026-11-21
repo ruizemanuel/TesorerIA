@@ -1,4 +1,4 @@
-import { type FundVersion, fundV2Abi } from "@tesoreria/agent";
+import { type Currency, type FundVersion, fundV2Abi } from "@tesoreria/agent";
 import type { Call } from "@tesoreria/wallet";
 import { type Address, encodeFunctionData, erc20Abi } from "viem";
 import type { Speech } from "./countries";
@@ -60,13 +60,20 @@ export function plainPesos(units: bigint): string {
   return `${cents / 100n}${rest === 0n ? "" : `.${rest.toString().padStart(2, "0").replace(/0$/, "")}`}`;
 }
 
+/** The name Ripio's ramp gives the currency's token. A currency its ramp doesn't serve has none: a link to it would be broken. */
+export function rampTokenOf(currency: Currency): string {
+  if (currency.rampToken === null) throw new Error(`Ripio's ramp doesn't serve ${currency.symbol}`);
+  return currency.rampToken;
+}
+
 /**
- * Ripio's ramp for wARS on Celo, paid into the member's own account, with the amount to load when there is one. Since
- * 5/11 it goes straight to Ripio's widget; on 7/10 it stopped at "Continue manually", which filled the form (spec, 10).
+ * Ripio's ramp for the fund's currency on Celo, in the currency's own country, paid into the member's own account, with
+ * the amount to load when there is one. Since 5/11 it goes straight to Ripio's widget; on 7/10 it stopped at "Continue
+ * manually", which filled the form (spec, 10).
  */
-export function rampUrl(account: Address, amount?: bigint): string {
+export function rampUrl(account: Address, currency: Currency, amount?: bigint): string {
   const amountParam = amount !== undefined && amount > 0n ? `&amount=${plainPesos(amount)}` : "";
-  return `https://ramp.ripio.com/?country=AR&chain=42220&token=WARS${amountParam}&address=${account}`;
+  return `https://ramp.ripio.com/?country=${currency.country}&chain=42220&token=${rampTokenOf(currency)}${amountParam}&address=${account}`;
 }
 
 const min = (a: bigint, b: bigint) => (a < b ? a : b);

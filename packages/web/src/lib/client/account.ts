@@ -1,13 +1,13 @@
 import { useEffect, useState } from "react";
 import type { Address } from "viem";
-import { ACCOUNT_CHANGED, type Balances, accountReader } from "../account-reader";
+import { ACCOUNT_CHANGED, type AccountTokens, type Balances, accountReader } from "../account-reader";
 import { celoBrowserClient } from "./wallet";
 
 /**
- * What the member's own account holds, read from the browser every `everyMs`, and again after a pass to pesos
- * (ACCOUNT_CHANGED, accountReader). `balances` is null until a first read; a read that fails keeps the last one and
- * sets `failed`, which a good read clears, and so does the announcement of a pass: a failure from before it says
- * nothing about the read that is now awaited.
+ * What the member's own account holds of the fund's currency and dollar (`tokens`), read from the browser every
+ * `everyMs`, and again after a pass to pesos (ACCOUNT_CHANGED, accountReader). `balances` is null until a first read;
+ * a read that fails keeps the last one and sets `failed`, which a good read clears, and so does the announcement of a
+ * pass: a failure from before it says nothing about the read that is now awaited.
  *
  * `changing` is true from the moment the pass is announced until a read made after it comes in, and `balances` is
  * then the one from before the pass: whoever offers an amount must not offer it. The hook can say it because it
@@ -15,12 +15,17 @@ import { celoBrowserClient } from "./wallet";
  * routine look while one is awaited, so the first good read after the announcement is the one made after the pass.
  * A failed read doesn't end it.
  */
-export function useAccountBalances(account: Address, everyMs: number): { balances: Balances | null; failed: boolean; changing: boolean } {
+export function useAccountBalances(
+  account: Address,
+  tokens: AccountTokens,
+  everyMs: number,
+): { balances: Balances | null; failed: boolean; changing: boolean } {
+  const { currency, dollar } = tokens; // the caller's object is new each render: the effect depends on what's in it
   const [balances, setBalances] = useState<Balances | null>(null);
   const [failed, setFailed] = useState(false);
   const [changing, setChanging] = useState(false);
   useEffect(() => {
-    const reader = accountReader(celoBrowserClient(), account, (read) => {
+    const reader = accountReader(celoBrowserClient(), account, { currency, dollar }, (read) => {
       if (read === null) {
         setFailed(true);
       } else {
@@ -43,6 +48,6 @@ export function useAccountBalances(account: Address, everyMs: number): { balance
       clearInterval(timer);
       window.removeEventListener(ACCOUNT_CHANGED, onChange);
     };
-  }, [account, everyMs]);
+  }, [account, currency, dollar, everyMs]);
   return { balances, failed, changing };
 }

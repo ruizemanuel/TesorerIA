@@ -342,7 +342,7 @@ describe("checkCalls", () => {
   });
 
   it("lets a live fund's member pass their own wARS to any address, alone: Pasar a pesos (spec, 6)", () => {
-    expect(checkCalls(asRead(cashOutCalls({ to: OTHER, amount: 10n ** 18n })), member)).toEqual({ ok: true, createsFund: false });
+    expect(checkCalls(asRead(cashOutCalls({ token: WARS, to: OTHER, amount: 10n ** 18n })), member)).toEqual({ ok: true, createsFund: false });
     expect(checkCalls([transfer(WARS, randomAccount(), 1n)], member)).toEqual({ ok: true, createsFund: false });
   });
 
@@ -731,7 +731,7 @@ describe("authorizeBundlerRequest", () => {
 
   it("sponsors a live member's pass to pesos, within the 2M ceiling, and nobody else's (spec, 6)", async () => {
     const { db, stranger, founder, juan, ana } = await people();
-    const pass = safeCallData(cashOutCalls({ to: OTHER, amount: 10n ** 18n }));
+    const pass = safeCallData(cashOutCalls({ token: WARS, to: OTHER, amount: 10n ** 18n }));
     for (const method of SPONSORED) {
       const juanPass = request(method, sponsored(juan.account, {}, MAX_OPERATION_GAS, pass));
       expect(await authorizeBundlerRequest(db, asUser(juan), juanPass, POLICY, price, agent, DAILY_LIMIT), method).toMatchObject({ ok: true });

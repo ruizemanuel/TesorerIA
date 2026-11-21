@@ -10,17 +10,18 @@ import { buttonClass } from "./ui";
 const LOOK_EVERY_MS = 30_000;
 
 /**
- * "En tu cuenta tenés $ 1.016,10.": what reached the member's own account and isn't in the fund, so money that
- * arrived from Ripio or an exchange doesn't look lost before its Aportar. No "sin aportar": the agent's
- * reimbursements land there too, and those are the member's to keep. With pesos in it, "Pasar a pesos" opens that
- * panel (spec, 9.2), so passing a reimbursement on doesn't depend on knowing it's behind the avatar. Nothing while it
- * reads, if it can't, or if the account is empty; a pass reads it again at once (ACCOUNT_CHANGED).
+ * "En tu cuenta tenés $ 1.016,10.": what reached the member's own account, of the fund's currency and dollar (`currency`
+ * and `dollar`, FundView's), and isn't in the fund, so money that arrived from Ripio or an exchange doesn't look lost
+ * before its Aportar. No "sin aportar": the agent's reimbursements land there too, and those are the member's to keep.
+ * With pesos in it, "Pasar a pesos" opens that panel (spec, 9.2), so passing a reimbursement on doesn't depend on
+ * knowing it's behind the avatar. Nothing while it reads, if it can't, or if the account is empty; a pass reads it
+ * again at once (ACCOUNT_CHANGED).
  */
-export function AccountHolding({ account }: { account: Address }) {
+export function AccountHolding({ account, currency, dollar }: { account: Address; currency: Address; dollar: Address | null }) {
   const m = useMessages();
-  const { balances } = useAccountBalances(account, LOOK_EVERY_MS);
+  const { balances } = useAccountBalances(account, { currency, dollar }, LOOK_EVERY_MS);
   if (balances === null) return null;
-  const amounts = heldAmounts({ currency: balances.wars, dollar: balances.usdt }, m);
+  const amounts = heldAmounts(balances, m);
   if (amounts.length === 0) return null;
   return (
     <p className="mt-1 text-sm text-muted">
@@ -32,7 +33,7 @@ export function AccountHolding({ account }: { account: Address }) {
           </span>
         )),
       )}
-      {balances.wars >= WARS_SPECK && (
+      {balances.currency >= WARS_SPECK && (
         <>
           {" "}
           {/* A link-styled button: 44 px tall, so it's easy to tap inside the sentence (spec, 9.1). */}

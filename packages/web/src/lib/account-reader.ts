@@ -1,4 +1,3 @@
-import { USDT, WARS } from "@tesoreria/agent";
 import { type Address, type PublicClient, erc20Abi } from "viem";
 import { waitForBlock } from "./read-your-writes";
 
@@ -8,16 +7,20 @@ import { waitForBlock } from "./read-your-writes";
  */
 export const ACCOUNT_CHANGED = "tesoreria:account-changed";
 
-export type Balances = { wars: bigint; usdt: bigint };
+/** What an account holds of its fund's currency and of the fund's dollar (zero in a fund that has none). */
+export type Balances = { currency: bigint; dollar: bigint };
+/** The tokens an account is read for: the fund's currency, and its dollar if it has one. */
+export type AccountTokens = { currency: Address; dollar: Address | null };
 export type BalanceClient = Pick<PublicClient, "readContract" | "getBlockNumber">;
 
 /**
- * Reads what `account` holds and hands each read to `onRead`: null when it failed, so whoever shows it keeps the last.
+ * Reads what `account` holds of `tokens` (a fund with no dollar reads none, and has none) and hands each read to
+ * `onRead`: null when it failed, so whoever shows it keeps the last.
  * After a change (`changed`, with the block it landed in), it waits for the node to have that block (read-your-writes,
  * spec 9.2: Forno can be a block or two behind the bundler), skips the routine looks meanwhile, and drops any read
  * begun before the change: a pass's old balance must never come back after it, or the panel would offer it again.
  */
-export function accountReader(client: BalanceClient, account: Address, onRead: (balances: Balances | null) => void) {
+export function accountReader(client: BalanceClient, account: Address, tokens: AccountTokens, onRead: (balances: Balances | null) => void) {
   let changes = 0; // a read begun under an older count says nothing new
   let waiting = false;
   let stopped = false;
@@ -25,11 +28,11 @@ export function accountReader(client: BalanceClient, account: Address, onRead: (
   const read = async (generation: number) => {
     let balances: Balances | null;
     try {
-      const [wars, usdt] = await Promise.all([
-        client.readContract({ address: WARS, abi: erc20Abi, functionName: "balanceOf", args: [account] }),
-        client.readContract({ address: USDT, abi: erc20Abi, functionName: "balanceOf", args: [account] }),
+      const [currency, dollar] = await Promise.all([
+        client.readContract({ address: tokens.currency, abi: erc20Abi, functionName: "balanceOf", args: [account] }),
+        tokens.dollar === null ? 0n : client.readContract({ address: tokens.dollar, abi: erc20Abi, functionName: "balanceOf", args: [account] }),
       ]);
-      balances = { wars, usdt };
+      balances = { currency, dollar };
     } catch {
       balances = null;
     }

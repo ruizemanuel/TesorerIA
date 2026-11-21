@@ -25,6 +25,8 @@ const LOOK_EVERY_MS = 30_000;
 export function AccountPanel({
   userName,
   account,
+  currency,
+  dollar,
   funds,
   fundName,
   invite,
@@ -32,13 +34,16 @@ export function AccountPanel({
 }: {
   userName: string;
   account: Address;
+  /** The fund's currency and its dollar, if it has one (FundView): what the account is read for. */
+  currency: Address;
+  dollar: Address | null;
   funds: readonly YourFund[];
   fundName: string;
   invite: string | null;
   keyChange?: KeyChangeAsk;
 }) {
   const m = useMessages();
-  const { balances, failed } = useAccountBalances(account, LOOK_EVERY_MS);
+  const { balances, failed } = useAccountBalances(account, { currency, dollar }, LOOK_EVERY_MS);
   return (
     <div className="grid gap-4">
       <p>{m.account.loggedInAs(userName)}</p>
@@ -48,19 +53,19 @@ export function AccountPanel({
         ) : (
           <>
             <p className="text-[24px] font-bold leading-tight [font-stretch:87%]">
-              {balances.usdt >= USDT_SPECK
+              {balances.dollar >= USDT_SPECK
                 ? m.account.holdsAnd(
-                    <span className="money">{formatMoney(balances.wars, m)}</span>,
-                    <span className="money">{formatUsdt(balances.usdt, m)}</span>,
+                    <span className="money">{formatMoney(balances.currency, m)}</span>,
+                    <span className="money">{formatUsdt(balances.dollar, m)}</span>,
                   )
-                : m.account.holds(<span className="money">{formatMoney(balances.wars, m)}</span>)}
+                : m.account.holds(<span className="money">{formatMoney(balances.currency, m)}</span>)}
             </p>
             <p className="text-sm text-muted">{m.account.reimbursementsLand}</p>
           </>
         )}
       </div>
       {balances !== null &&
-        (balances.wars >= WARS_SPECK ? (
+        (balances.currency >= WARS_SPECK ? (
           <PanelLink href="?p=pesos" className={buttonClass("primary")}>
             {m.account.cashOut}
           </PanelLink>

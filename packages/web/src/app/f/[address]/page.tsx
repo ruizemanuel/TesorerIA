@@ -87,13 +87,23 @@ export default async function FundPage({ params, searchParams }: { params: Promi
           <AccountPanel
             userName={user.name}
             account={user.account}
+            currency={screen.view.currency}
+            dollar={screen.view.dollar}
             funds={funds}
             fundName={screen.view.name}
             invite={screen.invite}
             keyChange={keyChange}
           />
         ),
-        pesos: <CashOutPanel fund={screen.view.address} account={user.account} cashOutOnItsWay={screen.cashOutOnItsWay} />,
+        pesos: (
+          <CashOutPanel
+            fund={screen.view.address}
+            account={user.account}
+            currency={screen.view.currency}
+            dollar={screen.view.dollar}
+            cashOutOnItsWay={screen.cashOutOnItsWay}
+          />
+        ),
         agente: chat ? (
           <AgentPanel
             fund={screen.view.address}

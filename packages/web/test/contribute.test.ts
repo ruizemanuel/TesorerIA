@@ -1,4 +1,4 @@
-import { USDT, WARS, fundV2Abi } from "@tesoreria/agent";
+import { CURRENCIES, USDT, WARS, currencyOf, fundV2Abi } from "@tesoreria/agent";
 import { decodeFunctionData, erc20Abi, getAddress } from "viem";
 import { describe, expect, it } from "vitest";
 import {
@@ -22,6 +22,7 @@ import {
   weeklyContribution,
   withFee,
 } from "../src/lib/contribute";
+import { COUNTRIES } from "../src/lib/countries";
 import { memberFundAbi } from "../src/lib/fund-abi";
 import { buildFundView } from "../src/lib/fund-view";
 import { NBSP, USDT_UNIT, WARS_UNIT, formatMoney, upToCentavo } from "../src/lib/format";
@@ -50,13 +51,28 @@ describe("contributeCalls", () => {
 });
 
 describe("rampUrl", () => {
+  const wars = currencyOf(WARS)!;
+  const wmxn = currencyOf(COUNTRIES.MX.currency.token)!;
+
   it("opens Ripio's ramp for wARS on Celo, to the member's own account (spec, 10)", () => {
-    expect(rampUrl(ME)).toBe(`https://ramp.ripio.com/?country=AR&chain=42220&token=WARS&address=${ME}`);
+    expect(rampUrl(ME, wars)).toBe(`https://ramp.ripio.com/?country=AR&chain=42220&token=WARS&address=${ME}`);
   });
 
   it("carries the amount, in pesos as Ripio's form reads them", () => {
-    expect(rampUrl(ME, pesos(10_000))).toBe(`https://ramp.ripio.com/?country=AR&chain=42220&token=WARS&amount=10000&address=${ME}`);
-    expect(rampUrl(ME, pesos(10_000) + 50n * 10n ** 16n)).toContain("&amount=10000.5&");
+    expect(rampUrl(ME, wars, pesos(10_000))).toBe(`https://ramp.ripio.com/?country=AR&chain=42220&token=WARS&amount=10000&address=${ME}`);
+    expect(rampUrl(ME, wars, pesos(10_000) + 50n * 10n ** 16n)).toContain("&amount=10000.5&");
+  });
+
+  it("sends a Mexican fund to Ripio's ramp for Mexico and wMXN", () => {
+    expect(rampUrl(ME, wmxn, (100_25n * WARS_UNIT) / 100n)).toBe(`https://ramp.ripio.com/?country=MX&chain=42220&token=WMXN&amount=100.25&address=${ME}`);
+    expect(rampUrl(ME, wmxn)).toBe(`https://ramp.ripio.com/?country=MX&chain=42220&token=WMXN&address=${ME}`);
+    expect(rampUrl(ME, wars, 10_000n * WARS_UNIT)).toBe(`https://ramp.ripio.com/?country=AR&chain=42220&token=WARS&amount=10000&address=${ME}`); // today's value
+  });
+
+  it("has no ramp for a currency Ripio's ramp doesn't serve, rather than a link to a token called null", () => {
+    const wpen = CURRENCIES.find((currency) => currency.symbol === "wPEN")!;
+    expect(wpen.rampToken).toBeNull();
+    expect(() => rampUrl(ME, wpen)).toThrow("wPEN");
   });
 });
 

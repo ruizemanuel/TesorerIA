@@ -1,5 +1,6 @@
 "use client";
 
+import { currencyOf } from "@tesoreria/agent";
 import { useEffect, useRef, useState } from "react";
 import { type Address, getAddress } from "viem";
 import { ACCOUNT_CHANGED } from "../lib/account-reader";
@@ -19,19 +20,32 @@ const LOOK_EVERY_MS = 10_000;
 const ADDRESS = "narrow break-all rounded-[14px] bg-surface p-3 text-center text-[15px] font-semibold [font-variant-numeric:lining-nums_tabular-nums]";
 
 /**
- * Pasar a pesos (spec, 9, pantalla 8, and 9.2): the member's wARS, sent from their own account to a Ripio address on
- * Celo. "Vender con Ripio" (offRampUrl) gives one that sells them 1:1 and pays the member's bank; the app's deposit
- * address works too, and the sale is done there. The address is remembered by this browser only, after a pass that
- * went well. The amount is all the account holds until the member types another; after a pass, nothing is offered
- * until a read made after it (useAccountBalances says when, and waits for the pass's block), so the old balance is
- * never offered again.
+ * Pasar a pesos (spec, 9, pantalla 8, and 9.2): the member's tokens of the fund's currency, sent from their own account
+ * to a Ripio address on Celo. "Vender con Ripio" (offRampUrl) gives one that sells them 1:1 and pays the member's bank;
+ * the app's deposit address works too, and the sale is done there. The address is remembered by this browser only, for
+ * this currency, after a pass that went well. The amount is all the account holds until the member types another; after
+ * a pass, nothing is offered until a read made after it (useAccountBalances says when, and waits for the pass's block),
+ * so the old balance is never offered again.
  */
-export function CashOutPanel({ fund, account, cashOutOnItsWay }: { fund: Address; account: Address; cashOutOnItsWay: boolean }) {
+export function CashOutPanel({
+  fund,
+  account,
+  currency,
+  dollar,
+  cashOutOnItsWay,
+}: {
+  fund: Address;
+  account: Address;
+  /** The fund's currency, which is what the member passes, and its dollar if it has one (FundView). */
+  currency: Address;
+  dollar: Address | null;
+  cashOutOnItsWay: boolean;
+}) {
   const m = useMessages();
   const words = m.country.words[m.locale];
   const { refresh } = useRefresh();
   // `changing`: right after a pass, until the account is read again, the balances are the old ones.
-  const { balances, failed, changing } = useAccountBalances(account, LOOK_EVERY_MS);
+  const { balances, failed, changing } = useAccountBalances(account, { currency, dollar }, LOOK_EVERY_MS);
   // Undefined until this browser was asked, after the first render: the server can't know it.
   const [saved, setSaved] = useState<Address | null | undefined>(undefined);
   const [editingAddress, setEditingAddress] = useState(false);
@@ -43,13 +57,13 @@ export function CashOutPanel({ fund, account, cashOutOnItsWay }: { fund: Address
   const [sentNow, setSentNow] = useState(false);
   const busy = useRef(false); // a second click lands before the button re-renders as disabled
 
-  useEffect(() => setSaved(rememberedRipioAddress(browserStorage(), account)), [account]);
+  useEffect(() => setSaved(rememberedRipioAddress(browserStorage(), account, currency)), [account, currency]);
 
   const asking = saved === null || editingAddress;
   const destination = asking ? pasted.trim() : (saved ?? "");
   const addressProblem = destination === "" ? null : cashOutProblem(destination, { account, fund }, m);
   const fresh = balances !== null && !changing ? balances : null;
-  const reading = fresh === null ? null : readCashOutAmount(typed, fresh.wars, m);
+  const reading = fresh === null ? null : readCashOutAmount(typed, fresh.currency, m);
   const onItsWay = cashOutOnItsWay || sentNow;
   const amount = reading?.ok ? reading.amount : null;
   const ready = step === "idle" && !onItsWay && amount !== null && destination !== "" && addressProblem === null;
@@ -62,8 +76,8 @@ export function CashOutPanel({ fund, account, cashOutOnItsWay }: { fund: Address
       setStep("signing");
       const me = await loadMe();
       const to = getAddress(destination);
-      const result = await sendCalls(me, cashOutCalls({ to, amount }), { kind: "cash-out", amount, token: "wars" }, () => setStep("sending"));
-      rememberRipioAddress(browserStorage(), account, to);
+      const result = await sendCalls(me, cashOutCalls({ token: currency, to, amount }), { kind: "cash-out", amount, token: "wars" }, () => setStep("sending"));
+      rememberRipioAddress(browserStorage(), account, currency, to);
       setSaved(to);
       setEditingAddress(false);
       setPasted("");
@@ -99,7 +113,7 @@ export function CashOutPanel({ fund, account, cashOutOnItsWay }: { fund: Address
       {saved !== undefined && (
         <div className="grid gap-3">
           <p>{asking ? m.cashOut.sellIntro(words.bankAccount) : m.cashOut.sellIntroSaved}</p>
-          <ButtonLink href={offRampUrl(amount ?? undefined)} target="_blank" rel="noreferrer" variant="secondary">
+          <ButtonLink href={offRampUrl(currencyOf(currency)!, amount ?? undefined)} target="_blank" rel="noreferrer" variant="secondary">
             {m.cashOut.sellWithRipio}
           </ButtonLink>
         </div>
@@ -149,14 +163,14 @@ export function CashOutPanel({ fund, account, cashOutOnItsWay }: { fund: Address
           !sentNow && <p className="font-semibold">{m.cashOut.onItsWay}</p>
         ) : fresh === null ? (
           <p className="text-muted">{failed ? m.account.readFailed : m.account.reading}</p>
-        ) : fresh.wars < WARS_SPECK ? (
+        ) : fresh.currency < WARS_SPECK ? (
           <p className="text-muted">{m.cashOut.nothingToPass}</p>
         ) : (
           <>
-            <p>{m.account.youHave(<span className="money font-semibold">{formatMoney(fresh.wars, m)}</span>)}</p>
+            <p>{m.account.youHave(<span className="money font-semibold">{formatMoney(fresh.currency, m)}</span>)}</p>
             <AmountField
               label={m.cashOut.amountLabel}
-              value={typed ?? moneyText(fresh.wars, m)}
+              value={typed ?? moneyText(fresh.currency, m)}
               problem={reading?.ok === false ? reading.error : ""}
               disabled={step !== "idle"}
               onChange={setTyped}
