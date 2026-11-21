@@ -11,17 +11,25 @@ import { WARS, addLiveFund, addUser, testDb } from "./support/db";
 
 const FUND = getAddress("0x9A74F670F3c59Ae4B8450fdD477b0461b89D2dfD");
 
-const state: { db: Db | null; acceptLanguage: string; reads: string[]; country: CountryCode } = {
+const state: { db: Db | null; acceptLanguage: string; reads: string[]; country: CountryCode; ip: string | null; env: Record<string, string> } = {
   db: null,
   acceptLanguage: "es-AR",
   reads: [],
   country: "AR",
+  ip: null,
+  env: {},
 };
 
 vi.mock("next/headers", () => ({
   cookies: async () => ({ get: () => undefined }),
-  headers: async () => new Headers({ "accept-language": state.acceptLanguage }),
+  headers: async () => new Headers({ "accept-language": state.acceptLanguage, ...(state.ip === null ? {} : { "x-vercel-ip-country": state.ip }) }),
 }));
+// The server's settings as it reads them from its variables (EXTRA_COUNTRIES turns Mexico on for a run), read again each time.
+vi.mock("../src/lib/env", async (importOriginal) => {
+  const { parseEnv } = await importOriginal<typeof import("../src/lib/env")>();
+  const base = { CHAIN_MODE: "fork", RP_ID: "localhost", ORIGIN: "http://localhost:3000", SESSION_SECRET: "s".repeat(32) };
+  return { parseEnv, env: () => parseEnv({ ...base, ...state.env }) };
+});
 vi.mock("../src/lib/db/client", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../src/lib/db/client")>()),
   getDb: async () => state.db,
@@ -96,6 +104,8 @@ beforeEach(async () => {
   state.acceptLanguage = "es-AR";
   state.reads = [];
   state.country = "AR";
+  state.ip = null;
+  state.env = {};
 });
 
 describe("each page's title in the link preview", () => {
@@ -131,6 +141,78 @@ describe("each page's title in the link preview", () => {
     expect(ownOnly(await invitation.generateMetadata(params({ code: fund.inviteCode })))).toEqual({
       title: "You're invited to Fútbol de los jueves",
       description: "Join the group's fund on TesorerIA.",
+    });
+  });
+
+  describe("when the visitor's country is Mexico, which this run offers (the site's Open Graph is then the neutral one)", () => {
+    const mexico = () => {
+      state.ip = "MX";
+      state.env = { EXTRA_COUNTRIES: "MX" };
+    };
+    const rioplatense = {
+      type: "website",
+      siteName: "TesorerIA",
+      locale: "es_AR",
+      images: [{ url: "/og/rioplatense.png", width: 1200, height: 630, alt: "TesorerIA: la plata del grupo, sin tesorero." }],
+    };
+    const neutral = {
+      type: "website",
+      siteName: "TesorerIA",
+      locale: "es_MX",
+      images: [{ url: "/og/neutral.png", width: 1200, height: 630, alt: "TesorerIA: el dinero del grupo, sin tesorero." }],
+    };
+
+    it("gives an Argentine fund's invitation its own Open Graph, in Rioplatense, with a copy of today's image", async () => {
+      const ana = await addUser(state.db!, "Ana");
+      const fund = await addLiveFund(state.db!, { creatorId: ana.id, address: FUND, members: [ana.id] });
+      mexico();
+      expect(await invitation.generateMetadata(params({ code: fund.inviteCode }))).toEqual({
+        title: "Te invitaron a Fútbol de los jueves",
+        description: "Sumate al fondo del grupo en TesorerIA.",
+        openGraph: rioplatense,
+      });
+    });
+
+    it("gives an Argentine fund's public view and movements the same", async () => {
+      mexico();
+      for (const page of [publicView, publicMovements]) {
+        expect(await page.generateMetadata(params({ address: FUND.toLowerCase() }))).toEqual({
+          title: "Fútbol de los jueves",
+          description: "Fútbol de los jueves, en vivo: lo que hay en el fondo, quién pagó la cuota y lo que hizo el agente.",
+          openGraph: rioplatense,
+        });
+      }
+    });
+
+    it("leaves an Argentine fund's page in English to the site's, which says it the same way for both countries", async () => {
+      const ana = await addUser(state.db!, "Ana");
+      const fund = await addLiveFund(state.db!, { creatorId: ana.id, address: FUND, members: [ana.id] });
+      mexico();
+      state.acceptLanguage = "en-US,en;q=0.9";
+      expect(ownOnly(await invitation.generateMetadata(params({ code: fund.inviteCode })))).toEqual({
+        title: "You're invited to Fútbol de los jueves",
+        description: "Join the group's fund on TesorerIA.",
+      });
+      expect(ownOnly(await publicView.generateMetadata(params({ address: FUND.toLowerCase() })))).toMatchObject({ title: "Fútbol de los jueves" });
+    });
+
+    it("leaves a visitor from Mexico to the site's when this run doesn't offer it: the page is Argentine, as the fund", async () => {
+      const ana = await addUser(state.db!, "Ana");
+      const fund = await addLiveFund(state.db!, { creatorId: ana.id, address: FUND, members: [ana.id] });
+      state.ip = "MX";
+      expect(ownOnly(await invitation.generateMetadata(params({ code: fund.inviteCode })))).toEqual({
+        title: "Te invitaron a Fútbol de los jueves",
+        description: "Sumate al fondo del grupo en TesorerIA.",
+      });
+    });
+
+    it("keeps a fund of Mexico's neutral Open Graph, whatever the visitor's country", async () => {
+      const ana = await addUser(state.db!, "Ana");
+      const fund = await addLiveFund(state.db!, { creatorId: ana.id, address: FUND, members: [ana.id], currency: COUNTRIES.MX.currency.token });
+      mexico();
+      expect(await invitation.generateMetadata(params({ code: fund.inviteCode }))).toMatchObject({ openGraph: neutral });
+      state.country = "MX";
+      expect(await publicView.generateMetadata(params({ address: FUND.toLowerCase() }))).toMatchObject({ openGraph: neutral });
     });
   });
 

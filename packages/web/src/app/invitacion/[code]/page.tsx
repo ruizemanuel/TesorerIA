@@ -10,20 +10,20 @@ import { formatPercent } from "../../../lib/format";
 import { countryCodeOf } from "../../../lib/fund-country";
 import { draftByInvite } from "../../../lib/funds";
 import { LocaleProvider } from "../../../lib/i18n/client";
-import { getMessages } from "../../../lib/i18n/server";
+import { getMessages, getPageCountry } from "../../../lib/i18n/server";
 import { invitationFor } from "../../../lib/invitation";
 import { NO_JOIN, joinStateOf, openRequestsFromOthers } from "../../../lib/join-requests";
 import { fundPageMetadata } from "../../../lib/site-metadata";
 
 /**
  * The link preview names the fund it invites to (spec, 9.6): it's what the group sees in the chat, in the fund's country,
- * and in neutral Spanish with its image.
+ * with the image of its Spanish (fundPageMetadata, which needs the country the site's own metadata speaks).
  */
 export async function generateMetadata({ params }: { params: Promise<{ code: string }> }): Promise<Metadata> {
   const draft = await draftByInvite(await getDb(), (await params).code);
   if (draft === null) return {};
   const m = await getMessages(countryCodeOf(draft.currency));
-  return fundPageMetadata(m, { title: m.meta.invitationTitle(draft.name), description: m.meta.invitationDescription });
+  return fundPageMetadata(m, { title: m.meta.invitationTitle(draft.name), description: m.meta.invitationDescription }, await getPageCountry());
 }
 
 /**

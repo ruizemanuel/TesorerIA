@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { messagesFor } from "../src/lib/i18n/messages";
 import { fundPageMetadata, siteMetadata } from "../src/lib/site-metadata";
@@ -53,26 +54,69 @@ describe("siteMetadata", () => {
 describe("a fund's page's own metadata (fundPageMetadata)", () => {
   const page = { title: "Te invitaron a Fútbol de los jueves", description: "Únete al fondo del grupo en TesorerIA." };
 
-  it("is just its title and description for a fund whose preview is the image of today: Next copies them into Open Graph and X", () => {
-    for (const m of [messagesFor("es", "AR"), messagesFor("en", "AR"), messagesFor("en", "MX")]) {
-      const meta = fundPageMetadata(m, page);
+  it("is just its title and description for a fund whose preview is the site's own: Next copies them into Open Graph and X", () => {
+    for (const [m, pageCountry] of [
+      [messagesFor("es", "AR"), "AR"],
+      [messagesFor("en", "AR"), "AR"],
+      [messagesFor("en", "MX"), "MX"],
+      [messagesFor("en", "AR"), "MX"],
+      [messagesFor("en", "MX"), "AR"],
+    ] as const) {
+      const meta = fundPageMetadata(m, page, pageCountry);
       expect(meta).toEqual(page);
       expect(meta).not.toHaveProperty("openGraph");
     }
   });
 
   it("gives a neutral Spanish fund the site's Open Graph whole, with Mexico's locale and the neutral image, since a page's own replaces the site's", () => {
-    const meta = fundPageMetadata(messagesFor("es", "MX"), page);
+    for (const pageCountry of ["AR", "MX"] as const) {
+      const meta = fundPageMetadata(messagesFor("es", "MX"), page, pageCountry);
+      expect(meta).toEqual({
+        ...page,
+        openGraph: {
+          type: "website",
+          siteName: "TesorerIA",
+          locale: "es_MX",
+          images: [{ url: "/og/neutral.png", width: 1200, height: 630, alt: "TesorerIA: el dinero del grupo, sin tesorero." }],
+        },
+      });
+      expect(meta).not.toHaveProperty("twitter");
+    }
+  });
+
+  it("gives a Rioplatense fund, on a page the site speaks in neutral Spanish, its own Open Graph whole with its locale and a copy of today's image", () => {
+    const meta = fundPageMetadata(messagesFor("es", "AR"), page, "MX");
     expect(meta).toEqual({
       ...page,
       openGraph: {
         type: "website",
         siteName: "TesorerIA",
-        locale: "es_MX",
-        images: [{ url: "/og/neutral.png", width: 1200, height: 630, alt: "TesorerIA: el dinero del grupo, sin tesorero." }],
+        locale: "es_AR",
+        images: [{ url: "/og/rioplatense.png", width: 1200, height: 630, alt: "TesorerIA: la plata del grupo, sin tesorero." }],
       },
     });
     expect(meta).not.toHaveProperty("twitter");
+  });
+
+  it("leaves a Rioplatense fund on a Rioplatense page to the site's, byte for byte as before", () => {
+    const meta = fundPageMetadata(messagesFor("es", "AR"), page, "AR");
+    expect(meta).toEqual(page);
+    expect(Object.keys(meta)).toEqual(["title", "description"]);
+  });
+});
+
+describe("the link preview's images, in public/og", () => {
+  /** The width and height a PNG says it has: the two big-endian numbers after its signature and the IHDR tag. */
+  const sizeOf = (file: Buffer) => [file.readUInt32BE(16), file.readUInt32BE(20)];
+  const read = (path: string) => readFileSync(new URL(path, import.meta.url));
+
+  it("are 1200 by 630, the neutral one and the Rioplatense one", () => {
+    expect(sizeOf(read("../public/og/neutral.png"))).toEqual([1200, 630]);
+    expect(sizeOf(read("../public/og/rioplatense.png"))).toEqual([1200, 630]);
+  });
+
+  it("has the Rioplatense one as a byte-for-byte copy of app/opengraph-image.png, which a page's own Open Graph can't point at (its URL carries a hash)", () => {
+    expect(read("../public/og/rioplatense.png").equals(read("../src/app/opengraph-image.png"))).toBe(true);
   });
 });
 
