@@ -200,7 +200,7 @@ describe("POST /api/agent/run", () => {
 
   it("waits for the node to have the member's last operation before running the agent (read-your-writes)", async () => {
     const landed: Hash = pad("0x0c", { size: 32 });
-    await recordOperation(db, ana.id, { userOpHash: landed, kind: "contribute", fund: FUND, amount: 5_000_000n, token: "usdt" });
+    await recordOperation(db, ana.id, { userOpHash: landed, kind: "contribute", fund: FUND, amount: 5_000_000n, token: "dollar" });
     await finishOperation(db, ana.id, { userOpHash: landed, transactionHash: landed, success: true, block: 79_925_582n });
     waitForBlock.mockClear();
     expect((await afterContribution()).status).toBe(202);

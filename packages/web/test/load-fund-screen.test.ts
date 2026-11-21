@@ -288,7 +288,7 @@ describe("loadFundScreen: the public view", () => {
       ref: `0x${crypto.randomUUID().replaceAll("-", "").padEnd(64, "0")}`,
       status: "waiting",
     });
-    await recordOperation(db, ana.id, { userOpHash: `0x${"a1".repeat(32)}`, kind: "contribute", fund: address, amount: 10_000n * WARS, token: "wars" });
+    await recordOperation(db, ana.id, { userOpHash: `0x${"a1".repeat(32)}`, kind: "contribute", fund: address, amount: 10_000n * WARS, token: "currency" });
 
     // The members do see them...
     const own = (await loadFundScreen(address, asViewer(ana)))!;
@@ -304,15 +304,27 @@ describe("loadFundScreen: the public view", () => {
 
   it("shows each member only their own operations on their way", async () => {
     const address = await liveFund();
-    await recordOperation(db, ana.id, { userOpHash: `0x${"b1".repeat(32)}`, kind: "contribute", fund: address, amount: 10_000n * WARS, token: "wars" });
-    await recordOperation(db, beto.id, { userOpHash: `0x${"b2".repeat(32)}`, kind: "contribute", fund: address, amount: 20_000n * WARS, token: "wars" });
+    await recordOperation(db, ana.id, { userOpHash: `0x${"b1".repeat(32)}`, kind: "contribute", fund: address, amount: 10_000n * WARS, token: "currency" });
+    await recordOperation(db, beto.id, { userOpHash: `0x${"b2".repeat(32)}`, kind: "contribute", fund: address, amount: 20_000n * WARS, token: "currency" });
     const forBeto = (await loadFundScreen(address, asViewer(beto)))!;
     expect(texts(forBeto)).toEqual([`Tu aporte de ${formatMoney(20_000n * WARS, es)} está en camino.`]);
   });
 
+  it("still reads a contribution on its way that was kept before the rename, as the dollar or the currency", async () => {
+    // Rows from before the deploy say "usdt" and "wars" in their token column.
+    const address = await liveFund();
+    const row = { userId: ana.id, kind: "contribute" as const, fund: address };
+    await db.insert(operations).values({ ...row, userOpHash: `0x${"e1".repeat(32)}`, amount: 10n * USDT_UNIT, token: "usdt" });
+    await db.insert(operations).values({ ...row, userOpHash: `0x${"e2".repeat(32)}`, amount: 20_000n * WARS, token: "wars" });
+    const screen = (await loadFundScreen(address, asViewer(ana)))!;
+    expect(texts(screen).sort()).toEqual(
+      [`Tu aporte de ${formatUsdt(10n * USDT_UNIT, es)} está en camino.`, `Tu aporte de ${formatMoney(20_000n * WARS, es)} está en camino.`].sort(),
+    );
+  });
+
   describe("a contribution on its way", () => {
     const send = (userId: string, address: Address, hash: string, kind: "contribute" | "vote" = "contribute") =>
-      recordOperation(db, userId, { userOpHash: `0x${hash.repeat(32)}`, kind, fund: address, amount: 10_000n * WARS, token: "wars" });
+      recordOperation(db, userId, { userOpHash: `0x${hash.repeat(32)}`, kind, fund: address, amount: 10_000n * WARS, token: "currency" });
     const onItsWay = async (address: Address, viewer: Person) => (await loadFundScreen(address, asViewer(viewer)))!.contributionOnItsWay;
 
     it("is reported to the member who sent it, and to no one else", async () => {
@@ -355,7 +367,7 @@ describe("loadFundScreen: the public view", () => {
 
   describe("a pass to pesos on its way (spec, 9.2)", () => {
     const pass = (userId: string, hash: string) =>
-      recordOperation(db, userId, { userOpHash: `0x${hash.repeat(32)}`, kind: "cash-out", amount: 10_000n * WARS, token: "wars" });
+      recordOperation(db, userId, { userOpHash: `0x${hash.repeat(32)}`, kind: "cash-out", amount: 10_000n * WARS, token: "currency" });
     const onItsWay = async (address: Address, viewer: Person) => (await loadFundScreen(address, asViewer(viewer)))!.cashOutOnItsWay;
 
     it("is reported to the member who sent it, in any of their funds, and to no one else; it's not a contribution", async () => {

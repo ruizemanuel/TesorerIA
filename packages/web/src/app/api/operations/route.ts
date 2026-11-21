@@ -6,7 +6,7 @@ import { type Db, getDb } from "../../../lib/db/client";
 import { draftCountryOf, fundCountryOf } from "../../../lib/fund-country";
 import { jsonError, readJson } from "../../../lib/http";
 import { messagesOf } from "../../../lib/i18n/request";
-import { ownsDraft, recordOperation } from "../../../lib/operations";
+import { operationToken, ownsDraft, recordOperation } from "../../../lib/operations";
 import { addressSchema, hashSchema } from "../../../lib/schemas";
 
 const Operation = z
@@ -20,7 +20,8 @@ const Operation = z
       .string()
       .regex(/^\d{1,78}$/)
       .optional(),
-    token: z.enum(["wars", "usdt"]).optional(),
+    /** A tab opened before the rename still sends `wars` and `usdt`: they are kept as `currency` and `dollar`. */
+    token: z.enum(["currency", "dollar", "wars", "usdt"]).transform(operationToken).optional(),
     /** For `create-fund`: its EntryPoint nonce (key 0), in decimal. */
     nonce: z
       .string()

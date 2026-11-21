@@ -2,6 +2,7 @@ import { type Call, type SendTaggedCallsResult, createMemberAccount, createPimli
 import { type Address, type Hash, type Hex, createPublicClient, http } from "viem";
 import { UserOperationReceiptNotFoundError, createBundlerClient, toWebAuthnAccount } from "viem/account-abstraction";
 import { celo } from "viem/chains";
+import type { OperationToken } from "../operations";
 import { get, post } from "./api";
 import { OnItsWayError, UserFacingError } from "./errors";
 
@@ -20,7 +21,7 @@ export type OperationInfo = {
   kind: "create-fund" | "contribute" | "vote" | "execute" | "cash-out" | "propose";
   fund?: Address;
   amount?: bigint;
-  token?: "wars" | "usdt";
+  token?: OperationToken;
   /** For `create-fund`: the draft it deploys, so a retried deploy finds the operation already sent. */
   draftId?: string;
 };

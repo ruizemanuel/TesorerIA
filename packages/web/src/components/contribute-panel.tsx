@@ -25,12 +25,13 @@ import {
 import { USDT_UNIT, formatMoney, formatPercent, formatUsdt, upToCentavo } from "../lib/format";
 import { memberFundAbi } from "../lib/fund-abi";
 import { useMessages } from "../lib/i18n/client";
+import type { OperationToken } from "../lib/operations";
 import { AddressBox } from "./address-box";
 import { ContributeAmount } from "./contribute-amount";
 import { useRefresh } from "./refresh-provider";
 import { Button, ButtonLink } from "./ui";
 
-type Token = "usdt" | "wars";
+type Token = OperationToken;
 /**
  * What the member's account holds of the fund's dollar (`usdt`) and currency (`wars`), and `rate`: what one USDT is
  * worth to the fund, the pool's 30-minute average, the price it values USDT at (version 1's quoteUsdtInWars, version 2's
@@ -83,8 +84,8 @@ export function ContributePanel({
   const router = useRouter();
   const { refresh } = useRefresh();
   // A fund with no dollar takes its currency alone.
-  const tokens: readonly Token[] = dollar === null ? ["wars"] : ["usdt", "wars"];
-  const [tab, setTab] = useState<Token>(dollar === null ? "wars" : "usdt");
+  const tokens: readonly Token[] = dollar === null ? ["currency"] : ["dollar", "currency"];
+  const [tab, setTab] = useState<Token>(dollar === null ? "currency" : "dollar");
   const [held, setHeld] = useState<Held | null>(null);
   const [lookFailed, setLookFailed] = useState(false);
   const [typed, setTyped] = useState<string | null>(null);
@@ -141,18 +142,20 @@ export function ContributePanel({
   const usdtDefault = defaultUsdtAmount(usdtOffer);
   const usdtReading = typedUsdt === null ? ({ ok: true, amount: usdtDefault } as const) : readUsdtAmount(typedUsdt, { ...usdtOffer, cap: balanceCap }, m);
   const toSend = held === null ? null : usdtToSend(usdtOffer);
-  const reading = tab === "usdt" ? usdtReading : wars.reading;
+  const reading = tab === "dollar" ? usdtReading : wars.reading;
   const amount = reading.ok ? reading.amount : 0n;
   // Pesos up to the centavo, as the field shows them: what was typed already is, and a version 2 fee's amount is a fraction over.
-  const label = tab === "usdt" ? formatUsdt(amount, m) : formatMoney(upToCentavo(amount), m);
+  const label = tab === "dollar" ? formatUsdt(amount, m) : formatMoney(upToCentavo(amount), m);
   // Ripio loads what the pesos tab asks: in a version 2 fund, what credits the week after the fee, up to the centavo.
   const rampAmount = version === 2 ? upToCentavo(withFee(target, feeBps)) : target;
   // Under the amount: in USDT, what it covers at the fund's rate; in either tab, the fee a version 2 fund leaves of it.
   const usdtNote = held !== null && held.rate !== null && usdtReading.ok ? usdtWorthText(usdtReading.amount, held.rate, target, m) : null;
   const feeNote = feeBps > 0 ? m.contribute.feeNote(formatPercent(feeBps, m)) : null;
-  const notes = [tab === "usdt" ? usdtNote : null, feeNote].filter((part) => part !== null);
+  const notes = [tab === "dollar" ? usdtNote : null, feeNote].filter((part) => part !== null);
   const note = notes.length > 0 ? notes.join(" ") : undefined;
-  const holding = held === null ? 0n : held[tab];
+  const holding = held === null ? 0n : tab === "dollar" ? held.usdt : held.wars;
+  // contributeCalls and the amount's pill still name the two tokens "usdt" and "wars": only the operation's record changed.
+  const paidIn = tab === "dollar" ? "usdt" : "wars";
   // Whether the server knows of one (a reopened panel, another tab) or this click just sent one: either way, no second.
   const onItsWay = contributionOnItsWay || sentNow;
   // What the USDT tab says over the address: how much to send ("more" once some USDT is already held), and Binance's minimum.
@@ -166,7 +169,7 @@ export function ContributePanel({
     try {
       setStep("signing");
       const me = await loadMe();
-      await sendCalls(me, contributeCalls({ fund, version, token: tab, amount, currency, dollar }), { kind: "contribute", fund, amount, token: tab }, () =>
+      await sendCalls(me, contributeCalls({ fund, version, token: paidIn, amount, currency, dollar }), { kind: "contribute", fund, amount, token: tab }, () =>
         setStep("sending"),
       );
       void askAgentToRun(); // convert now rather than at the next heartbeat, in either token (spec, 8.3)
@@ -201,14 +204,14 @@ export function ContributePanel({
               onClick={() => setTab(token)}
               className={`min-h-11 rounded-[11px] text-sm font-bold ${tab === token ? "bg-surface text-primary" : "text-muted"}`}
             >
-              {token === "usdt" ? m.contribute.haveUsdt : m.contribute.havePesos}
+              {token === "dollar" ? m.contribute.haveUsdt : m.contribute.havePesos}
             </button>
           ))}
         </div>
       )}
 
       <div role={tokens.length > 1 ? "tabpanel" : undefined} className="grid gap-4">
-        {tab === "usdt" ? (
+        {tab === "dollar" ? (
           <p>
             {toSend !== null && toSend > 0n
               ? sendAtLeast(<span className="money font-semibold">{formatUsdt(toSend, m)}</span>, <span className="money">{formatMoney(target, m)}</span>)
@@ -240,21 +243,21 @@ export function ContributePanel({
             <p className="p-2 text-muted">{lookFailed ? m.account.readFailed : m.account.reading}</p>
           ) : holding === 0n ? (
             <p className="p-2 text-muted">{m.contribute.nothingYet}</p>
-          ) : room === 0n || (tab === "usdt" && usdtDefault === 0n) ? (
+          ) : room === 0n || (tab === "dollar" && usdtDefault === 0n) ? (
             <p className="p-2 font-semibold text-owe">{m.contribute.capReachedNotice(<span className="money">{cap}</span>)}</p>
           ) : (
             <>
               <ContributeAmount
                 label={m.contribute.amountLabel}
                 held={m.contribute.youHold(
-                  <span className="money font-semibold">{tab === "usdt" ? formatUsdt(held.usdt, m) : formatMoney(held.wars, m)}</span>,
+                  <span className="money font-semibold">{tab === "dollar" ? formatUsdt(held.usdt, m) : formatMoney(held.wars, m)}</span>,
                 )}
-                token={tab}
-                value={tab === "usdt" ? (typedUsdt ?? usdtText(usdtDefault, m)) : wars.value}
+                token={paidIn}
+                value={tab === "dollar" ? (typedUsdt ?? usdtText(usdtDefault, m)) : wars.value}
                 problem={reading.ok ? "" : reading.error}
                 note={note}
                 disabled={step !== "idle"}
-                onChange={tab === "usdt" ? setTypedUsdt : setTyped}
+                onChange={tab === "dollar" ? setTypedUsdt : setTyped}
                 speech={m}
               />
               <Button disabled={step !== "idle" || amount === 0n} onClick={contribute}>

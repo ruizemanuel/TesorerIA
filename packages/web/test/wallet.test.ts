@@ -45,7 +45,7 @@ const OP: Hash = pad("0x01", { size: 32 });
 const TX: Hash = pad("0x02", { size: 32 });
 const BLOCK = 79_925_582n;
 const CALLS = [{ to: FUND, data: "0x" as const }];
-const INFO = { kind: "contribute", fund: FUND, amount: 10_000_000n, token: "usdt" } as const;
+const INFO = { kind: "contribute", fund: FUND, amount: 10_000_000n, token: "dollar" } as const;
 const RECEIPT = { userOpHash: OP, transactionHash: TX, blockNumber: BLOCK, success: true, reason: undefined };
 /** The account's EntryPoint nonce, as the Safe reads it. */
 const NONCE = vi.fn(async (_parameters?: { key?: bigint }) => 7n);
@@ -134,7 +134,7 @@ describe("sendCalls", () => {
     expect(result).toEqual(RECEIPT);
     expect(events).toEqual(["signed", "sent", "post /api/operations", "receipt", "post /api/operations/done"]);
     expect(posted()).toEqual([
-      ["/api/operations", { kind: "contribute", fund: FUND, amount: "10000000", token: "usdt", userOpHash: OP }],
+      ["/api/operations", { kind: "contribute", fund: FUND, amount: "10000000", token: "dollar", userOpHash: OP }],
       ["/api/operations/done", { userOpHash: OP, transactionHash: TX, blockNumber: "79925582", success: true }],
     ]);
     expect(passkey.sign).toHaveBeenCalledWith({ hash: "0xdead" });

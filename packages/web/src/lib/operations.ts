@@ -3,12 +3,26 @@ import type { Address, Hash } from "viem";
 import type { Db } from "./db/client";
 import { funds, operations } from "./db/schema";
 
+/** Which of a fund's two tokens an operation moves: its currency, or the dollar it also takes (whatever they are). */
+export type OperationToken = "currency" | "dollar";
+
+/** What the column can hold: the two names, and the two it kept before the rename (`wars` and `usdt`). */
+type StoredToken = NonNullable<typeof operations.$inferSelect.token>;
+
+/**
+ * A token under its current name. Rows kept before the rename still say `wars` (the currency) and `usdt` (the dollar), and
+ * a tab opened before the deploy still sends them: they read, and are kept, as the new names. Nothing rewrites the old rows.
+ */
+export function operationToken(stored: StoredToken): OperationToken {
+  return stored === "wars" ? "currency" : stored === "usdt" ? "dollar" : stored;
+}
+
 export type OperationInput = {
   userOpHash: Hash;
   kind: "create-fund" | "contribute" | "vote" | "execute" | "cash-out" | "propose" | "key-change";
   fund?: Address;
   amount?: bigint;
-  token?: "wars" | "usdt";
+  token?: OperationToken;
   /** For `create-fund`: the draft (a `funds` row) it deploys. */
   draftId?: string;
   /** For `create-fund`: its EntryPoint nonce, on key 0. */
@@ -87,9 +101,9 @@ export async function lastOperationBlock(db: Db, userId: string, fund?: Address)
   return row?.block ?? null;
 }
 
-/** A member's operations in a fund still on their way, newest first. */
+/** A member's operations in a fund still on their way, newest first, their tokens under the current names. */
 export async function pendingOperations(db: Db, userId: string, fund: Address, now = new Date()) {
-  return db
+  const rows = await db
     .select()
     .from(operations)
     .where(
@@ -101,6 +115,7 @@ export async function pendingOperations(db: Db, userId: string, fund: Address, n
       ),
     )
     .orderBy(desc(operations.createdAt));
+  return rows.map((row) => ({ ...row, token: row.token === null ? null : operationToken(row.token) }));
 }
 
 /**

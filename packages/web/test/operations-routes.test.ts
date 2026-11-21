@@ -61,12 +61,22 @@ describe("POST /api/operations", () => {
 
   it("keeps a contribution with its amount and nonce, and the fund in the form the database keeps", async () => {
     const response = await record(
-      post("/api/operations", { userOpHash: OP, kind: "contribute", fund: FUND.toLowerCase(), amount: "10000000", token: "usdt", nonce: "7" }),
+      post("/api/operations", { userOpHash: OP, kind: "contribute", fund: FUND.toLowerCase(), amount: "10000000", token: "dollar", nonce: "7" }),
     );
     expect(response.status).toBe(200);
     expect(await db.select().from(operations)).toMatchObject([
-      { userOpHash: OP, userId: ana.id, kind: "contribute", fund: FUND, amount: 10_000_000n, token: "usdt", nonce: 7n, draftId: null },
+      { userOpHash: OP, userId: ana.id, kind: "contribute", fund: FUND, amount: 10_000_000n, token: "dollar", nonce: 7n, draftId: null },
     ]);
+  });
+
+  it("stores an old tab's token under its new name", async () => {
+    // A tab opened before the deploy still sends "usdt" and "wars": the route takes them and keeps "dollar" and "currency".
+    const other: Hash = pad("0x03", { size: 32 });
+    expect((await record(post("/api/operations", { userOpHash: OP, kind: "contribute", fund: FUND, amount: "1", token: "usdt" }))).status).toBe(200);
+    expect((await record(post("/api/operations", { userOpHash: other, kind: "contribute", fund: FUND, amount: "1", token: "wars" }))).status).toBe(200);
+    const [dollar] = await db.select().from(operations).where(eq(operations.userOpHash, OP));
+    const [currency] = await db.select().from(operations).where(eq(operations.userOpHash, other));
+    expect([dollar?.token, currency?.token]).toEqual(["dollar", "currency"]);
   });
 
   it("keeps an execution, like a vote, so the timeline shows it on its way", async () => {
@@ -80,10 +90,10 @@ describe("POST /api/operations", () => {
   });
 
   it("keeps a pass to pesos, with its amount and no fund (spec, 9.2)", async () => {
-    const response = await record(post("/api/operations", { userOpHash: OP, kind: "cash-out", amount: "45000000000000000000000", token: "wars" }));
+    const response = await record(post("/api/operations", { userOpHash: OP, kind: "cash-out", amount: "45000000000000000000000", token: "currency" }));
     expect(response.status).toBe(200);
     expect(await db.select().from(operations)).toMatchObject([
-      { userOpHash: OP, userId: ana.id, kind: "cash-out", fund: null, amount: 45_000n * 10n ** 18n, token: "wars" },
+      { userOpHash: OP, userId: ana.id, kind: "cash-out", fund: null, amount: 45_000n * 10n ** 18n, token: "currency" },
     ]);
   });
 
@@ -113,7 +123,8 @@ describe("POST /api/operations", () => {
       { userOpHash: OP, kind: "vote", draftId },
       { userOpHash: OP, kind: "vote", fund: FUND, nonce: "-1" },
       { userOpHash: OP, kind: "vote", fund: FUND, nonce: "0x1" },
-      { userOpHash: OP, kind: "cash-out", fund: FUND, amount: "1", token: "wars" },
+      { userOpHash: OP, kind: "cash-out", fund: FUND, amount: "1", token: "currency" },
+      { userOpHash: OP, kind: "contribute", fund: FUND, amount: "1", token: "eth" },
       { userOpHash: OP, kind: "key-change", fund: FUND },
     ];
     for (const body of bad) expect((await record(post("/api/operations", body))).status, JSON.stringify(body)).toBe(400);

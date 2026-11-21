@@ -76,7 +76,7 @@ export function CashOutPanel({
       setStep("signing");
       const me = await loadMe();
       const to = getAddress(destination);
-      const result = await sendCalls(me, cashOutCalls({ token: currency, to, amount }), { kind: "cash-out", amount, token: "wars" }, () => setStep("sending"));
+      const result = await sendCalls(me, cashOutCalls({ token: currency, to, amount }), { kind: "cash-out", amount, token: "currency" }, () => setStep("sending"));
       rememberRipioAddress(browserStorage(), account, currency, to);
       setSaved(to);
       setEditingAddress(false);

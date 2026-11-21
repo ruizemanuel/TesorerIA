@@ -206,6 +206,7 @@ export async function loadFundScreen(
     conversions: loss.byConversion,
     expenses: expenseRows,
     pending,
+    dollar: snapshot.dollar,
     // Movimientos shows a request while a proposal made in time could still carry it out (JOIN_REQUEST_REACH_DAYS).
     joinRequests: requests
       .filter((request) => request.withinReach)

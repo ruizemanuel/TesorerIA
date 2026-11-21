@@ -1,8 +1,10 @@
 import { USDT, WARS as WARS_TOKEN } from "@tesoreria/agent";
 import { type Address, getAddress, pad, toHex, zeroAddress } from "viem";
 import { describe, expect, it } from "vitest";
+import { COUNTRIES } from "../src/lib/countries";
 import type { ExpenseStatus } from "../src/lib/db/schema";
 import { NBSP, formatUsdt } from "../src/lib/format";
+import { messagesFor } from "../src/lib/i18n/messages";
 import { type ProposalState, type TimelineItem, buildTimeline, splitYourTurn } from "../src/lib/timeline";
 import { AGENT, ANA, BETO, BLOCK, CARO, CLOCK, NOW, START, USDT_UNIT, WARS, event } from "./support/fixtures";
 import { en, es } from "./support/messages";
@@ -27,6 +29,7 @@ function timeline(change: Partial<Parameters<typeof buildTimeline>[0]> = {}) {
     proposals: new Map(),
     expenses: [],
     pending: [],
+    dollar: USDT,
     conversionHold: null,
     currencyBalance: 90_000n * WARS,
     viewerIsMember: true,
@@ -222,7 +225,7 @@ describe("buildTimeline", () => {
     });
     const items = timeline({
       expenses: [expense("sending", "1"), expense("waiting", "2"), expense("blocked", "3"), expense("rejected", "4"), expense("reimbursed", "5")],
-      pending: [{ userOpHash: "0xop", kind: "contribute", amount: 10n * USDT_UNIT, token: "usdt", createdAt: NOW }],
+      pending: [{ userOpHash: "0xop", kind: "contribute", amount: 10n * USDT_UNIT, token: "dollar", createdAt: NOW }],
     });
     expect(items.map((i) => [i.text, i.pending ?? false])).toEqual([
       [$("Tu aporte de 10 USDT está en camino."), true],
@@ -255,7 +258,7 @@ describe("buildTimeline", () => {
   });
 
   it("leaves a pass to pesos out: it moves the member's own account, not the fund (spec, 9.2)", () => {
-    const pass = { userOpHash: "0xpass", kind: "cash-out" as const, amount: 5_000n * WARS, token: "wars" as const, createdAt: NOW };
+    const pass = { userOpHash: "0xpass", kind: "cash-out" as const, amount: 5_000n * WARS, token: "currency" as const, createdAt: NOW };
     expect(timeline({ pending: [pass] })).toEqual([]);
   });
 
@@ -560,7 +563,7 @@ describe("buildTimeline in English", () => {
   });
 
   it("says your own operations on their way, as 'You', and leaves a pass to pesos out", () => {
-    const operation = (kind: "vote" | "execute" | "contribute" | "cash-out", amount: bigint | null = null, token: "wars" | "usdt" | null = null) => ({
+    const operation = (kind: "vote" | "execute" | "contribute" | "cash-out", amount: bigint | null = null, token: "currency" | "dollar" | null = null) => ({
       userOpHash: `0x${kind}${token}`,
       kind,
       amount,
@@ -571,9 +574,9 @@ describe("buildTimeline in English", () => {
       pending: [
         operation("vote"),
         operation("execute"),
-        operation("contribute", 10n * USDT_UNIT, "usdt"),
-        operation("contribute", 10_000n * WARS, "wars"),
-        operation("cash-out", 5_000n * WARS, "wars"),
+        operation("contribute", 10n * USDT_UNIT, "dollar"),
+        operation("contribute", 10_000n * WARS, "currency"),
+        operation("cash-out", 5_000n * WARS, "currency"),
       ],
     });
     expect(items.map((i) => [i.actor, i.text, i.pending])).toEqual([
@@ -629,6 +632,35 @@ describe("buildTimeline: what a conversion got under or over its USDT's credit (
     expect(said(GAINED, [ANA, BETO], en)).toBe(
       ars("I converted the 10 USDT that came in to ARS 16,050, ARS 4.41 more than they were worth when contributed. That difference goes to the members who contributed them."),
     );
+  });
+});
+
+describe("buildTimeline: the fund's own dollar", () => {
+  const WMXN = COUNTRIES.MX.currency.token;
+  const contribution = (member: Address, token: Address, amount: bigint) => event("Contribution", { member, token, amount, credited: amount }, BLOCK - 100n);
+
+  it("shows a Mexican fund's contribution in Mexican pesos", () => {
+    const items = timeline({ dollar: null, m: messagesFor("es", "MX"), events: [contribution(ANA, WMXN, (10_025n * WARS) / 100n)] });
+    expect(items[0]!.text).toContain("$100.25");
+  });
+
+  it("still shows a v2 Argentine fund's USDT contribution in USDT", () => {
+    const items = timeline({ dollar: USDT, m: messagesFor("es", "AR"), events: [contribution(BETO, USDT, 10_000_000n)] });
+    expect(items[0]!.text).toMatch(/10\sUSDT/);
+  });
+
+  it("shows a contribution in dollars when its token is the fund's dollar, whichever dollar that is", () => {
+    const OTHER_DOLLAR = getAddress("0x00000000000000000000000000000000000d0111");
+    expect(timeline({ dollar: OTHER_DOLLAR, events: [contribution(BETO, OTHER_DOLLAR, 10_000_000n)] })[0]!.text).toMatch(/10\sUSDT/);
+    // The USDT address is not special: a fund with another dollar, or with none, reads it as the fund's currency.
+    expect(timeline({ dollar: OTHER_DOLLAR, events: [contribution(BETO, USDT, 10n * WARS)] })[0]!.text).not.toMatch(/USDT/);
+    expect(timeline({ dollar: null, events: [contribution(BETO, USDT, 10n * WARS)] })[0]!.text).not.toMatch(/USDT/);
+  });
+
+  it("says a contribution on its way in the dollar or in the currency by its token, in a fund of either country", () => {
+    const onItsWay = (token: "currency" | "dollar") => [{ userOpHash: `0x${token}`, kind: "contribute" as const, amount: 10_000_000n, token, createdAt: NOW }];
+    expect(timeline({ dollar: USDT, pending: onItsWay("dollar") })[0]!.text).toMatch(/10\sUSDT/);
+    expect(timeline({ dollar: null, m: messagesFor("es", "MX"), pending: onItsWay("currency") })[0]!.text).not.toMatch(/USDT/);
   });
 });
 
@@ -705,7 +737,7 @@ describe("buildTimeline: a version 2 fund", () => {
     // withFee($ 10.000, 25): the button said "Aportar $ 10.025,07", and sent this, a fraction of a centavo less.
     const asked = 10_025_062_656_641_604_010_026n;
     const contribution = event("Contribution", { member: CARO, token: WARS_TOKEN, amount: asked, credited: 10_000n * WARS + 1n }, BLOCK - 100n);
-    const onItsWay = { userOpHash: "0xc", kind: "contribute" as const, amount: asked, token: "wars" as const, createdAt: NOW };
+    const onItsWay = { userOpHash: "0xc", kind: "contribute" as const, amount: asked, token: "currency" as const, createdAt: NOW };
     expect(v2({ events: [contribution], pending: [onItsWay] }).map((i) => i.text)).toEqual([
       $("Tu aporte de $ 10.025,07 está en camino."),
       $("Caro aportó $ 10.025,07."),

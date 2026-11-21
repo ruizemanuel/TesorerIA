@@ -14,14 +14,36 @@ describe("operations on their way", () => {
     const db = await testDb();
     const ema = await addUser(db, "Ema");
     const juan = await addUser(db, "Juan");
-    await recordOperation(db, ema.id, { userOpHash: OP, kind: "contribute", fund: FUND, amount: 10_000_000n, token: "usdt" });
-    await recordOperation(db, ema.id, { userOpHash: OP, kind: "contribute", fund: FUND, amount: 10_000_000n, token: "usdt" }); // a retry
-    expect(await pendingOperations(db, ema.id, FUND)).toMatchObject([{ userOpHash: OP, amount: 10_000_000n, token: "usdt" }]);
+    await recordOperation(db, ema.id, { userOpHash: OP, kind: "contribute", fund: FUND, amount: 10_000_000n, token: "dollar" });
+    await recordOperation(db, ema.id, { userOpHash: OP, kind: "contribute", fund: FUND, amount: 10_000_000n, token: "dollar" }); // a retry
+    expect(await pendingOperations(db, ema.id, FUND)).toMatchObject([{ userOpHash: OP, amount: 10_000_000n, token: "dollar" }]);
     expect(await pendingOperations(db, juan.id, FUND)).toEqual([]);
     await finishOperation(db, juan.id, { userOpHash: OP, transactionHash: TX, success: true }); // not Juan's
     expect(await pendingOperations(db, ema.id, FUND)).toHaveLength(1);
     await finishOperation(db, ema.id, { userOpHash: OP, transactionHash: TX, success: true });
     expect(await pendingOperations(db, ema.id, FUND)).toEqual([]);
+  });
+
+  it("reads an old pending contribution's token as the currency or the dollar", async () => {
+    // Rows kept before the rename say "usdt" and "wars": a contribution pending during the deploy must still read.
+    const db = await testDb();
+    const ema = await addUser(db, "Ema");
+    const row = { userId: ema.id, kind: "contribute" as const, fund: FUND, amount: 10_000_000n };
+    await db.insert(operations).values({ ...row, userOpHash: OP, token: "usdt" });
+    expect((await pendingOperations(db, ema.id, FUND))[0]!.token).toBe("dollar");
+    await db.insert(operations).values({ ...row, userOpHash: OP_LATER, token: "wars" });
+    expect((await pendingOperations(db, ema.id, FUND)).map((o) => o.token).sort()).toEqual(["currency", "dollar"]);
+    // And a row with no token (a vote) still has none.
+    await recordOperation(db, ema.id, { userOpHash: pad("0x04", { size: 32 }), kind: "vote", fund: FUND });
+    expect((await pendingOperations(db, ema.id, FUND)).find((o) => o.kind === "vote")!.token).toBeNull();
+  });
+
+  it("keeps the new names only: recordOperation writes the currency and the dollar, never the old words", async () => {
+    const db = await testDb();
+    const ema = await addUser(db, "Ema");
+    await recordOperation(db, ema.id, { userOpHash: OP, kind: "contribute", fund: FUND, amount: 1n, token: "dollar" });
+    await recordOperation(db, ema.id, { userOpHash: OP_LATER, kind: "contribute", fund: FUND, amount: 1n, token: "currency" });
+    expect((await db.select({ token: operations.token }).from(operations)).map((row) => row.token).sort()).toEqual(["currency", "dollar"]);
   });
 
   it("stops showing an operation that never came back after 15 minutes", async () => {
@@ -101,7 +123,7 @@ describe("cashOutPending: a pass to pesos on its way (spec, 9.2)", () => {
     const ema = await addUser(db, "Ema");
     const juan = await addUser(db, "Juan");
     expect(await cashOutPending(db, ema.id)).toBe(false);
-    await recordOperation(db, ema.id, { userOpHash: PASS, kind: "cash-out", amount: 45_000n * 10n ** 18n, token: "wars" });
+    await recordOperation(db, ema.id, { userOpHash: PASS, kind: "cash-out", amount: 45_000n * 10n ** 18n, token: "currency" });
     expect(await cashOutPending(db, ema.id)).toBe(true);
     expect(await cashOutPending(db, juan.id)).toBe(false);
     await finishOperation(db, ema.id, { userOpHash: PASS, transactionHash: TX, success: true });
@@ -111,7 +133,7 @@ describe("cashOutPending: a pass to pesos on its way (spec, 9.2)", () => {
   it("is true only within 15 minutes, so a pass that never came back doesn't block the next one for good", async () => {
     const db = await testDb();
     const ema = await addUser(db, "Ema");
-    await recordOperation(db, ema.id, { userOpHash: PASS, kind: "cash-out", amount: 1n, token: "wars" });
+    await recordOperation(db, ema.id, { userOpHash: PASS, kind: "cash-out", amount: 1n, token: "currency" });
     expect(await cashOutPending(db, ema.id, new Date(Date.now() + 14 * 60_000))).toBe(true);
     expect(await cashOutPending(db, ema.id, new Date(Date.now() + 16 * 60_000))).toBe(false);
   });
@@ -119,7 +141,7 @@ describe("cashOutPending: a pass to pesos on its way (spec, 9.2)", () => {
   it("is false for the member's other operations on their way", async () => {
     const db = await testDb();
     const ema = await addUser(db, "Ema");
-    await recordOperation(db, ema.id, { userOpHash: OP, kind: "contribute", fund: FUND, amount: 1n, token: "wars" });
+    await recordOperation(db, ema.id, { userOpHash: OP, kind: "contribute", fund: FUND, amount: 1n, token: "currency" });
     await recordOperation(db, ema.id, { userOpHash: OP_LATER, kind: "vote", fund: FUND });
     expect(await cashOutPending(db, ema.id)).toBe(false);
     expect(await pendingOperations(db, ema.id, FUND)).toHaveLength(2);

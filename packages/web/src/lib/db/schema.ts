@@ -199,7 +199,11 @@ export const operations = pgTable("operations", {
   kind: text("kind", { enum: ["create-fund", "contribute", "vote", "execute", "cash-out", "propose", "key-change"] }).notNull(),
   /** For a contribution or a pass to pesos: the amount in the token's units. */
   amount: units("amount"),
-  token: text("token", { enum: ["wars", "usdt"] }),
+  /**
+   * For a contribution or a pass to pesos: the fund's `currency`, or the `dollar` it also takes. Rows from before the
+   * rename say `wars` and `usdt` (a plain text column: nothing was rewritten); only the new names are written.
+   */
+  token: text("token", { enum: ["currency", "dollar", "wars", "usdt"] }),
   /**
    * For `create-fund`: its EntryPoint nonce, on key 0. One that never came back is released only while the chain
    * still has this nonce, and its resend is pinned to it (funds.ts). Null for other kinds, which take a fresh nonce

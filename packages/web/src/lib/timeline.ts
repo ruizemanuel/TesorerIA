@@ -1,10 +1,11 @@
-import { type ConversionDifference, type FundEvent, type FundVersion, type SkipCode, USDT, paidProposal } from "@tesoreria/agent";
+import { type ConversionDifference, type FundEvent, type FundVersion, type SkipCode, paidProposal } from "@tesoreria/agent";
 import { type Address, type Hash, getAddress, isAddressEqual } from "viem";
 import { type BlockClock, blockTime, weekAt } from "./chain-time";
 import type { ExpenseStatus } from "./db/schema";
 import { ProposalAction } from "./fund-abi";
 import { formatMoney, formatPercent, formatUsdt, upToCentavo } from "./format";
 import type { Messages } from "./i18n/messages";
+import type { OperationToken } from "./operations";
 import { sameName } from "./same-name";
 
 /** A centavo, in wARS: a conversion that got less than this under or over its USDT's credit keeps the plain sentence. */
@@ -46,7 +47,7 @@ export type TimelinePending = {
   userOpHash: string;
   kind: "create-fund" | "contribute" | "vote" | "execute" | "cash-out" | "propose" | "key-change";
   amount: bigint | null;
-  token: "wars" | "usdt" | null;
+  token: OperationToken | null;
   createdAt: Date;
 };
 
@@ -85,6 +86,7 @@ export function buildTimeline({
   conversions = new Map(),
   expenses,
   pending,
+  dollar,
   joinRequests = [],
   memberNames = [],
   canAddMembers = false,
@@ -120,6 +122,8 @@ export function buildTimeline({
   conversions?: ReadonlyMap<string, ConversionDifference>;
   expenses: readonly TimelineExpense[];
   pending: readonly TimelinePending[];
+  /** The dollar the fund takes, or null if it takes none: a contribution in it is said in dollars (version 1: USDT). */
+  dollar: Address | null;
   /** Who asked to join (members' screens only), and whether the fund has room for one more on the chain. */
   joinRequests?: readonly TimelineJoinRequest[];
   /** The names of the fund's current members, as the database has them: an open request with one of them gets a heads-up. */
@@ -168,7 +172,7 @@ export function buildTimeline({
     switch (event.eventName) {
       case "Contribution": {
         const { member, token, amount } = event.args;
-        const what = isAddressEqual(token, USDT) ? formatUsdt(amount, m) : contributedPesos(amount);
+        const what = dollar !== null && isAddressEqual(token, dollar) ? formatUsdt(amount, m) : contributedPesos(amount);
         items.push({ ...base, actor: { kind: "member", name: who(member) }, text: t.contributed(who(member), what) });
         break;
       }
@@ -385,7 +389,7 @@ export function buildTimeline({
           : operation.kind === "propose"
             ? t.onItsWay.propose
             : t.onItsWay.contribution(
-                operation.token === "usdt" ? formatUsdt(operation.amount ?? 0n, m) : contributedPesos(operation.amount ?? 0n),
+                operation.token === "dollar" ? formatUsdt(operation.amount ?? 0n, m) : contributedPesos(operation.amount ?? 0n),
               );
     items.push({ id: `op:${operation.userOpHash}`, at: operation.createdAt, actor: { kind: "member", name: t.you }, text, pending: true });
   }
